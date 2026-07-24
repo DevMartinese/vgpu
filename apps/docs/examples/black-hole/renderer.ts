@@ -57,12 +57,24 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     resizeFrame = 0;
     const size = pendingSize;
     pendingSize = undefined;
-    if (disposed || !size || !effects || !targets || !surface) return;
-    resizeTargets(targets, [
-      Math.max(1, Math.round(size.width * size.dpr)),
-      Math.max(1, Math.round(size.height * size.dpr)),
-    ]);
-    setBindings(effects, targets, surface);
+    if (disposed || !size || !gpu || !effects || !targets || !surface) return;
+    try {
+      const previousTargets = targets;
+      const nextTargets = createTargets(gpu, [
+        Math.max(1, Math.round(size.width * size.dpr)),
+        Math.max(1, Math.round(size.height * size.dpr)),
+      ], 'black-hole-live');
+      try {
+        setBindings(effects, nextTargets, surface);
+      } catch (error) {
+        destroyTargets(nextTargets);
+        throw error;
+      }
+      targets = nextTargets;
+      destroyTargets(previousTargets);
+    } catch (error) {
+      handleFailure(error);
+    }
   };
   const resize = (size: RenderSize) => {
     if (disposed || size.width <= 0 || size.height <= 0) return;
@@ -92,12 +104,13 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
     input?.dispose();
     input = undefined;
+    if (targets) destroyTargets(targets);
+    targets = undefined;
     surface?.dispose();
     surface = undefined;
     gpu?.dispose();
     gpu = undefined;
     effects = undefined;
-    targets = undefined;
   };
 
   const initialize = async () => {
@@ -125,10 +138,18 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     });
   };
 
+  function handleFailure(error: unknown): void {
+    if (disposed) return;
+    if (!reportedError) {
+      reportedError = true;
+      try { options.onError?.(error); } catch { /* error reporting must not block teardown */ }
+    }
+    dispose();
+  }
+
   const ready = initialize().catch((error: unknown) => {
     if (disposed) return;
-    if (!reportedError) { reportedError = true; options.onError?.(error); }
-    dispose();
+    handleFailure(error);
     throw error;
   });
 
@@ -138,26 +159,30 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
 export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
   const effects = createEffects(gpu, 'black-hole-thumb');
   const targets = createTargets(gpu, target.size, 'black-hole-thumb');
-  const time = opts.time ?? 8.5;
-  setConstants(effects);
-  setBindings(effects, targets, target);
-  await prewarm(effects, targets, target);
+  try {
+    const time = opts.time ?? 8.5;
+    setConstants(effects);
+    setBindings(effects, targets, target);
+    await prewarm(effects, targets, target);
 
-  renderAt(gpu, effects, targets, target, time, [0, 0.05]);
-  await gpu.gpu.queue.onSubmittedWorkDone();
+    renderAt(gpu, effects, targets, target, time, [0, 0.05]);
+    await gpu.gpu.queue.onSubmittedWorkDone();
 
-  renderAt(gpu, effects, targets, target, time + 7, [0, 0.05]);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await opts.onVariantRendered?.('time-delta', await target.read(), target.size);
+    renderAt(gpu, effects, targets, target, time + 7, [0, 0.05]);
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await opts.onVariantRendered?.('time-delta', await target.read(), target.size);
 
-  renderAt(gpu, effects, targets, target, time, [0.72, 0.34]);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await opts.onVariantRendered?.('pointer-orbit', await target.read(), target.size);
+    renderAt(gpu, effects, targets, target, time, [0.72, 0.34]);
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await opts.onVariantRendered?.('pointer-orbit', await target.read(), target.size);
 
-  // Leave the deterministic poster framing in the output target.
-  renderAt(gpu, effects, targets, target, time, [0, 0.05]);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
+    // Leave the deterministic poster framing in the output target.
+    renderAt(gpu, effects, targets, target, time, [0, 0.05]);
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await gpu.settled();
+  } finally {
+    destroyTargets(targets);
+  }
 }
 
 function createEffects(gpu: Gpu, label: string): Effects {
@@ -178,11 +203,28 @@ function createEffects(gpu: Gpu, label: string): Effects {
 function createTargets(gpu: Gpu, size: readonly [number, number], label: string): Targets {
   const full = normalizeSize(size);
   const bloom = bloomSize(full);
-  return {
-    scene: gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` }),
-    bloomA: gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-a` }),
-    bloomB: gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-b` }),
-  };
+  let scene: Target | undefined;
+  let bloomA: Target | undefined;
+  try {
+    scene = gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` });
+    bloomA = gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-a` });
+    const bloomB = gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-b` });
+    return { scene, bloomA, bloomB };
+  } catch (error) {
+    destroyTarget(bloomA);
+    destroyTarget(scene);
+    throw error;
+  }
+}
+
+function destroyTargets(targets: Targets): void {
+  destroyTarget(targets.bloomB);
+  destroyTarget(targets.bloomA);
+  destroyTarget(targets.scene);
+}
+
+function destroyTarget(target: Target | undefined): void {
+  (target as { destroy?: () => void } | undefined)?.destroy?.();
 }
 
 function setConstants(effects: Effects): void {

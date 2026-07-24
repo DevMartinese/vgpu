@@ -3,9 +3,9 @@ import { afterEach, expect, test, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock('vgpu', () => ({ init: mocks.init }));
 
-import { createRenderer } from './renderer';
+import { createRenderer, renderThumbnail } from './renderer';
 
-function setup() {
+function setup(options: { failCompile?: boolean } = {}) {
   const windowListeners = new Map<string, EventListener>();
   const canvasListeners = new Map<string, EventListener>();
   const frames = new Map<number, FrameRequestCallback>();
@@ -34,22 +34,30 @@ function setup() {
     releasePointerCapture: vi.fn((id: number) => captured.delete(id)),
   } as unknown as HTMLCanvasElement;
 
-  const resize = vi.fn();
-  const targets = Array.from({ length: 3 }, () => ({ size: [200, 100], texelSize: [1 / 200, 1 / 100], resize, format: 'rgba16float', read: vi.fn() }));
+  const targetObjects: Array<{ size: number[]; texelSize: number[]; resize: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn>; format: string; read: ReturnType<typeof vi.fn> }> = [];
   const surface = { size: [200, 100], format: 'bgra8unorm', dispose: vi.fn() };
-  const effect = () => ({ set: vi.fn(), compile: vi.fn(async () => {}) });
+  const compile = options.failCompile
+    ? vi.fn(async () => { throw new Error('compile failed'); })
+    : vi.fn(async () => {});
+  const effect = () => ({ set: vi.fn(), compile });
   const stop = vi.fn();
   const gpu = {
     time: 0,
+    gpu: { queue: { onSubmittedWorkDone: vi.fn(async () => {}) } },
+    settled: vi.fn(async () => {}),
     surface: vi.fn(() => surface),
-    target: vi.fn(() => targets.shift()!),
+    target: vi.fn(() => {
+      const target = { size: [200, 100], texelSize: [1 / 200, 1 / 100], resize: vi.fn(), destroy: vi.fn(), format: 'rgba16float', read: vi.fn(async () => new Uint8Array()) };
+      targetObjects.push(target);
+      return target;
+    }),
     effect: vi.fn(effect),
     sampler: vi.fn(() => ({})),
     frame: Object.assign(vi.fn(), { loop: vi.fn(() => ({ stop })) }),
     dispose: vi.fn(),
   };
   mocks.init.mockResolvedValueOnce(gpu);
-  return { canvas, canvasListeners, windowListeners, frames, disconnect, resize, surface, gpu, stop };
+  return { canvas, canvasListeners, windowListeners, frames, disconnect, targetObjects, surface, gpu, stop };
 }
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
@@ -67,8 +75,9 @@ test('coalesces resize work and cleans loop, observer, and pointer capture', asy
   renderer.resize({ width: 400, height: 200, dpr: 1.6 });
   expect(env.frames.size).toBe(1);
   [...env.frames.values()][0]?.(16);
-  expect(env.resize).toHaveBeenCalledTimes(3);
-  expect(env.resize).toHaveBeenLastCalledWith([640, 320]);
+  expect(env.gpu.target).toHaveBeenCalledTimes(6);
+  for (const target of env.targetObjects.slice(0, 3)) expect(target.destroy).toHaveBeenCalledOnce();
+  for (const target of env.targetObjects.slice(3)) expect(target.destroy).not.toHaveBeenCalled();
 
   renderer.dispose();
   renderer.dispose();
@@ -79,4 +88,17 @@ test('coalesces resize work and cleans loop, observer, and pointer capture', asy
   expect(env.canvasListeners.size).toBe(0);
   expect(env.windowListeners.size).toBe(0);
   expect(env.surface.dispose).toHaveBeenCalledOnce();
+  for (const target of env.targetObjects) expect(target.destroy).toHaveBeenCalledOnce();
+});
+
+test('thumbnail destroys its target graph when prewarm fails', async () => {
+  const env = setup({ failCompile: true });
+  const output = {
+    size: [160, 90],
+    format: 'rgba8unorm',
+    read: vi.fn(async () => new Uint8Array()),
+  };
+  await expect(renderThumbnail(env.gpu as never, output as never)).rejects.toThrow('compile failed');
+  expect(env.targetObjects).toHaveLength(3);
+  for (const target of env.targetObjects) expect(target.destroy).toHaveBeenCalledOnce();
 });
