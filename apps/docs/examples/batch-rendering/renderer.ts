@@ -123,9 +123,11 @@ export async function renderThumbnail(gpu: Gpu, output: Target, opts: ThumbOptio
       time += opts.dt ?? 1 / 60;
       gpu.frame((frame) => render(frame, scene!, blit, target, output, time));
     }
-    await gpu.gpu.queue.onSubmittedWorkDone();
-    await gpu.settled();
   } finally {
+    await Promise.allSettled([
+      Promise.resolve().then(() => gpu.gpu.queue.onSubmittedWorkDone()),
+      Promise.resolve().then(() => gpu.settled()),
+    ]);
     scene?.mesh.destroy();
     (target as { destroy?: () => void }).destroy?.();
   }

@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('vgpu', () => ({ init: mocks.init }));
 
-import { createRenderer } from './renderer';
+import { createRenderer, renderThumbnail } from './renderer';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -82,6 +82,32 @@ test('reports an initialization failure once, rejects ready, and self-disposes',
   expect(failed.instance.dispose).toHaveBeenCalledOnce();
   renderer.dispose();
   expect(failed.instance.dispose).toHaveBeenCalledOnce();
+});
+
+test('drains and settles submitted work when thumbnail rendering throws', async () => {
+  const error = new Error('render failed');
+  const drainPending = deferred<void>();
+  const settledPending = deferred<void>();
+  const drain = vi.fn(() => drainPending.promise);
+  const settled = vi.fn(() => settledPending.promise);
+  const thumbnailGpu = {
+    gpu: { queue: { onSubmittedWorkDone: drain } },
+    settled,
+    effect: vi.fn(() => ({ set: vi.fn() })),
+    frame: vi.fn(() => { throw error; }),
+  };
+  const target = { size: [160, 90] };
+  const rendering = renderThumbnail(thumbnailGpu as never, target as never);
+  let completed = false;
+  void rendering.then(() => { completed = true; }, () => { completed = true; });
+  await vi.waitFor(() => {
+    expect(drain).toHaveBeenCalledOnce();
+    expect(settled).toHaveBeenCalledOnce();
+  });
+  expect(completed).toBe(false);
+  drainPending.resolve();
+  settledPending.resolve();
+  await expect(rendering).rejects.toBe(error);
 });
 
 test('owns one loop, applies the latest coalesced resize, and removes resources', async () => {

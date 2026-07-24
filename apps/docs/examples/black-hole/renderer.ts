@@ -178,9 +178,11 @@ export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptio
 
     // Leave the deterministic poster framing in the output target.
     renderAt(gpu, effects, targets, target, time, [0, 0.05]);
-    await gpu.gpu.queue.onSubmittedWorkDone();
-    await gpu.settled();
   } finally {
+    await Promise.allSettled([
+      Promise.resolve().then(() => gpu.gpu.queue.onSubmittedWorkDone()),
+      Promise.resolve().then(() => gpu.settled()),
+    ]);
     destroyTargets(targets);
   }
 }

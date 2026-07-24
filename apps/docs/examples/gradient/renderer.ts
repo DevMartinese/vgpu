@@ -118,8 +118,11 @@ export async function renderThumbnail(
     });
     gpu.frame((frame) => frame.pass({ target }, (pass) => pass.draw(effect)));
   } finally {
-    // Drain any work submitted before a render/encoding failure is observed.
-    await gpu.gpu.queue.onSubmittedWorkDone();
+    // Always drain and settle, including when encoding throws. allSettled keeps
+    // cleanup failures from replacing the original rendering failure.
+    await Promise.allSettled([
+      Promise.resolve().then(() => gpu.gpu.queue.onSubmittedWorkDone()),
+      Promise.resolve().then(() => gpu.settled()),
+    ]);
   }
-  await gpu.settled();
 }

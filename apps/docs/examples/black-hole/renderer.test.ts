@@ -5,6 +5,12 @@ vi.mock('vgpu', () => ({ init: mocks.init }));
 
 import { createRenderer, renderThumbnail } from './renderer';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 function setup(options: { failCompile?: boolean } = {}) {
   const windowListeners = new Map<string, EventListener>();
   const canvasListeners = new Map<string, EventListener>();
@@ -98,7 +104,19 @@ test('thumbnail destroys its target graph when prewarm fails', async () => {
     format: 'rgba8unorm',
     read: vi.fn(async () => new Uint8Array()),
   };
-  await expect(renderThumbnail(env.gpu as never, output as never)).rejects.toThrow('compile failed');
+  const drainPending = deferred<void>();
+  const settledPending = deferred<void>();
+  env.gpu.gpu.queue.onSubmittedWorkDone.mockReturnValueOnce(drainPending.promise);
+  env.gpu.settled.mockReturnValueOnce(settledPending.promise);
+  const rendering = renderThumbnail(env.gpu as never, output as never);
+  await vi.waitFor(() => {
+    expect(env.gpu.gpu.queue.onSubmittedWorkDone).toHaveBeenCalledOnce();
+    expect(env.gpu.settled).toHaveBeenCalledOnce();
+  });
   expect(env.targetObjects).toHaveLength(3);
+  for (const target of env.targetObjects) expect(target.destroy).not.toHaveBeenCalled();
+  drainPending.resolve();
+  settledPending.resolve();
+  await expect(rendering).rejects.toThrow('compile failed');
   for (const target of env.targetObjects) expect(target.destroy).toHaveBeenCalledOnce();
 });
