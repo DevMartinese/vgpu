@@ -22,15 +22,15 @@ const standardRendererEntries = [
   { slug: 'anti-aliasing', module: '../examples/anti-aliasing/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'post-processing', module: '../examples/post-processing/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'black-hole', module: '../examples/black-hole/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'fluid', module: '../examples/fluid/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'instanced-rendering', module: '../examples/instanced-rendering/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'batch-rendering', module: '../examples/batch-rendering/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'raymarched-fractal', module: '../examples/raymarched-fractal/renderer.ts', exportName: 'renderThumbnail' },
 ];
 
 /** @type {CustomRendererEntry[]} */
 const legacyRendererEntries = [
   { slug: 'triangle-led-front', module: '../examples/triangle-led-front/example.ts', exportName: 'renderThumb' },
-  { slug: 'raymarched-fractal', module: '../examples/raymarched-fractal/example.ts', exportName: 'renderThumb' },
-  { slug: 'fluid', module: '../examples/fluid/validation.ts', exportName: 'renderThumb' },
   { slug: 'fft-ocean', module: '../examples/fft-ocean/example.ts', exportName: 'renderThumb' },
 ];
 

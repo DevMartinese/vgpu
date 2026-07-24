@@ -16,8 +16,10 @@ export const exampleComponentLoaders = {
   'anti-aliasing': () => import('../examples/anti-aliasing'),
   'post-processing': () => import('../examples/post-processing'),
   'black-hole': () => import('../examples/black-hole'),
+  fluid: () => import('../examples/fluid'),
   'instanced-rendering': () => import('../examples/instanced-rendering'),
   'batch-rendering': () => import('../examples/batch-rendering'),
+  'raymarched-fractal': () => import('../examples/raymarched-fractal'),
 } satisfies Partial<Record<ExampleSlug, ExampleComponentLoader>>;
 
 export function getExampleComponentLoader(slug: ExampleSlug): ExampleComponentLoader | undefined {
