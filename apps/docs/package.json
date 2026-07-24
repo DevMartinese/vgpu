@@ -12,6 +12,8 @@
     "thumbs:check": "node scripts/render-example-thumbs.mjs --check",
     "render:proof": "node scripts/render-example-thumbs.mjs --proof-dir ../../artifacts/example-renders",
     "typecheck": "tsc --noEmit",
+    "check:example-imports": "node scripts/check-example-imports.mjs",
+    "check:example-bundles": "node scripts/check-example-bundles.mjs",
     "build:workspace": "pnpm --dir ../.. run build"
   },
   "dependencies": {

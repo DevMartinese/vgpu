@@ -1,6 +1,7 @@
 import type { Effect, Frame, Gpu, Surface, Target } from 'vgpu';
 
-import { createRenderScheduler, installDragOrbit, type Orbit } from './controls';
+import { createRenderScheduler, installDragOrbit, type Orbit } from './pointer-input';
+import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
 import fractalWgsl from './fractal.wgsl';
 import brightPassWgsl from './bright-pass.wgsl';
 import blurWgsl from './blur.wgsl';
@@ -8,7 +9,7 @@ import compositeWgsl from './composite.wgsl';
 
 type Output = Surface | Target;
 type Variant = 'static-repeat' | 'alternate-orbit' | 'bloom-off';
-interface ThumbOptions {
+interface ThumbOptions extends ThumbnailOptions {
   onVariantRendered?: (variant: Variant, pixels: Uint8Array, size: readonly [number, number]) => void | Promise<void>;
 }
 interface Effects {
@@ -22,56 +23,114 @@ const CLEAR: readonly [number, number, number, number] = [0, 0, 0, 1];
 const POSTER: Readonly<Orbit> = { yaw: 0.58, pitch: 0.24 };
 const ALTERNATE: Readonly<Orbit> = { yaw: -0.35, pitch: 0.10 };
 
-export async function run(canvas: HTMLCanvasElement): Promise<() => void> {
-  const { init } = await import('vgpu');
-  const gpu = await init();
-  const surface = gpu.surface(canvas, { dpr: [1, 1.6] });
-  const effects = createEffects(gpu, 'raymarched-fractal-live');
-  const targets = createTargets(gpu, surface.size, 'raymarched-fractal-live');
-  const orbit: Orbit = { ...POSTER };
+export function createRenderer(options: BrowserRendererOptions): ExampleRenderer {
   let disposed = false;
+  let reportedError = false;
+  let gpu: Gpu | undefined;
+  let surface: Surface | undefined;
+  let effects: Effects | undefined;
+  let targets: Targets | undefined;
+  let scheduler: ReturnType<typeof createRenderScheduler> | undefined;
+  let disposeInput: (() => void) | undefined;
+  let observer: ResizeObserver | undefined;
+  let resizeFrame = 0;
+  let pendingSize: RenderSize | undefined;
+  let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+  const orbit: Orbit = { ...POSTER };
 
-  setConstants(effects);
-  setBindings(effects, targets);
-  await prewarm(effects, targets, surface);
-
-  const scheduler = createRenderScheduler(() => {
+  const renderOnce = () => {
+    if (disposed || !gpu || !surface || !effects || !targets) return;
     effects.scene.set({ params: orbit });
-    gpu.frame((frame) => renderChain(frame, effects, targets, surface));
-  });
-  const disposeInput = installDragOrbit(canvas, orbit, scheduler.request);
-  const unsubscribeResize = surface.onResize(() => {
-    if (disposed) return;
-    resizeTargets(targets, surface.size);
+    gpu.frame((frame) => renderChain(frame, effects!, targets!, surface!));
+  };
+  const applyResize = () => {
+    resizeFrame = 0;
+    const size = pendingSize;
+    pendingSize = undefined;
+    if (disposed || !size || !targets || !effects) return;
+    resizeTargets(targets, [
+      Math.max(1, Math.round(size.width * size.dpr)),
+      Math.max(1, Math.round(size.height * size.dpr)),
+    ]);
     setBindings(effects, targets);
-  });
-  const requestResize = () => scheduler.request();
-  window.addEventListener('resize', requestResize);
-  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(requestResize);
-  observer?.observe(canvas);
-  scheduler.request();
+    scheduler?.request();
+  };
+  const resize = (size: RenderSize) => {
+    if (disposed || size.width <= 0 || size.height <= 0) return;
+    pendingSize = size;
+    if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize);
+  };
+  const measure = () => {
+    const rect = options.canvas.getBoundingClientRect();
+    resize({ width: rect.width, height: rect.height, dpr: Math.min(1.6, Math.max(1, window.devicePixelRatio || 1)) });
+  };
+  const onWindowResize = () => {
+    if (window.devicePixelRatio === lastDpr) return;
+    lastDpr = window.devicePixelRatio;
+    measure();
+  };
 
-  return () => {
+  function dispose() {
     if (disposed) return;
     disposed = true;
+    scheduler?.dispose();
+    scheduler = undefined;
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
+    pendingSize = undefined;
     observer?.disconnect();
-    window.removeEventListener('resize', requestResize);
-    unsubscribeResize();
-    disposeInput();
-    scheduler.dispose();
-    destroyTargets(targets);
-    surface.dispose();
-    gpu.dispose();
+    observer = undefined;
+    if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
+    disposeInput?.();
+    disposeInput = undefined;
+    if (targets) destroyTargets(targets);
+    targets = undefined;
+    effects = undefined;
+    surface?.dispose();
+    surface = undefined;
+    gpu?.dispose();
+    gpu = undefined;
+  }
+
+  const initialize = async () => {
+    const { init } = await import('vgpu');
+    if (disposed) return;
+    const nextGpu = await init();
+    if (disposed) { nextGpu.dispose(); return; }
+    gpu = nextGpu;
+    surface = gpu.surface(options.canvas, { dpr: [1, 1.6] });
+    effects = createEffects(gpu, 'raymarched-fractal-live');
+    targets = createTargets(gpu, surface.size, 'raymarched-fractal-live');
+    setConstants(effects);
+    setBindings(effects, targets);
+    await prewarm(effects, targets, surface);
+    if (disposed) return;
+    scheduler = createRenderScheduler(renderOnce);
+    disposeInput = installDragOrbit(options.canvas, orbit, scheduler.request);
+    observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    observer?.observe(options.canvas);
+    window.addEventListener('resize', onWindowResize);
+    measure();
+    scheduler.request();
   };
+
+  const ready = initialize().catch((error: unknown) => {
+    if (disposed) return;
+    if (!reportedError) { reportedError = true; options.onError?.(error); }
+    dispose();
+    throw error;
+  });
+
+  return { ready, invalidate: () => scheduler?.request(), resize, dispose };
 }
 
-export async function renderThumb(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
+export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
   const effects = createEffects(gpu, 'raymarched-fractal-thumb');
   const targets = createTargets(gpu, target.size, 'raymarched-fractal-thumb');
   setConstants(effects);
   setBindings(effects, targets);
-  await prewarm(effects, targets, target);
   try {
+    await prewarm(effects, targets, target);
     await renderAndWait(gpu, effects, targets, target, POSTER);
     await renderAndWait(gpu, effects, targets, target, POSTER);
     await reportVariant(opts, 'static-repeat', target);
@@ -84,7 +143,11 @@ export async function renderThumb(gpu: Gpu, target: Target, opts: ThumbOptions =
     await renderAndWait(gpu, effects, targets, target, POSTER);
     await gpu.settled();
   } finally {
-    destroyTargets(targets);
+    try {
+      await gpu.gpu.queue.onSubmittedWorkDone();
+    } finally {
+      destroyTargets(targets);
+    }
   }
 }
 
@@ -111,11 +174,20 @@ function createEffects(gpu: Gpu, label: string): Effects {
 }
 function createTargets(gpu: Gpu, size: readonly [number, number], label: string): Targets {
   const full = normalizeSize(size), bloom = bloomSize(full);
-  return {
-    scene: gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` }),
-    bloomA: gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-a` }),
-    bloomB: gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-b` }),
-  };
+  let scene: Target | undefined;
+  let bloomA: Target | undefined;
+  let bloomB: Target | undefined;
+  try {
+    scene = gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` });
+    bloomA = gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-a` });
+    bloomB = gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-b` });
+    return { scene, bloomA, bloomB };
+  } catch (error) {
+    scene?.color.destroy();
+    bloomA?.color.destroy();
+    bloomB?.color.destroy();
+    throw error;
+  }
 }
 function setConstants(e: Effects): void {
   e.scene.set({ params: { resolution: [1, 1], ...POSTER } });

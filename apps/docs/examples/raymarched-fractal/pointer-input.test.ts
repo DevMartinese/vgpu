@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { createRenderScheduler, installDragOrbit, type Orbit } from './controls';
+import { createRenderScheduler, installDragOrbit, type Orbit } from './pointer-input';
 
 class CanvasMock {
   style = { touchAction: 'pan-y' };

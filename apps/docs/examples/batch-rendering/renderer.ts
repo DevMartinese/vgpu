@@ -3,53 +3,134 @@ import { perspectiveCamera } from 'vgpu/scene';
 import sceneWgsl from './scene.wgsl';
 import blitWgsl from './blit.wgsl';
 
+import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
+
 type Output = Surface | Target;
-interface ThumbOptions { warmupFrames?: number; dt?: number; time?: number }
+interface ThumbOptions extends ThumbnailOptions {}
 interface Scene { mesh: Mesh; draws: readonly Draw[]; bundle: Bundle }
 const CLEAR = [0.008, 0.014, 0.035, 1] as const;
 
-export async function run(canvas: HTMLCanvasElement): Promise<() => void> {
-  const { init } = await import('vgpu');
-  const gpu = await init();
-  const surface = gpu.surface(canvas, { dpr: [1, 2] });
-  const target = gpu.target({ size: surface.size, format: 'rgba8unorm', depth: true });
-  const blit = createBlit(gpu, target, surface);
-  const scene = await createScene(gpu, target);
+export function createRenderer(options: BrowserRendererOptions): ExampleRenderer {
   let disposed = false;
-  let sawInitialResize = false;
-  const unsubscribeResize = surface.onResize(() => {
-    if (!sawInitialResize) { sawInitialResize = true; return; }
-    if (disposed) return;
-    target.resize(surface.size);
+  let gpu: Gpu | undefined;
+  let surface: Surface | undefined;
+  let target: Target | undefined;
+  let blit: Effect | undefined;
+  let scene: Scene | undefined;
+  let loop: { stop(): void } | undefined;
+  let observer: ResizeObserver | undefined;
+  let resizeFrame = 0;
+  let pendingSize: RenderSize | undefined;
+  let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+  let reportedError = false;
+
+  const applyResize = () => {
+    resizeFrame = 0;
+    const size = pendingSize;
+    pendingSize = undefined;
+    if (disposed || !size || !target || !blit || !surface) return;
+    target.resize([
+      Math.max(1, Math.round(size.width * size.dpr)),
+      Math.max(1, Math.round(size.height * size.dpr)),
+    ]);
     setBlitSource(blit, target, surface);
-  });
-  const loop = gpu.frame.loop((frame) => render(frame, scene, blit, target, surface, gpu.time));
-  return () => {
+  };
+  const resize = (size: RenderSize) => {
+    if (disposed || size.width <= 0 || size.height <= 0) return;
+    pendingSize = size;
+    if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize);
+  };
+  const measure = () => {
+    const rect = options.canvas.getBoundingClientRect();
+    resize({ width: rect.width, height: rect.height, dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)) });
+  };
+  const onWindowResize = () => {
+    if (window.devicePixelRatio === lastDpr) return;
+    lastDpr = window.devicePixelRatio;
+    measure();
+  };
+
+  const dispose = () => {
     if (disposed) return;
     disposed = true;
-    loop.stop();
-    unsubscribeResize();
-    scene.mesh.destroy();
-    (target as { destroy?: () => void }).destroy?.();
-    surface.dispose();
-    gpu.dispose();
+    loop?.stop();
+    loop = undefined;
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
+    pendingSize = undefined;
+    observer?.disconnect();
+    observer = undefined;
+    if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
+    scene?.mesh.destroy();
+    scene = undefined;
+    (target as { destroy?: () => void } | undefined)?.destroy?.();
+    target = undefined;
+    surface?.dispose();
+    surface = undefined;
+    gpu?.dispose();
+    gpu = undefined;
   };
+
+  const initialize = async () => {
+    const { init } = await import('vgpu');
+    if (disposed) return;
+    const nextGpu = await init();
+    if (disposed) { nextGpu.dispose(); return; }
+    gpu = nextGpu;
+    surface = gpu.surface(options.canvas, { dpr: [1, 2] });
+    target = gpu.target({ size: surface.size, format: 'rgba8unorm', depth: true });
+    blit = createBlit(gpu, target, surface);
+    const nextScene = await createScene(gpu, target);
+    if (disposed) {
+      nextScene.mesh.destroy();
+      return;
+    }
+    scene = nextScene;
+    observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    observer?.observe(options.canvas);
+    window.addEventListener('resize', onWindowResize);
+    measure();
+    loop = gpu.frame.loop((frame) => render(frame, scene!, blit!, target!, surface!, gpu!.time));
+  };
+
+  function handleFailure(error: unknown): void {
+    if (disposed) return;
+    if (!reportedError) {
+      reportedError = true;
+      try { options.onError?.(error); } catch { /* error reporting must not block teardown */ }
+    }
+    dispose();
+  }
+
+  const ready = initialize().catch((error: unknown) => {
+    if (disposed) return;
+    handleFailure(error);
+    throw error;
+  });
+
+  return { ready, invalidate() {}, resize, dispose };
 }
 
-export async function renderThumb(gpu: Gpu, output: Target, opts: ThumbOptions = {}): Promise<void> {
+export async function renderThumbnail(gpu: Gpu, output: Target, opts: ThumbOptions = {}): Promise<void> {
   const target = gpu.target({ size: output.size, format: 'rgba8unorm', depth: true });
-  const blit = createBlit(gpu, target, output);
-  const scene = await createScene(gpu, target);
-  await blit.compile(output);
-  let time = opts.time ?? 2.4;
-  for (let i = 0; i < (opts.warmupFrames ?? 3); i++) {
-    time += opts.dt ?? 1 / 60;
-    gpu.frame((frame) => render(frame, scene, blit, target, output, time));
+  let scene: Scene | undefined;
+  try {
+    const blit = createBlit(gpu, target, output);
+    scene = await createScene(gpu, target);
+    await blit.compile(output);
+    let time = opts.time ?? 2.4;
+    for (let i = 0; i < (opts.warmupFrames ?? 3); i++) {
+      time += opts.dt ?? 1 / 60;
+      gpu.frame((frame) => render(frame, scene!, blit, target, output, time));
+    }
+  } finally {
+    await Promise.allSettled([
+      Promise.resolve().then(() => gpu.gpu.queue.onSubmittedWorkDone()),
+      Promise.resolve().then(() => gpu.settled()),
+    ]);
+    scene?.mesh.destroy();
+    (target as { destroy?: () => void }).destroy?.();
   }
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
-  scene.mesh.destroy();
-  (target as { destroy?: () => void }).destroy?.();
 }
 
 async function createScene(gpu: Gpu, target: Target): Promise<Scene> {
@@ -64,22 +145,27 @@ async function createScene(gpu: Gpu, target: Target): Promise<Scene> {
     label: 'batch-rendering-packed-primitives',
     buffers: [{ data, stride: 36, attributes: { position: 'float32x3', normal: 'float32x3', color: 'float32x3' } }],
   });
-  const slices = counts.map((vertexCount, i) => mesh.slice({
-    firstVertex: counts.slice(0, i).reduce((a, b) => a + b, 0), vertexCount, label: ['cubes', 'pyramids', 'octahedra', 'icosahedra'][i],
-  }));
-  const draws = slices.map((slice, i) => gpu.draw({ shader: sceneWgsl, mesh: slice, label: `batch-${i}` }));
-  const initial = camera(2.4, target);
-  for (const draw of draws) draw.set({ light: [-0.45, -0.75, -0.35], time: 2.4, viewProjection: initial });
-  await Promise.all(draws.map((draw) => draw.compile(target)));
-  // Slices freeze their ranges; this bundle also captures the pyramid's equivalent call-level override.
-  // A changing range would require a direct pass.draw override or re-recording the bundle.
-  const bundle = gpu.bundle({ target, label: 'batch-rendering-primitives' }, (b) => {
-    b.draw(draws[0]!);
-    b.draw(draws[1]!, { firstVertex: slices[1]!.firstVertex, vertices: slices[1]!.vertexCount });
-    b.draw(draws[2]!);
-    b.draw(draws[3]!);
-  });
-  return { mesh, draws, bundle };
+  try {
+    const slices = counts.map((vertexCount, i) => mesh.slice({
+      firstVertex: counts.slice(0, i).reduce((a, b) => a + b, 0), vertexCount, label: ['cubes', 'pyramids', 'octahedra', 'icosahedra'][i],
+    }));
+    const draws = slices.map((slice, i) => gpu.draw({ shader: sceneWgsl, mesh: slice, label: `batch-${i}` }));
+    const initial = camera(2.4, target);
+    for (const draw of draws) draw.set({ light: [-0.45, -0.75, -0.35], time: 2.4, viewProjection: initial });
+    await Promise.all(draws.map((draw) => draw.compile(target)));
+    // Slices freeze their ranges; this bundle also captures the pyramid's equivalent call-level override.
+    // A changing range would require a direct pass.draw override or re-recording the bundle.
+    const bundle = gpu.bundle({ target, label: 'batch-rendering-primitives' }, (b) => {
+      b.draw(draws[0]!);
+      b.draw(draws[1]!, { firstVertex: slices[1]!.firstVertex, vertices: slices[1]!.vertexCount });
+      b.draw(draws[2]!);
+      b.draw(draws[3]!);
+    });
+    return { mesh, draws, bundle };
+  } catch (error) {
+    mesh.destroy();
+    throw error;
+  }
 }
 
 function render(frame: Frame, scene: Scene, blit: Effect, target: Target, output: Output, time: number): void {

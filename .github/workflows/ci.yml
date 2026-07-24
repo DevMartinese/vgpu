@@ -218,6 +218,8 @@ jobs:
         run: node packages/vgpu/lib/docs/generate/cli.js
       - name: Build docs app
         run: pnpm --filter docs build
+      - name: Check docs example bundle isolation and budgets
+        run: pnpm --filter docs check:example-bundles
 
   docs-generated:
     # Guards that the committed docs manifest + generated skill are in sync with their sources
