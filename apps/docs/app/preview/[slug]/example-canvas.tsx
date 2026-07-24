@@ -1,7 +1,8 @@
 'use client';
 
-import { Component, lazy, Suspense, useMemo, type ErrorInfo, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
 import { getExampleComponentLoader } from '@/lib/example-components';
+import { createDeduplicatedExampleErrorReporter, ExampleErrorReporterProvider } from '@/lib/example-error-reporter';
 import { type ExampleSlug } from '@/lib/example-slugs';
 
 interface ExampleCanvasProps {
@@ -29,7 +30,7 @@ function ErrorDisplay({ message }: { message: string }) {
 }
 
 interface PreviewErrorBoundaryProps {
-  readonly slug: ExampleSlug;
+  readonly reportError: (error: unknown) => void;
   readonly children: ReactNode;
 }
 
@@ -39,16 +40,13 @@ interface PreviewErrorBoundaryState {
 
 class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewErrorBoundaryState> {
   state: PreviewErrorBoundaryState = { message: null };
-  private posted = false;
 
   static getDerivedStateFromError(error: unknown): PreviewErrorBoundaryState {
     return { message: messageOf(error) };
   }
 
   componentDidCatch(error: unknown, _info: ErrorInfo): void {
-    if (this.posted) return;
-    this.posted = true;
-    postPreviewError(this.props.slug, messageOf(error));
+    this.props.reportError(error);
   }
 
   render() {
@@ -70,12 +68,27 @@ function ReactExampleCanvas({ slug }: { slug: ExampleSlug }) {
   );
 }
 
+function PreviewHost({ slug }: { slug: ExampleSlug }) {
+  const [asyncError, setAsyncError] = useState<string | null>(null);
+  const reportError = useMemo(() => createDeduplicatedExampleErrorReporter(
+    (error) => setAsyncError(messageOf(error)),
+    (error) => postPreviewError(slug, messageOf(error)),
+  ), [slug]);
+
+  if (asyncError) return <ErrorDisplay message={asyncError} />;
+  return (
+    <ExampleErrorReporterProvider reportError={reportError}>
+      <PreviewErrorBoundary reportError={reportError}>
+        <ReactExampleCanvas slug={slug} />
+      </PreviewErrorBoundary>
+    </ExampleErrorReporterProvider>
+  );
+}
+
 export function ExampleCanvas({ slug }: ExampleCanvasProps) {
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
-      <PreviewErrorBoundary key={slug} slug={slug}>
-        <ReactExampleCanvas slug={slug} />
-      </PreviewErrorBoundary>
+      <PreviewHost key={slug} slug={slug} />
     </div>
   );
 }
