@@ -2,7 +2,7 @@ import type { Draw, Effect, Frame, Gpu, Surface, Target } from 'vgpu';
 import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
 import { DEFAULT_POST_PROCESSING_CONTROLS, type PostProcessingControls } from './types';
 import blurWgsl from './blur.wgsl'; import gradeWgsl from './grade.wgsl'; import sceneWgsl from './scene.wgsl'; import thresholdWgsl from './threshold.wgsl';
-export type PostProcessingMode = 'all-off' | 'bloom-only' | 'ca-only';
+type PostProcessingMode = 'all-off' | 'bloom-only' | 'ca-only';
 interface ThumbOptions extends ThumbnailOptions { onModeRendered?: (mode: PostProcessingMode, pixels: Uint8Array, size: readonly [number, number]) => void | Promise<void> }
 interface EffectChain { scene: Draw; sceneVertexBuffer: GPUBuffer; threshold: Effect; blurH: Effect; blurV: Effect; grade: Effect; sampler: GPUSampler }
 interface ChainTargets { scene: Target; bright: Target; blurA: Target; blurB: Target }
