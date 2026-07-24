@@ -1,6 +1,6 @@
 import type { Gpu, Target } from 'vgpu';
 import type { StirInput } from './pointer-input';
-import { createFluid, prepareFluid, renderFluid, stepFluid, type Fluid } from './simulation';
+import { createFluid, destroyFluid, prepareFluid, renderFluid, stepFluid, type Fluid } from './simulation';
 
 export interface FluidValidationStats {
   steps: number;
@@ -21,26 +21,34 @@ export async function renderThumb(
   } = {},
 ): Promise<void> {
   const fluid = createFluid(gpu);
-  await prepareFluid(fluid, target);
+  try {
+    await prepareFluid(fluid, target);
 
-  if (options.soak) {
-    const pointer = scriptedInput(0.37, 0.42, 0.4, Infinity);
-    for (let i = 0; i < 6_000; i++) {
-      stepFluid(fluid, i < 5_000 ? undefined : pointer);
-      if ((i + 1) % 500 === 0) {
-        await gpu.gpu.queue.onSubmittedWorkDone();
-        options.onStateValidated?.(await readStats(fluid));
+    if (options.soak) {
+      const pointer = scriptedInput(0.37, 0.42, 0.4, Infinity);
+      for (let i = 0; i < 6_000; i++) {
+        stepFluid(fluid, i < 5_000 ? undefined : pointer);
+        if ((i + 1) % 500 === 0) {
+          await gpu.gpu.queue.onSubmittedWorkDone();
+          options.onStateValidated?.(await readStats(fluid));
+        }
       }
+    } else {
+      const pointer = options.scriptedDrag ? scriptedInput(0.08, 0.28, 0.24, 40) : undefined;
+      for (let i = 0; i < (options.warmupFrames ?? 120); i++) stepFluid(fluid, pointer);
     }
-  } else {
-    const pointer = options.scriptedDrag ? scriptedInput(0.08, 0.28, 0.24, 40) : undefined;
-    for (let i = 0; i < (options.warmupFrames ?? 120); i++) stepFluid(fluid, pointer);
-  }
 
-  renderFluid(fluid, target);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
-  options.onStateValidated?.(await readStats(fluid));
+    renderFluid(fluid, target);
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await gpu.settled();
+    options.onStateValidated?.(await readStats(fluid));
+  } finally {
+    try {
+      await gpu.gpu.queue.onSubmittedWorkDone();
+    } finally {
+      destroyFluid(fluid);
+    }
+  }
 }
 
 function scriptedInput(rate: number, radiusX: number, radiusY: number, activeSteps: number): StirInput {

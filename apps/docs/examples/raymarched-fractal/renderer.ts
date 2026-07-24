@@ -129,8 +129,8 @@ export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptio
   const targets = createTargets(gpu, target.size, 'raymarched-fractal-thumb');
   setConstants(effects);
   setBindings(effects, targets);
-  await prewarm(effects, targets, target);
   try {
+    await prewarm(effects, targets, target);
     await renderAndWait(gpu, effects, targets, target, POSTER);
     await renderAndWait(gpu, effects, targets, target, POSTER);
     await reportVariant(opts, 'static-repeat', target);
@@ -143,7 +143,11 @@ export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptio
     await renderAndWait(gpu, effects, targets, target, POSTER);
     await gpu.settled();
   } finally {
-    destroyTargets(targets);
+    try {
+      await gpu.gpu.queue.onSubmittedWorkDone();
+    } finally {
+      destroyTargets(targets);
+    }
   }
 }
 
@@ -170,11 +174,20 @@ function createEffects(gpu: Gpu, label: string): Effects {
 }
 function createTargets(gpu: Gpu, size: readonly [number, number], label: string): Targets {
   const full = normalizeSize(size), bloom = bloomSize(full);
-  return {
-    scene: gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` }),
-    bloomA: gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-a` }),
-    bloomB: gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-b` }),
-  };
+  let scene: Target | undefined;
+  let bloomA: Target | undefined;
+  let bloomB: Target | undefined;
+  try {
+    scene = gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` });
+    bloomA = gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-a` });
+    bloomB = gpu.target({ size: bloom, format: HDR_FORMAT, label: `${label}-bloom-b` });
+    return { scene, bloomA, bloomB };
+  } catch (error) {
+    scene?.color.destroy();
+    bloomA?.color.destroy();
+    bloomB?.color.destroy();
+    throw error;
+  }
 }
 function setConstants(e: Effects): void {
   e.scene.set({ params: { resolution: [1, 1], ...POSTER } });

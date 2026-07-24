@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
   createFluid: vi.fn(() => ({ marker: 'fluid' })),
+  destroyFluid: vi.fn(),
   prepareFluid: vi.fn(async () => {}),
   renderFluid: vi.fn(),
   stepFluid: vi.fn(),
@@ -11,13 +12,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('vgpu', () => ({ init: mocks.init }));
 vi.mock('./simulation', () => ({
   createFluid: mocks.createFluid,
+  destroyFluid: mocks.destroyFluid,
   prepareFluid: mocks.prepareFluid,
   renderFluid: mocks.renderFluid,
   stepFluid: mocks.stepFluid,
 }));
 vi.mock('./pointer-input', () => ({ installStirInput: () => ({ dispose: mocks.inputDispose }) }));
 
-import { createRenderer } from './renderer';
+import { createRenderer, renderThumbnail } from './renderer';
 
 function setup() {
   let nextRaf = 1;
@@ -31,9 +33,12 @@ function setup() {
   vi.stubGlobal('performance', { now: () => 0 });
   const page = { hidden: false };
   vi.stubGlobal('document', page);
-  vi.stubGlobal('window', { devicePixelRatio: 1 });
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-  const surface = { onResize: vi.fn(() => vi.fn()), dispose: vi.fn(), size: [100, 50], format: 'bgra8unorm' };
+  const windowMock = { devicePixelRatio: 1, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+  vi.stubGlobal('window', windowMock);
+  let observerCallback: ResizeObserverCallback | undefined;
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) { observerCallback = callback; } observe() {} disconnect() {} });
+  let surfaceResizeCallback: (() => void) | undefined;
+  const surface = { onResize: vi.fn((callback: () => void) => { surfaceResizeCallback = callback; return vi.fn(); }), dispose: vi.fn(), size: [100, 50], format: 'bgra8unorm' };
   const gpu = { surface: vi.fn(() => surface), dispose: vi.fn() };
   mocks.init.mockResolvedValueOnce(gpu);
   const canvas = {
@@ -46,7 +51,11 @@ function setup() {
     callbacks.delete(entry[0]);
     entry[1](time);
   };
-  return { page, surface, gpu, canvas, callbacks, fireNext };
+  return {
+    page, surface, gpu, canvas, callbacks, fireNext, windowMock,
+    surfaceResize: () => surfaceResizeCallback?.(),
+    observerResize: () => observerCallback?.([], {} as ResizeObserver),
+  };
 }
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
@@ -69,6 +78,53 @@ test('hidden time is discarded by the fixed-step RAF and disposal cancels future
   expect(mocks.inputDispose).toHaveBeenCalledOnce();
   expect(env.surface.dispose).toHaveBeenCalledOnce();
   expect(env.gpu.dispose).toHaveBeenCalledOnce();
+});
+
+test('all resize sources coalesce and async display preparation never overlaps', async () => {
+  const env = setup();
+  const renderer = createRenderer({ canvas: env.canvas });
+  await renderer.ready;
+  expect(mocks.prepareFluid).toHaveBeenCalledTimes(1);
+
+  env.surfaceResize();
+  env.observerResize();
+  renderer.resize({ width: 200, height: 100, dpr: 2 });
+  expect(env.callbacks.size).toBe(2); // fixed-step tick plus one resize flush
+  const resizeId = Math.max(...env.callbacks.keys());
+  const resizeCallback = env.callbacks.get(resizeId)!;
+  env.callbacks.delete(resizeId);
+  resizeCallback(1);
+  await vi.waitFor(() => expect(mocks.prepareFluid).toHaveBeenCalledTimes(2));
+
+  let release!: () => void;
+  mocks.prepareFluid.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+  env.surfaceResize();
+  const pendingId = Math.max(...env.callbacks.keys());
+  const pendingCallback = env.callbacks.get(pendingId)!;
+  env.callbacks.delete(pendingId);
+  pendingCallback(2);
+  await vi.waitFor(() => expect(mocks.prepareFluid).toHaveBeenCalledTimes(3));
+  env.observerResize();
+  renderer.resize({ width: 300, height: 150, dpr: 1 });
+  expect(env.callbacks.size).toBe(1); // only the fixed-step tick while prepare is running
+  release();
+  await vi.waitFor(() => expect(mocks.prepareFluid).toHaveBeenCalledTimes(4));
+
+  const dprListener = env.windowMock.addEventListener.mock.calls.find(([type]) => type === 'resize')?.[1] as (() => void);
+  env.windowMock.devicePixelRatio = 1.5;
+  dprListener();
+  expect(env.callbacks.size).toBe(2);
+  renderer.dispose();
+});
+
+test('thumbnail cleanup waits for submitted work and destroys fluid resources on failure', async () => {
+  const failure = new Error('compile failed');
+  mocks.prepareFluid.mockRejectedValueOnce(failure);
+  const onSubmittedWorkDone = vi.fn(async () => {});
+  const gpu = { gpu: { queue: { onSubmittedWorkDone } } };
+  await expect(renderThumbnail(gpu as never, {} as never)).rejects.toBe(failure);
+  expect(onSubmittedWorkDone).toHaveBeenCalledOnce();
+  expect(mocks.destroyFluid).toHaveBeenCalledOnce();
 });
 
 test('dispose before GPU readiness prevents installation and disposes the late GPU', async () => {
