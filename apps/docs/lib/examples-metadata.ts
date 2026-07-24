@@ -1,5 +1,5 @@
 import { exampleThumbs } from './example-thumbs.generated';
-import type { ExampleMeta, LegacyExampleMetaDefinition } from './example-meta';
+import type { ExampleMeta, ExampleMetaDefinition } from './example-meta';
 import { exampleSlugs, type ExampleSlug } from './example-slugs';
 
 import { meta as gradientMeta } from '../examples/gradient/meta';
@@ -24,29 +24,27 @@ const rawMetadata = {
   'batch-rendering': batchRenderingMeta,
   'fft-ocean': fftOceanMeta,
   'raymarched-fractal': raymarchedFractalMeta,
-} satisfies Record<ExampleSlug, LegacyExampleMetaDefinition>;
+} satisfies Record<ExampleSlug, ExampleMetaDefinition>;
 
-function normalizeMetadata(meta: LegacyExampleMetaDefinition): ExampleMeta {
+function withThumbnails(meta: ExampleMetaDefinition): ExampleMeta {
   return {
     ...meta,
-    tags: meta.tags ?? [],
-    capabilities: meta.capabilities ?? [],
     thumbnail: exampleThumbs[meta.slug]?.card,
     hero: exampleThumbs[meta.slug]?.hero,
   };
 }
 
 export const exampleMetadataBySlug = {
-  gradient: normalizeMetadata(rawMetadata.gradient),
-  'triangle-led-front': normalizeMetadata(rawMetadata['triangle-led-front']),
-  'anti-aliasing': normalizeMetadata(rawMetadata['anti-aliasing']),
-  'post-processing': normalizeMetadata(rawMetadata['post-processing']),
-  'black-hole': normalizeMetadata(rawMetadata['black-hole']),
-  fluid: normalizeMetadata(rawMetadata.fluid),
-  'instanced-rendering': normalizeMetadata(rawMetadata['instanced-rendering']),
-  'batch-rendering': normalizeMetadata(rawMetadata['batch-rendering']),
-  'fft-ocean': normalizeMetadata(rawMetadata['fft-ocean']),
-  'raymarched-fractal': normalizeMetadata(rawMetadata['raymarched-fractal']),
+  gradient: withThumbnails(rawMetadata.gradient),
+  'triangle-led-front': withThumbnails(rawMetadata['triangle-led-front']),
+  'anti-aliasing': withThumbnails(rawMetadata['anti-aliasing']),
+  'post-processing': withThumbnails(rawMetadata['post-processing']),
+  'black-hole': withThumbnails(rawMetadata['black-hole']),
+  fluid: withThumbnails(rawMetadata.fluid),
+  'instanced-rendering': withThumbnails(rawMetadata['instanced-rendering']),
+  'batch-rendering': withThumbnails(rawMetadata['batch-rendering']),
+  'fft-ocean': withThumbnails(rawMetadata['fft-ocean']),
+  'raymarched-fractal': withThumbnails(rawMetadata['raymarched-fractal']),
 } satisfies Record<ExampleSlug, ExampleMeta>;
 
 export const examplesMetadata = exampleSlugs.map((slug) => exampleMetadataBySlug[slug]);

@@ -11,7 +11,6 @@ const sourcesOutFile = path.join(docsDir, 'lib', 'examples-source.generated.ts')
 const thumbsOutFile = path.join(docsDir, 'lib', 'example-thumbs.generated.ts');
 const slugsFile = path.join(docsDir, 'lib', 'example-slugs.ts');
 const componentsFile = path.join(docsDir, 'lib', 'example-components.ts');
-const runnersFile = path.join(docsDir, 'lib', 'example-runners.ts');
 
 function normalizeLf(source) {
   const normalized = source.replace(/\r\n?/g, '\n');
@@ -61,8 +60,7 @@ function stringValue(node, label) {
   return node.text;
 }
 
-function stringArray(node, label, { optional = false } = {}) {
-  if (!node && optional) return [];
+function stringArray(node, label) {
   if (!node || !ts.isArrayLiteralExpression(node)) throw new Error(`${label} must be an explicit array literal.`);
   return node.elements.map((item, index) => stringValue(item, `${label}[${index}]`));
 }
@@ -75,8 +73,8 @@ async function readMetadata(slug) {
     slug: stringValue(properties.get('slug'), `${slug}/meta.ts slug`),
     title: stringValue(properties.get('title'), `${slug}/meta.ts title`),
     description: stringValue(properties.get('description'), `${slug}/meta.ts description`),
-    tags: stringArray(properties.get('tags'), `${slug}/meta.ts tags`, { optional: true }),
-    capabilities: stringArray(properties.get('capabilities'), `${slug}/meta.ts capabilities`, { optional: true }),
+    tags: stringArray(properties.get('tags'), `${slug}/meta.ts tags`),
+    capabilities: stringArray(properties.get('capabilities'), `${slug}/meta.ts capabilities`),
     files: stringArray(properties.get('files'), `${slug}/meta.ts files`),
   };
   if (metadata.slug !== slug) throw new Error(`${slug}/meta.ts declares mismatched slug '${metadata.slug}'.`);
@@ -132,14 +130,10 @@ async function validatedFiles(metadata) {
     if (!info.isFile()) throw new Error(`${metadata.slug}/meta.ts path '${name}' is not a file.`);
   }
 
-  const migrated = seen.has('index.tsx');
-  if (migrated && !seen.has('renderer.ts')) {
+  if (!seen.has('index.tsx') || !seen.has('renderer.ts')) {
     throw new Error(`${metadata.slug}/meta.ts must list both index.tsx and renderer.ts.`);
   }
-  if (!migrated && !seen.has('example.ts')) {
-    throw new Error(`${metadata.slug}/meta.ts must list legacy example.ts until index.tsx and renderer.ts are migrated.`);
-  }
-  if (seen.has('index.tsx') && metadata.files[0] !== 'index.tsx') {
+  if (metadata.files[0] !== 'index.tsx') {
     throw new Error(`${metadata.slug}/meta.ts must list index.tsx first.`);
   }
   return metadata.files;
@@ -204,9 +198,7 @@ assertSameSet('example folders', folders, slugs);
 const metadata = await Promise.all(slugs.map(readMetadata));
 assertSameSet('metadata', metadata.map((item) => item.slug), slugs);
 const loaderSlugs = await registryKeys(componentsFile, 'exampleComponentLoaders');
-const runnerSlugs = await registryKeys(runnersFile, 'exampleRunners');
-assertSameSet('React loaders plus legacy runners', [...loaderSlugs, ...runnerSlugs], slugs);
-if (loaderSlugs.some((slug) => runnerSlugs.includes(slug))) throw new Error('A slug cannot have both a React loader and a legacy runner.');
+assertSameSet('React loaders', loaderSlugs, slugs);
 
 await writeSources(slugs, new Map(metadata.map((item) => [item.slug, item])));
 await writeThumbs();

@@ -7,10 +7,6 @@ export interface ExampleComponentModule {
 
 export type ExampleComponentLoader = () => Promise<ExampleComponentModule>;
 
-/**
- * Literal imports are added here as example folders migrate. Keeping this map
- * partial lets the preview bridge route the remaining examples to legacy runners.
- */
 export const exampleComponentLoaders = {
   gradient: () => import('../examples/gradient'),
   'triangle-led-front': () => import('../examples/triangle-led-front'),
@@ -22,8 +18,8 @@ export const exampleComponentLoaders = {
   'batch-rendering': () => import('../examples/batch-rendering'),
   'fft-ocean': () => import('../examples/fft-ocean'),
   'raymarched-fractal': () => import('../examples/raymarched-fractal'),
-} satisfies Partial<Record<ExampleSlug, ExampleComponentLoader>>;
+} satisfies Record<ExampleSlug, ExampleComponentLoader>;
 
-export function getExampleComponentLoader(slug: ExampleSlug): ExampleComponentLoader | undefined {
-  return (exampleComponentLoaders as Partial<Record<ExampleSlug, ExampleComponentLoader>>)[slug];
+export function getExampleComponentLoader(slug: ExampleSlug): ExampleComponentLoader {
+  return exampleComponentLoaders[slug];
 }

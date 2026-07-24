@@ -20,12 +20,6 @@ export interface ExampleMetaDefinition {
   readonly thumb?: ExampleThumbOptions;
 }
 
-/** Temporary bridge for meta.ts files which have not migrated yet. */
-export type LegacyExampleMetaDefinition = Omit<ExampleMetaDefinition, 'tags' | 'capabilities'> & {
-  readonly tags?: readonly string[];
-  readonly capabilities?: readonly string[];
-};
-
 export interface ExampleMeta extends ExampleMetaDefinition {
   readonly thumbnail?: string;
   readonly hero?: string;

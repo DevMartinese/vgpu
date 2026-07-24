@@ -1,8 +1,7 @@
 'use client';
 
-import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useMemo, type ErrorInfo, type ReactNode } from 'react';
 import { getExampleComponentLoader } from '@/lib/example-components';
-import { getExampleRunner } from '@/lib/example-runners';
 import { type ExampleSlug } from '@/lib/example-slugs';
 
 interface ExampleCanvasProps {
@@ -58,55 +57,12 @@ class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewE
   }
 }
 
-function LegacyExampleCanvas({ slug }: { slug: ExampleSlug }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const postedRef = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const runner = getExampleRunner(slug);
-    if (!canvas || !runner) return;
-
-    let disposed = false;
-    let dispose: (() => void) | undefined;
-
-    runner(canvas)
-      .then((cleanup) => {
-        if (disposed) cleanup();
-        else dispose = cleanup;
-      })
-      .catch((caught: unknown) => {
-        if (disposed) return;
-        const message = messageOf(caught);
-        setError(message);
-        if (!postedRef.current) {
-          postedRef.current = true;
-          postPreviewError(slug, message);
-        }
-      });
-
-    return () => {
-      disposed = true;
-      dispose?.();
-    };
-  }, [slug]);
-
-  return (
-    <>
-      <canvas ref={canvasRef} className="block h-full w-full touch-none" />
-      {error ? <ErrorDisplay message={error} /> : null}
-    </>
-  );
-}
-
 function ReactExampleCanvas({ slug }: { slug: ExampleSlug }) {
   const loader = getExampleComponentLoader(slug);
   const LazyExample = useMemo(
-    () => loader ? lazy(() => loader().then((module) => ({ default: module.Example }))) : null,
+    () => lazy(() => loader().then((module) => ({ default: module.Example }))),
     [loader],
   );
-  if (!LazyExample) return <LegacyExampleCanvas slug={slug} />;
   return (
     <Suspense fallback={<div className="h-full w-full bg-black" aria-label="Loading example" />}>
       <LazyExample />

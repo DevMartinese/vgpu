@@ -15,9 +15,9 @@ const rendererBundle = path.join(cacheDir, 'renderers.mjs');
 const docsDataEntry = path.join(cacheDir, 'docs-data-entry.ts');
 const docsDataBundle = path.join(cacheDir, 'docs-data.mjs');
 
-/** @typedef {{ slug: string; module: string; exportName: string }} CustomRendererEntry */
-/** @type {CustomRendererEntry[]} */
-const standardRendererEntries = [
+/** @typedef {{ slug: string; module: string; exportName: string }} RendererEntry */
+/** @type {RendererEntry[]} */
+const rendererEntries = [
   { slug: 'gradient', module: '../examples/gradient/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'triangle-led-front', module: '../examples/triangle-led-front/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'anti-aliasing', module: '../examples/anti-aliasing/renderer.ts', exportName: 'renderThumbnail' },
@@ -29,11 +29,6 @@ const standardRendererEntries = [
   { slug: 'fft-ocean', module: '../examples/fft-ocean/renderer.ts', exportName: 'renderThumbnail' },
   { slug: 'raymarched-fractal', module: '../examples/raymarched-fractal/renderer.ts', exportName: 'renderThumbnail' },
 ];
-
-/** @type {CustomRendererEntry[]} */
-const legacyRendererEntries = [];
-
-const customRendererEntries = [...standardRendererEntries, ...legacyRendererEntries];
 
 const sizes = args.proofDir ? { proof: [160, 90] } : {
   card: [1280, 720],
@@ -606,9 +601,9 @@ async function writeAaModePngs(modePixels, size, kind) {
 }
 
 async function loadRenderers() {
-  if (customRendererEntries.length === 0) return {};
+  if (rendererEntries.length === 0) return {};
   await mkdir(cacheDir, { recursive: true });
-  const contents = customRendererEntries
+  const contents = rendererEntries
     .map((entry, index) => `export { ${entry.exportName} as renderer_${index} } from '${entry.module}';`)
     .join('\n');
   await import('node:fs/promises').then(({ writeFile }) => writeFile(rendererEntry, `${contents}\n`));
@@ -624,7 +619,7 @@ async function loadRenderers() {
     logLevel: 'silent',
   });
   const module = await import(pathToFileURL(rendererBundle).href);
-  return customRendererEntries.reduce((acc, entry, index) => {
+  return rendererEntries.reduce((acc, entry, index) => {
     const renderer = module[`renderer_${index}`];
     if (typeof renderer !== 'function') {
       throw new Error(`Renderer export for '${entry.slug}' was not found.`);

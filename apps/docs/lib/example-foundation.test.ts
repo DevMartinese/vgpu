@@ -4,7 +4,6 @@ vi.mock('server-only', () => ({}));
 
 import { exampleComponentLoaders } from './example-components';
 import type { ExampleRenderer, RenderSize } from './example-renderer';
-import { exampleRunners } from './example-runners';
 import { exampleSlugs } from './example-slugs';
 import { exampleSources } from './examples-source.generated';
 import { exampleMetadataBySlug } from './examples-metadata';
@@ -13,12 +12,11 @@ function sorted(values: readonly string[]) {
   return [...values].sort();
 }
 
-test('canonical, metadata, generated source, and bridge registries cover exactly the same slugs', () => {
+test('canonical, metadata, generated source, and component registries cover exactly the same slugs', () => {
   const canonical = sorted(exampleSlugs);
   expect(sorted(Object.keys(exampleMetadataBySlug))).toEqual(canonical);
   expect(sorted(Object.keys(exampleSources))).toEqual(canonical);
-  expect(sorted([...Object.keys(exampleComponentLoaders), ...Object.keys(exampleRunners)])).toEqual(canonical);
-  expect(Object.keys(exampleComponentLoaders).filter((slug) => slug in exampleRunners)).toEqual([]);
+  expect(sorted(Object.keys(exampleComponentLoaders))).toEqual(canonical);
 });
 
 test('React component loaders resolve the migrated example modules', async () => {
