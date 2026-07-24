@@ -1,130 +1,43 @@
 import type { Draw, Effect, Frame, Gpu, Surface, Target } from 'vgpu';
-import {
-  AA_MODE_FXAA,
-  AA_MODE_MSAA_4X,
-  AA_MODE_OFF,
-  AA_MODE_SSAA_2X,
-  installControls,
-  type AaMode,
-} from './legacy-controls';
+import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
+import { AA_MODE_FXAA, AA_MODE_MSAA_4X, AA_MODE_OFF, AA_MODE_SSAA_2X, DEFAULT_ANTI_ALIASING_CONTROLS, type AaMode, type AntiAliasingControls } from './types';
 import sceneWgsl from './scene.wgsl';
 import resolveWgsl from './resolve.wgsl';
 import fxaaWgsl from './fxaa.wgsl';
 
-interface ThumbOptions {
-  warmupFrames?: number;
-  dt?: number;
-  time?: number;
-  onModeRendered?: (mode: AaMode, pixels: Uint8Array, size: readonly [number, number]) => void | Promise<void>;
-}
-
-interface AaEffects {
-  readonly scene: Draw;
-  readonly vertexBuffer: GPUBuffer;
-  readonly resolve: Effect;
-  readonly fxaa: Effect;
-  readonly sampler: GPUSampler;
-}
-
-interface AaTargets {
-  readonly msaa: Target;
-  readonly ssaa: Target;
-  readonly ldr: Target;
-}
-
+interface ThumbOptions extends ThumbnailOptions { onModeRendered?: (mode: AaMode, pixels: Uint8Array, size: readonly [number, number]) => void | Promise<void> }
+interface AaEffects { readonly scene: Draw; readonly vertexBuffer: GPUBuffer; readonly resolve: Effect; readonly fxaa: Effect; readonly sampler: GPUSampler }
+interface AaTargets { readonly msaa: Target; readonly ssaa: Target; readonly ldr: Target }
 const FORMAT: GPUTextureFormat = 'rgba8unorm';
 const CLEAR_BLACK: readonly [number, number, number, number] = [0, 0, 0, 1];
 const ALL_MODES: readonly AaMode[] = [AA_MODE_OFF, AA_MODE_MSAA_4X, AA_MODE_SSAA_2X, AA_MODE_FXAA];
+const isMode = (value: number): value is AaMode => ALL_MODES.includes(value as AaMode);
 
-export async function run(canvas: HTMLCanvasElement): Promise<() => void> {
-  const { init } = await import('vgpu');
-  const gpu = await init();
-  const surface = gpu.surface(canvas, { dpr: [1, 2] });
-  const effects = createEffects(gpu, 'anti-aliasing');
-  const targets = createTargets(gpu, surface.size, 'anti-aliasing');
-  const controls = installControls(canvas);
-  let disposed = false;
-  let sawInitialResize = false;
-
-  // Compile every target signature before the frame loop so mode changes never compile lazily.
-  await prewarm(effects, targets, surface);
-  setStaticBindings(effects, targets);
-  setResolutionBindings(effects, surface);
-  let mode = controls.getMode();
-  setModeBindings(effects, targets, mode);
-
-  const unsubscribeResize = surface.onResize(() => {
-    if (!sawInitialResize) {
-      sawInitialResize = true;
-      return;
-    }
-    if (disposed) return;
-    resizeTargets(targets, surface.size);
-    setResolutionBindings(effects, surface);
-  });
-
-  const handle = gpu.frame.loop((frame) => {
-    const nextMode = controls.getMode();
-    if (nextMode !== mode) {
-      mode = nextMode;
-      setModeBindings(effects, targets, mode);
-    }
-    renderMode(frame, effects, targets, surface, mode, gpu.time);
-  });
-
-  return () => {
-    if (disposed) return;
-    disposed = true;
-    handle.stop();
-    unsubscribeResize();
-    controls.dispose();
-    destroyEffects(effects);
-    destroyTargets(targets);
-    surface.dispose();
-    gpu.dispose();
-  };
+export function createRenderer(options: BrowserRendererOptions<AntiAliasingControls>): ExampleRenderer<AntiAliasingControls> {
+  let disposed = false, reportedError = false;
+  let controls = { ...(options.initialControls ?? DEFAULT_ANTI_ALIASING_CONTROLS) };
+  if (!isMode(controls.mode)) controls = { ...DEFAULT_ANTI_ALIASING_CONTROLS };
+  let gpu: Gpu | undefined, surface: Surface | undefined, effects: AaEffects | undefined, targets: AaTargets | undefined;
+  let loop: { stop(): void } | undefined, observer: ResizeObserver | undefined, resizeFrame = 0, pendingSize: RenderSize | undefined;
+  let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+  const applyResize = () => { resizeFrame = 0; const size = pendingSize; pendingSize = undefined; if (disposed || !size || !targets || !effects || !surface) return; resizeTargets(targets, [Math.max(1, Math.round(size.width * size.dpr)), Math.max(1, Math.round(size.height * size.dpr))]); setResolutionBindings(effects, surface); };
+  const resize = (size: RenderSize) => { if (disposed || size.width <= 0 || size.height <= 0) return; pendingSize = size; if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize); };
+  const measure = () => { const rect = options.canvas.getBoundingClientRect(); resize({ width: rect.width, height: rect.height, dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)) }); };
+  const onWindowResize = () => { if (window.devicePixelRatio === lastDpr) return; lastDpr = window.devicePixelRatio; measure(); };
+  const setControls = (next: Readonly<AntiAliasingControls>) => { if (disposed || !isMode(next.mode) || next.mode === controls.mode) return; controls = { mode: next.mode }; if (effects && targets) setModeBindings(effects, targets, controls.mode); };
+  const dispose = () => { if (disposed) return; disposed = true; loop?.stop(); loop = undefined; if (resizeFrame) cancelAnimationFrame(resizeFrame); resizeFrame = 0; pendingSize = undefined; observer?.disconnect(); observer = undefined; if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize); if (effects) destroyEffects(effects); effects = undefined; if (targets) destroyTargets(targets); targets = undefined; surface?.dispose(); surface = undefined; gpu?.dispose(); gpu = undefined; };
+  const initialize = async () => { const { init } = await import('vgpu'); if (disposed) return; const nextGpu = await init(); if (disposed) { nextGpu.dispose(); return; } gpu = nextGpu; surface = gpu.surface(options.canvas, { dpr: [1, 2] }); effects = createEffects(gpu, 'anti-aliasing'); targets = createTargets(gpu, surface.size, 'anti-aliasing'); await prewarm(effects, targets, surface); if (disposed) return; setStaticBindings(effects, targets); setResolutionBindings(effects, surface); setModeBindings(effects, targets, controls.mode); observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure); observer?.observe(options.canvas); window.addEventListener('resize', onWindowResize); measure(); loop = gpu.frame.loop((frame) => { if (!disposed && effects && targets && surface && gpu) renderMode(frame, effects, targets, surface, controls.mode, gpu.time); }); };
+  const ready = initialize().catch((error: unknown) => { if (disposed) return; if (!reportedError) { reportedError = true; options.onError?.(error); } dispose(); throw error; });
+  return { ready, setControls, invalidate() {}, resize, dispose };
 }
 
-export async function renderThumb(
-  gpu: Gpu,
-  target: Target,
-  opts: ThumbOptions = {},
-): Promise<void> {
-  const effects = createEffects(gpu, 'anti-aliasing-thumb');
-  const targets = createTargets(gpu, target.size, 'anti-aliasing-thumb');
-  await prewarm(effects, targets, target);
-  setStaticBindings(effects, targets);
-  setResolutionBindings(effects, target);
-  let configuredMode: AaMode | undefined;
-  const configureMode = (mode: AaMode) => {
-    if (mode === configuredMode) return;
-    configuredMode = mode;
-    setModeBindings(effects, targets, mode);
-  };
-
-  const dt = opts.dt ?? 1 / 60;
-  let time = opts.time ?? 1.2;
-
-  // The gallery normally ends on FXAA, but exercise every mode first so Docker validates
-  // all lazily-selected pipelines (including the 4x sample-count variant) and bindings.
-  for (const mode of ALL_MODES) {
-    configureMode(mode);
-    gpu.frame((frame) => renderMode(frame, effects, targets, target, mode, time));
-    await gpu.gpu.queue.onSubmittedWorkDone();
-    await opts.onModeRendered?.(mode, await target.read(), target.size);
-  }
-
-  const warmupFrames = Math.max(1, opts.warmupFrames ?? 60);
-  for (let i = 0; i < warmupFrames; i++) {
-    time += dt;
-    configureMode(AA_MODE_FXAA);
-    gpu.frame((frame) => renderMode(frame, effects, targets, target, AA_MODE_FXAA, time));
-  }
-
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
-  destroyEffects(effects);
-  destroyTargets(targets);
+export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
+  const effects = createEffects(gpu, 'anti-aliasing-thumb'); const targets = createTargets(gpu, target.size, 'anti-aliasing-thumb'); await prewarm(effects, targets, target); setStaticBindings(effects, targets); setResolutionBindings(effects, target); let configuredMode: AaMode | undefined;
+  const configureMode = (mode: AaMode) => { if (mode !== configuredMode) { configuredMode = mode; setModeBindings(effects, targets, mode); } };
+  const dt = opts.dt ?? 1 / 60; let time = opts.time ?? 1.2;
+  for (const mode of ALL_MODES) { configureMode(mode); gpu.frame((frame) => renderMode(frame, effects, targets, target, mode, time)); await gpu.gpu.queue.onSubmittedWorkDone(); await opts.onModeRendered?.(mode, await target.read(), target.size); }
+  for (let i = 0; i < Math.max(1, opts.warmupFrames ?? 60); i++) { time += dt; configureMode(DEFAULT_ANTI_ALIASING_CONTROLS.mode); gpu.frame((frame) => renderMode(frame, effects, targets, target, DEFAULT_ANTI_ALIASING_CONTROLS.mode, time)); }
+  await gpu.gpu.queue.onSubmittedWorkDone(); await gpu.settled(); destroyEffects(effects); destroyTargets(targets);
 }
 
 function createEffects(gpu: Gpu, label: string): AaEffects {
