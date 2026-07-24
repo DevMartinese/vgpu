@@ -13,22 +13,27 @@ export function createRenderer(options: BrowserRendererOptions<PostProcessingCon
  let disposed = false, reportedError = false; let controls = { ...(options.initialControls ?? DEFAULT_POST_PROCESSING_CONTROLS) };
  let gpu: Gpu | undefined, surface: Surface | undefined, effects: EffectChain | undefined, targets: ChainTargets | undefined, loop: { stop(): void } | undefined, observer: ResizeObserver | undefined;
  let resizeFrame = 0, pendingSize: RenderSize | undefined, lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
- const applyResize = () => { resizeFrame = 0; const size = pendingSize; pendingSize = undefined; if (disposed || !size || !gpu || !surface || !effects || !targets) return; destroyTargets(targets); targets = createTargets(gpu, [Math.max(1, Math.round(size.width * size.dpr)), Math.max(1, Math.round(size.height * size.dpr))], 'post-processing-live'); setChainBindings(effects, targets, surface); };
+ const applyResize = () => { resizeFrame = 0; const size = pendingSize; pendingSize = undefined; if (disposed || !size || !gpu || !surface || !effects || !targets) return; try { const nextTargets = createTargets(gpu, [Math.max(1, Math.round(size.width * size.dpr)), Math.max(1, Math.round(size.height * size.dpr))], 'post-processing-live'); destroyTargets(targets); targets = nextTargets; setChainBindings(effects, targets, surface); } catch (error) { fail(error); } };
  const resize = (size: RenderSize) => { if (disposed || size.width <= 0 || size.height <= 0) return; pendingSize = size; if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize); };
  const measure = () => { const rect = options.canvas.getBoundingClientRect(); resize({ width: rect.width, height: rect.height, dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)) }); };
  const onWindowResize = () => { if (window.devicePixelRatio === lastDpr) return; lastDpr = window.devicePixelRatio; measure(); };
  const setControls = (next: Readonly<PostProcessingControls>) => { const valid = { bloom: Boolean(next.bloom), ca: Boolean(next.ca) }; if (disposed || (valid.bloom === controls.bloom && valid.ca === controls.ca)) return; controls = valid; if (effects) setGradeFlags(effects.grade, controls); };
  const dispose = () => { if (disposed) return; disposed = true; loop?.stop(); loop = undefined; if (resizeFrame) cancelAnimationFrame(resizeFrame); resizeFrame = 0; pendingSize = undefined; observer?.disconnect(); observer = undefined; if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize); if (effects) destroyEffects(effects); effects = undefined; if (targets) destroyTargets(targets); targets = undefined; surface?.dispose(); surface = undefined; gpu?.dispose(); gpu = undefined; };
+ const fail = (error: unknown) => { if (disposed) return; if (!reportedError) { reportedError = true; try { options.onError?.(error); } catch {} } dispose(); };
  const initialize = async () => { const { init } = await import('vgpu'); if (disposed) return; const nextGpu = await init(); if (disposed) { nextGpu.dispose(); return; } gpu = nextGpu; surface = gpu.surface(options.canvas, { dpr: [1, 2] }); effects = createEffects(gpu, 'post-processing-live'); targets = createTargets(gpu, surface.size, 'post-processing-live'); await prewarm(effects, targets, surface); if (disposed) return; setChainConstants(effects); setChainBindings(effects, targets, surface); setGradeFlags(effects.grade, controls); observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure); observer?.observe(options.canvas); window.addEventListener('resize', onWindowResize); measure(); loop = gpu.frame.loop((frame) => { if (!disposed && effects && targets && surface && gpu) renderChain(frame, effects, targets, surface, gpu.time); }); };
- const ready = initialize().catch((error: unknown) => { if (disposed) return; if (!reportedError) { reportedError = true; options.onError?.(error); } dispose(); throw error; });
+ const ready = initialize().catch((error: unknown) => { if (disposed) return; fail(error); throw error; });
  return { ready, setControls, invalidate() {}, resize, dispose };
 }
 
 export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
- const effects = createEffects(gpu, 'post-processing-thumb'), targets = createTargets(gpu, target.size, 'post-processing-thumb'); await prewarm(effects, targets, target); setChainConstants(effects); setChainBindings(effects, targets, target); const dt = opts.dt ?? 1 / 60; let time = opts.time ?? 2;
- for (const [mode, flags] of THUMB_MODES) { setGradeFlags(effects.grade, flags); gpu.frame((frame) => renderChain(frame, effects, targets, target, time)); await gpu.gpu.queue.onSubmittedWorkDone(); await opts.onModeRendered?.(mode, await target.read(), target.size); }
- setGradeFlags(effects.grade, DEFAULT_POST_PROCESSING_CONTROLS); for (let i = 0; i < Math.max(1, opts.warmupFrames ?? 60); i++) { time += dt; gpu.frame((frame) => renderChain(frame, effects, targets, target, time)); }
- await gpu.gpu.queue.onSubmittedWorkDone(); await gpu.settled(); destroyEffects(effects); destroyTargets(targets);
+ let effects: EffectChain | undefined; let targets: ChainTargets | undefined;
+ try {
+  effects = createEffects(gpu, 'post-processing-thumb'); targets = createTargets(gpu, target.size, 'post-processing-thumb'); await prewarm(effects, targets, target); setChainConstants(effects); setChainBindings(effects, targets, target); const dt = opts.dt ?? 1 / 60; let time = opts.time ?? 2;
+  for (const [mode, flags] of THUMB_MODES) { setGradeFlags(effects.grade, flags); gpu.frame((frame) => renderChain(frame, effects!, targets!, target, time)); await gpu.gpu.queue.onSubmittedWorkDone(); await opts.onModeRendered?.(mode, await target.read(), target.size); }
+  setGradeFlags(effects.grade, DEFAULT_POST_PROCESSING_CONTROLS); for (let i = 0; i < Math.max(1, opts.warmupFrames ?? 60); i++) { time += dt; gpu.frame((frame) => renderChain(frame, effects!, targets!, target, time)); }
+ } finally {
+  await Promise.allSettled([gpu.gpu.queue.onSubmittedWorkDone(), gpu.settled()]); if (targets) destroyTargets(targets); if (effects) destroyEffects(effects);
+ }
 }
 
 function createEffects(gpu: Gpu, label: string): EffectChain {
@@ -38,9 +43,9 @@ function createEffects(gpu: Gpu, label: string): EffectChain {
     usage: ['vertex', 'copy_dst'],
     label: `${label}-geometry`,
   });
-  buffer.write(vertices.buffer as ArrayBuffer);
-
-  return {
+  try {
+    buffer.write(vertices.buffer as ArrayBuffer);
+    return {
     scene: gpu.draw({
       shader: sceneWgsl,
       label: `${label}-scene`,
@@ -64,18 +69,20 @@ function createEffects(gpu: Gpu, label: string): EffectChain {
     blurV: gpu.effect(blurWgsl, { label: `${label}-blur-v` }),
     grade: gpu.effect(gradeWgsl, { label: `${label}-grade` }),
     sampler: gpu.sampler({ minFilter: 'linear', magFilter: 'linear' }),
-  };
+  }; } catch (error) { buffer.gpu.destroy(); throw error; }
 }
 
 function createTargets(gpu: Gpu, size: readonly [number, number], label: string): ChainTargets {
   const full = normalizeSize(size);
   const half = halfSize(full);
-  return {
-    scene: gpu.target({ size: full, format: FORMAT, label: `${label}-scene` }),
-    bright: gpu.target({ size: half, format: FORMAT, label: `${label}-bright` }),
-    blurA: gpu.target({ size: half, format: FORMAT, label: `${label}-blur-a` }),
-    blurB: gpu.target({ size: half, format: FORMAT, label: `${label}-blur-b` }),
-  };
+  const created: Target[] = [];
+  try {
+    const scene = gpu.target({ size: full, format: FORMAT, label: `${label}-scene` }); created.push(scene);
+    const bright = gpu.target({ size: half, format: FORMAT, label: `${label}-bright` }); created.push(bright);
+    const blurA = gpu.target({ size: half, format: FORMAT, label: `${label}-blur-a` }); created.push(blurA);
+    const blurB = gpu.target({ size: half, format: FORMAT, label: `${label}-blur-b` }); created.push(blurB);
+    return { scene, bright, blurA, blurB };
+  } catch (error) { for (const target of created) (target as Target & { destroy?: () => void }).destroy?.(); throw error; }
 }
 
 async function prewarm(effects: EffectChain, targets: ChainTargets, output: Surface | Target): Promise<void> {

@@ -20,24 +20,29 @@ export function createRenderer(options: BrowserRendererOptions<AntiAliasingContr
   let gpu: Gpu | undefined, surface: Surface | undefined, effects: AaEffects | undefined, targets: AaTargets | undefined;
   let loop: { stop(): void } | undefined, observer: ResizeObserver | undefined, resizeFrame = 0, pendingSize: RenderSize | undefined;
   let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
-  const applyResize = () => { resizeFrame = 0; const size = pendingSize; pendingSize = undefined; if (disposed || !size || !targets || !effects || !surface) return; resizeTargets(targets, [Math.max(1, Math.round(size.width * size.dpr)), Math.max(1, Math.round(size.height * size.dpr))]); setResolutionBindings(effects, surface); };
+  const applyResize = () => { resizeFrame = 0; const size = pendingSize; pendingSize = undefined; if (disposed || !size || !targets || !effects || !surface) return; try { resizeTargets(targets, [Math.max(1, Math.round(size.width * size.dpr)), Math.max(1, Math.round(size.height * size.dpr))]); setResolutionBindings(effects, surface); } catch (error) { fail(error); } };
   const resize = (size: RenderSize) => { if (disposed || size.width <= 0 || size.height <= 0) return; pendingSize = size; if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize); };
   const measure = () => { const rect = options.canvas.getBoundingClientRect(); resize({ width: rect.width, height: rect.height, dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)) }); };
   const onWindowResize = () => { if (window.devicePixelRatio === lastDpr) return; lastDpr = window.devicePixelRatio; measure(); };
   const setControls = (next: Readonly<AntiAliasingControls>) => { if (disposed || !isMode(next.mode) || next.mode === controls.mode) return; controls = { mode: next.mode }; if (effects && targets) setModeBindings(effects, targets, controls.mode); };
   const dispose = () => { if (disposed) return; disposed = true; loop?.stop(); loop = undefined; if (resizeFrame) cancelAnimationFrame(resizeFrame); resizeFrame = 0; pendingSize = undefined; observer?.disconnect(); observer = undefined; if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize); if (effects) destroyEffects(effects); effects = undefined; if (targets) destroyTargets(targets); targets = undefined; surface?.dispose(); surface = undefined; gpu?.dispose(); gpu = undefined; };
+  const fail = (error: unknown) => { if (disposed) return; if (!reportedError) { reportedError = true; try { options.onError?.(error); } catch {} } dispose(); };
   const initialize = async () => { const { init } = await import('vgpu'); if (disposed) return; const nextGpu = await init(); if (disposed) { nextGpu.dispose(); return; } gpu = nextGpu; surface = gpu.surface(options.canvas, { dpr: [1, 2] }); effects = createEffects(gpu, 'anti-aliasing'); targets = createTargets(gpu, surface.size, 'anti-aliasing'); await prewarm(effects, targets, surface); if (disposed) return; setStaticBindings(effects, targets); setResolutionBindings(effects, surface); setModeBindings(effects, targets, controls.mode); observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure); observer?.observe(options.canvas); window.addEventListener('resize', onWindowResize); measure(); loop = gpu.frame.loop((frame) => { if (!disposed && effects && targets && surface && gpu) renderMode(frame, effects, targets, surface, controls.mode, gpu.time); }); };
-  const ready = initialize().catch((error: unknown) => { if (disposed) return; if (!reportedError) { reportedError = true; options.onError?.(error); } dispose(); throw error; });
+  const ready = initialize().catch((error: unknown) => { if (disposed) return; fail(error); throw error; });
   return { ready, setControls, invalidate() {}, resize, dispose };
 }
 
 export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
-  const effects = createEffects(gpu, 'anti-aliasing-thumb'); const targets = createTargets(gpu, target.size, 'anti-aliasing-thumb'); await prewarm(effects, targets, target); setStaticBindings(effects, targets); setResolutionBindings(effects, target); let configuredMode: AaMode | undefined;
-  const configureMode = (mode: AaMode) => { if (mode !== configuredMode) { configuredMode = mode; setModeBindings(effects, targets, mode); } };
-  const dt = opts.dt ?? 1 / 60; let time = opts.time ?? 1.2;
-  for (const mode of ALL_MODES) { configureMode(mode); gpu.frame((frame) => renderMode(frame, effects, targets, target, mode, time)); await gpu.gpu.queue.onSubmittedWorkDone(); await opts.onModeRendered?.(mode, await target.read(), target.size); }
-  for (let i = 0; i < Math.max(1, opts.warmupFrames ?? 60); i++) { time += dt; configureMode(DEFAULT_ANTI_ALIASING_CONTROLS.mode); gpu.frame((frame) => renderMode(frame, effects, targets, target, DEFAULT_ANTI_ALIASING_CONTROLS.mode, time)); }
-  await gpu.gpu.queue.onSubmittedWorkDone(); await gpu.settled(); destroyEffects(effects); destroyTargets(targets);
+  let effects: AaEffects | undefined; let targets: AaTargets | undefined;
+  try {
+    effects = createEffects(gpu, 'anti-aliasing-thumb'); targets = createTargets(gpu, target.size, 'anti-aliasing-thumb'); await prewarm(effects, targets, target); setStaticBindings(effects, targets); setResolutionBindings(effects, target); let configuredMode: AaMode | undefined;
+    const configureMode = (mode: AaMode) => { if (mode !== configuredMode) { configuredMode = mode; setModeBindings(effects!, targets!, mode); } };
+    const dt = opts.dt ?? 1 / 60; let time = opts.time ?? 1.2;
+    for (const mode of ALL_MODES) { configureMode(mode); gpu.frame((frame) => renderMode(frame, effects!, targets!, target, mode, time)); await gpu.gpu.queue.onSubmittedWorkDone(); await opts.onModeRendered?.(mode, await target.read(), target.size); }
+    for (let i = 0; i < Math.max(1, opts.warmupFrames ?? 60); i++) { time += dt; configureMode(DEFAULT_ANTI_ALIASING_CONTROLS.mode); gpu.frame((frame) => renderMode(frame, effects!, targets!, target, DEFAULT_ANTI_ALIASING_CONTROLS.mode, time)); }
+  } finally {
+    await Promise.allSettled([gpu.gpu.queue.onSubmittedWorkDone(), gpu.settled()]); if (targets) destroyTargets(targets); if (effects) destroyEffects(effects);
+  }
 }
 
 function createEffects(gpu: Gpu, label: string): AaEffects {
@@ -47,9 +52,9 @@ function createEffects(gpu: Gpu, label: string): AaEffects {
     usage: ['vertex', 'copy_dst'],
     label: `${label}-geometry`,
   });
-  buffer.write(vertices.buffer as ArrayBuffer);
-
-  return {
+  try {
+    buffer.write(vertices.buffer as ArrayBuffer);
+    return {
     scene: gpu.draw({
       shader: sceneWgsl,
       label: `${label}-scene`,
@@ -74,17 +79,19 @@ function createEffects(gpu: Gpu, label: string): AaEffects {
       addressModeU: 'clamp-to-edge',
       addressModeV: 'clamp-to-edge',
     }),
-  };
+  }; } catch (error) { buffer.gpu.destroy(); throw error; }
 }
 
 function createTargets(gpu: Gpu, size: readonly [number, number], label: string): AaTargets {
   const [width, height] = normalizedSize(size);
-  return {
+  const created: Target[] = [];
+  try {
     // Dawn compat in Docker rejects rgba16float+MSAA, so every AA intermediate is rgba8unorm.
-    msaa: gpu.target({ size: [width, height], format: FORMAT, msaa: true, label: `${label}-msaa-4x` }),
-    ssaa: gpu.target({ size: [width * 2, height * 2], format: FORMAT, label: `${label}-ssaa-2x` }),
-    ldr: gpu.target({ size: [width, height], format: FORMAT, label: `${label}-fxaa-ldr` }),
-  };
+    const msaa = gpu.target({ size: [width, height], format: FORMAT, msaa: true, label: `${label}-msaa-4x` }); created.push(msaa);
+    const ssaa = gpu.target({ size: [width * 2, height * 2], format: FORMAT, label: `${label}-ssaa-2x` }); created.push(ssaa);
+    const ldr = gpu.target({ size: [width, height], format: FORMAT, label: `${label}-fxaa-ldr` }); created.push(ldr);
+    return { msaa, ssaa, ldr };
+  } catch (error) { for (const target of created) (target as Target & { destroy?: () => void }).destroy?.(); throw error; }
 }
 
 function resizeTargets(targets: AaTargets, size: readonly [number, number]): void {
