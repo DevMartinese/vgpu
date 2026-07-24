@@ -29,6 +29,8 @@ test('generated metadata and files preserve the canonical and explicit order', (
     expect(generated.slug).toBe(slug);
     expect(generated.title).toBe(metadata.title);
     expect(generated.description).toBe(metadata.description);
+    expect(generated.tags).toEqual(metadata.tags);
+    expect(generated.capabilities).toEqual(metadata.capabilities);
     expect(generated.files.map((file) => file.path)).toEqual(metadata.files);
     for (const file of generated.files) {
       expect(file.content.endsWith('\n')).toBe(true);
