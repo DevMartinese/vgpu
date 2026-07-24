@@ -6,11 +6,11 @@ relatedSymbols:
 ---
 # CLI
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The vgpu CLI provides command-line tooling for working with vgpu. Use it to validate WGSL shaders, query the vgpu documentation, inspect canonical example source, diagnose your local GPU environment, and set up the native runtime for Node.js workflows.
 
 ## Installation and usage
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The CLI ships with the `vgpu` package, so no separate installation is required. Run any command with `npx vgpu`:
 
 ```terminal
 npx vgpu <command> [args] [flags]
