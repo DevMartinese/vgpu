@@ -1,3 +1,5 @@
+import type { ExampleMetaDefinition } from '../../lib/example-meta';
+
 export const meta = {
   slug: 'fft-ocean',
   title: 'Particles ocean',
@@ -11,4 +13,4 @@ export const meta = {
     'particles.wgsl', 'particles-common.wgsl', 'particles-light.wgsl',
     'bloom-bright.wgsl', 'bloom-blur.wgsl', 'bloom-composite.wgsl', 'present.wgsl', 'stage-preview.wgsl',
   ],
-} as const;
+} as const satisfies ExampleMetaDefinition;

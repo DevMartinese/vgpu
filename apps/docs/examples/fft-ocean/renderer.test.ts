@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock('vgpu', () => ({ init: mocks.init }));
 
-import { createRenderer } from './renderer';
+import { createRenderer, renderThumbnail } from './renderer';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -31,4 +31,25 @@ test('dispose-before-ready destroys a late GPU and never starts the ocean graph'
   expect(gpu.dispose).toHaveBeenCalledOnce();
   expect(gpu.surface).not.toHaveBeenCalled();
   expect(gpu.frame.loop).not.toHaveBeenCalled();
+});
+
+test('thumbnail graph construction destroys targets acquired before an allocation failure', async () => {
+  const destroyFirst = vi.fn();
+  const destroySecond = vi.fn();
+  const targets = [
+    { color: { destroy: destroyFirst } },
+    { color: { destroy: destroySecond } },
+  ];
+  const gpu = {
+    target: vi.fn(() => {
+      const target = targets.shift();
+      if (!target) throw new Error('target allocation failed');
+      return target;
+    }),
+  } as unknown as Parameters<typeof renderThumbnail>[0];
+  const output = { size: [100, 50], format: 'rgba8unorm' } as unknown as Parameters<typeof renderThumbnail>[1];
+
+  await expect(renderThumbnail(gpu, output)).rejects.toThrow('target allocation failed');
+  expect(destroySecond).toHaveBeenCalledOnce();
+  expect(destroyFirst).toHaveBeenCalledOnce();
 });

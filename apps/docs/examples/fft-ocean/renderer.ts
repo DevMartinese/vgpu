@@ -119,37 +119,54 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
 
 export async function renderThumbnail(gpu: Gpu, output: Target, opts: ThumbOptions = {}): Promise<void> {
   const graph = await createGraph(gpu, output, 'fft-ocean-thumb');
-  const time = opts.time ?? 18;
-  renderAt(gpu, graph, output, time);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  if (opts.onIntermediateRendered) {
-    const displacement = graph.ifft.at(-1)!.output;
-    const previewTarget = gpu.target({ size: displacement.size, format: 'rgba8unorm', label: 'fft-ocean-displacement-preview' });
-    const preview = gpu.effect(stagePreviewWgsl, { label: 'fft-ocean-displacement-preview' });
-    preview.set({ u: { outputWidth: displacement.size[0], outputHeight: displacement.size[1], stage: 1, gain: 16 }, u_input: displacement });
-    await preview.compile(previewTarget);
-    gpu.frame((frame) => frame.pass({ target: previewTarget, clear: CLEAR }, (pass) => pass.draw(preview)));
+  try {
+    const time = opts.time ?? 18;
+    renderAt(gpu, graph, output, time);
     await gpu.gpu.queue.onSubmittedWorkDone();
-    await opts.onIntermediateRendered('displacement', await previewTarget.read(), previewTarget.size);
-    previewTarget.color.destroy();
+    if (opts.onIntermediateRendered) {
+      const displacement = graph.ifft.at(-1)!.output;
+      const previewTarget = gpu.target({ size: displacement.size, format: 'rgba8unorm', label: 'fft-ocean-displacement-preview' });
+      try {
+        const preview = gpu.effect(stagePreviewWgsl, { label: 'fft-ocean-displacement-preview' });
+        preview.set({ u: { outputWidth: displacement.size[0], outputHeight: displacement.size[1], stage: 1, gain: 16 }, u_input: displacement });
+        await preview.compile(previewTarget);
+        gpu.frame((frame) => frame.pass({ target: previewTarget, clear: CLEAR }, (pass) => pass.draw(preview)));
+        await gpu.gpu.queue.onSubmittedWorkDone();
+        await opts.onIntermediateRendered('displacement', await previewTarget.read(), previewTarget.size);
+      } finally {
+        try {
+          await gpu.gpu.queue.onSubmittedWorkDone();
+        } finally {
+          previewTarget.color.destroy();
+        }
+      }
+    }
+    renderAt(gpu, graph, output, time + 5);
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await opts.onVariantRendered?.('time-delta', await output.read(), output.size);
+    renderAt(gpu, graph, output, time);
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await gpu.settled();
+  } finally {
+    try {
+      await gpu.gpu.queue.onSubmittedWorkDone();
+    } finally {
+      destroyGraph(graph);
+    }
   }
-  renderAt(gpu, graph, output, time + 5);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await opts.onVariantRendered?.('time-delta', await output.read(), output.size);
-  renderAt(gpu, graph, output, time);
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
-  destroyGraph(graph);
 }
 
 async function createGraph(gpu: Gpu, output: Output, label: string): Promise<OceanGraph> {
+  const ownedTargets: Target[] = [];
+  const own = (target: Target) => { ownedTargets.push(target); return target; };
+  try {
   const resolution = OCEAN_RESOLUTION;
-  const simTarget = (name: string) => gpu.target({ size: [resolution, resolution], format: SIM_FORMAT, label: `${label}-${name}` });
+  const simTarget = (name: string) => own(gpu.target({ size: [resolution, resolution], format: SIM_FORMAT, label: `${label}-${name}` }));
   const noise = simTarget('noise'), h0 = simTarget('h0'), spectrum = simTarget('spectrum'), ping = simTarget('ping'), pong = simTarget('pong'), normalFoam = simTarget('normal-foam');
-  const scene = gpu.target({ size: normalizedSize(output.size), format: HDR_FORMAT, label: `${label}-scene` });
+  const scene = own(gpu.target({ size: normalizedSize(output.size), format: HDR_FORMAT, label: `${label}-scene` }));
   const sizes = bloomSizes(output.size);
-  const bright = gpu.target({ size: sizes[0]!, format: HDR_FORMAT, label: `${label}-bright` });
-  const composite = gpu.target({ size: sizes[0]!, format: HDR_FORMAT, label: `${label}-composite` });
+  const bright = own(gpu.target({ size: sizes[0]!, format: HDR_FORMAT, label: `${label}-bright` }));
+  const composite = own(gpu.target({ size: sizes[0]!, format: HDR_FORMAT, label: `${label}-composite` }));
   const sampler = gpu.sampler({ minFilter: 'linear', magFilter: 'linear' });
   const noiseEffect = gpu.effect(noiseWgsl, { label: `${label}-noise` });
   noiseEffect.set({ u: { seed: 0x6f636561, resolution } });
@@ -179,8 +196,8 @@ async function createGraph(gpu: Gpu, output: Output, label: string): Promise<Oce
   brightEffect.set({ uniforms: { luminosityThreshold: OCEAN_TUNING.bloom.threshold, smoothWidth: OCEAN_TUNING.bloom.smoothWidth }, tDiffuse: scene, linearSampler: sampler });
   let bloomInput = bright;
   const levels = sizes.map((size, index) => {
-    const horizontal = gpu.target({ size, format: HDR_FORMAT, label: `${label}-bloom-h${index}` });
-    const vertical = gpu.target({ size, format: HDR_FORMAT, label: `${label}-bloom-v${index}` });
+    const horizontal = own(gpu.target({ size, format: HDR_FORMAT, label: `${label}-bloom-h${index}` }));
+    const vertical = own(gpu.target({ size, format: HDR_FORMAT, label: `${label}-bloom-v${index}` }));
     const kernelRadius = OCEAN_TUNING.bloom.kernelRadii[index]!;
     const horizontalEffect = makeBlur(gpu, `${label}-blur-h${index}`, bloomInput, horizontal, sampler, [1, 0], kernelRadius);
     const verticalEffect = makeBlur(gpu, `${label}-blur-v${index}`, horizontal, vertical, sampler, [0, 1], kernelRadius);
@@ -196,11 +213,10 @@ async function createGraph(gpu: Gpu, output: Output, label: string): Promise<Oce
   const present = gpu.effect(presentWgsl, { label: `${label}-present` });
   present.set({ sceneHDR: scene, bloomTexture: composite, linearSampler: sampler });
   const graph: OceanGraph = { noise, h0, spectrum, ping, pong, normalFoam, scene, bright, composite, levels, noiseEffect, initialSpectrum, evolveSpectrum, ifft, normals, particles, brightEffect, compositeEffect, present, needsInitialSpectrum: true };
-  try {
-    await prewarm(graph, output);
-    return graph;
+  await prewarm(graph, output);
+  return graph;
   } catch (error) {
-    destroyGraph(graph);
+    for (let i = ownedTargets.length - 1; i >= 0; i--) ownedTargets[i]!.color.destroy();
     throw error;
   }
 }
