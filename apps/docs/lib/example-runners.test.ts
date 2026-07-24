@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 vi.mock('vgpu', async () => import('vgpu/mock'));
+vi.mock('server-only', () => ({}));
 
 import { exampleRunners } from './example-runners';
 import { examples } from './examples-registry';
