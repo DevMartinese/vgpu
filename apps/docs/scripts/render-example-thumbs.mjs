@@ -660,8 +660,17 @@ function wgslPlugin() {
 async function loadDocsData() {
   await mkdir(cacheDir, { recursive: true });
   await import('node:fs/promises').then(({ writeFile }) => writeFile(docsDataEntry, `
-    export { examples } from '../lib/examples-registry';
-    export { exampleSources } from '../lib/examples-source.generated';
+    import { examplesMetadata } from '../lib/examples-metadata';
+    import { exampleSources } from '../lib/examples-source.generated';
+    const examples = examplesMetadata.map((meta) => ({
+      meta,
+      sources: (exampleSources[meta.slug]?.files ?? []).map((file) => ({
+        name: file.path,
+        lang: file.language,
+        code: file.content,
+      })),
+    }));
+    export { examples, exampleSources };
   `));
   await build({
     entryPoints: [docsDataEntry],
@@ -670,7 +679,13 @@ async function loadDocsData() {
     platform: 'node',
     format: 'esm',
     sourcemap: false,
-    external: ['server-only'],
+    plugins: [{
+      name: 'ignore-server-only-marker',
+      setup(builder) {
+        builder.onResolve({ filter: /^server-only$/ }, () => ({ path: 'server-only', namespace: 'empty' }));
+        builder.onLoad({ filter: /.*/, namespace: 'empty' }, () => ({ contents: 'export {};' }));
+      },
+    }],
     loader: { '.wgsl': 'text' },
     logLevel: 'silent',
   });
