@@ -123,6 +123,11 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    title: 'CLI',
+    href: '/cli',
+    groups: [],
+  },
+  {
     title: 'API Reference',
     href: '/reference',
     groups: [...referenceGroups.map(referenceGroupToNavGroup)],
@@ -210,6 +215,9 @@ function referenceTopicToNavItem(topic: ReferenceTopic): NavItem {
 function flattenNavSections(sections: NavSection[]) {
   const items: FlatNavItem[] = [];
   for (const section of sections) {
+    if (section.href && section.groups.length === 0) {
+      items.push({ title: section.title, href: section.href, section: section.title, groupPath: [] });
+    }
     for (const group of section.groups) {
       flattenGroup(section.title, group, [group.title], items);
     }
@@ -241,6 +249,7 @@ function sectionOverviewHref(section: string) {
   if (section === 'Core Concepts') return '/concepts';
   if (section === 'Guides') return '/guides';
   if (section === 'Examples') return '/examples';
+  if (section === 'CLI') return '/cli';
   if (section === 'API Reference') return '/reference';
   return '/';
 }
