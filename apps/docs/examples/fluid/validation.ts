@@ -1,5 +1,5 @@
 import type { Gpu, Target } from 'vgpu';
-import type { StirInput } from './controls';
+import type { StirInput } from './pointer-input';
 import { createFluid, prepareFluid, renderFluid, stepFluid, type Fluid } from './simulation';
 
 export interface FluidValidationStats {
