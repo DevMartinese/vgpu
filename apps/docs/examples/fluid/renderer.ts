@@ -31,11 +31,18 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
 
   const reportFailure = (error: unknown) => {
     if (disposed) return;
-    if (!reportedError) {
-      reportedError = true;
-      options.onError?.(error);
+    try {
+      if (!reportedError) {
+        reportedError = true;
+        try {
+          options.onError?.(error);
+        } catch {
+          // Error reporting must never replace the renderer failure or block teardown.
+        }
+      }
+    } finally {
+      dispose();
     }
-    dispose();
   };
 
   const prepareCurrentOutput = async () => {
