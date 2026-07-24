@@ -1,0 +1,20 @@
+[
+  "animation",
+  "anti-aliasing",
+  "batching",
+  "bloom",
+  "compute",
+  "fft",
+  "fluid",
+  "fractal",
+  "gradient",
+  "hdr",
+  "instancing",
+  "ocean",
+  "particles",
+  "post-processing",
+  "raymarch",
+  "raymarching",
+  "rendering",
+  "sierpinski"
+]

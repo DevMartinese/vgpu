@@ -1,0 +1,10 @@
+[
+  "compute",
+  "controls",
+  "hdr",
+  "instancing",
+  "multi-pass",
+  "render-bundles",
+  "storage-buffers",
+  "textures"
+]
