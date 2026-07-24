@@ -285,7 +285,7 @@ npx vgpu install-software-renderer
 
 ## snapshot
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu snapshot` command is an internal self-test used by vgpu's own CI: it renders a scene built into the CLI inside the Docker GPU harness (`VGPU_DOCKER_TEST=1`) and compares the pixels against a committed baseline to catch toolchain regressions. To verify that your machine is set up correctly, use `vgpu doctor` instead.
 
 ```text
 Usage: vgpu snapshot [--ci] [--update] [--baseline <path>]
