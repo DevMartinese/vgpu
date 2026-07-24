@@ -127,6 +127,37 @@ test('thumbnail cleanup waits for submitted work and destroys fluid resources on
   expect(mocks.destroyFluid).toHaveBeenCalledOnce();
 });
 
+test('throwing error reporter cannot replace the original error or bypass full teardown', async () => {
+  const env = setup();
+  const originalError = new Error('animation scheduling failed');
+  const reporterError = new Error('reporter failed');
+  const cancelAnimationFrame = vi.fn();
+  let requestCount = 0;
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => {
+    requestCount++;
+    if (requestCount === 2) throw originalError;
+    return 41;
+  }));
+  vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame);
+  env.surface.onResize.mockImplementationOnce((callback: () => void) => {
+    callback();
+    return vi.fn();
+  });
+  const onError = vi.fn(() => { throw reporterError; });
+
+  const renderer = createRenderer({ canvas: env.canvas, onError });
+  await expect(renderer.ready).rejects.toBe(originalError);
+
+  expect(onError).toHaveBeenCalledOnce();
+  expect(onError).toHaveBeenCalledWith(originalError);
+  expect(cancelAnimationFrame).toHaveBeenCalledWith(41);
+  expect(env.windowMock.removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+  expect(mocks.inputDispose).toHaveBeenCalledOnce();
+  expect(mocks.destroyFluid).toHaveBeenCalledOnce();
+  expect(env.surface.dispose).toHaveBeenCalledOnce();
+  expect(env.gpu.dispose).toHaveBeenCalledOnce();
+});
+
 test('dispose before GPU readiness prevents installation and disposes the late GPU', async () => {
   const env = setup();
   let resolve!: (gpu: typeof env.gpu) => void;
