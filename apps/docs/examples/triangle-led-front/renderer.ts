@@ -22,22 +22,31 @@ export function createRenderer(options: BrowserRendererOptions<TriangleLedContro
   let controls = { ...(options.initialControls ?? DEFAULT_TRIANGLE_LED_CONTROLS) };
   if (!isTriangleLedMode(controls.mode)) controls = { ...DEFAULT_TRIANGLE_LED_CONTROLS };
 
+  const fail = (error: unknown) => {
+    if (disposed) return;
+    if (!reportedError) {
+      reportedError = true;
+      try { options.onError?.(error); } catch { /* Error reporting must not bypass teardown. */ }
+    }
+    dispose();
+  };
   const applyResize = () => {
     resizeFrame = 0;
     const size = pendingSize;
     pendingSize = undefined;
     if (disposed || !size || !scene || !surface) return;
     const generation = ++resizeGeneration;
-    scene.rebuild({ width: size.width, height: size.height, dpr: surface.dpr });
-    scene.setOutputTarget(surface);
-    void scene.prewarm().catch((error: unknown) => {
+    try {
+      scene.rebuild({ width: size.width, height: size.height, dpr: surface.dpr });
+      scene.setOutputTarget(surface);
+      void scene.prewarm().catch((error: unknown) => {
+        if (disposed || generation !== resizeGeneration) return;
+        fail(error);
+      });
+    } catch (error) {
       if (disposed || generation !== resizeGeneration) return;
-      if (!reportedError) {
-        reportedError = true;
-        options.onError?.(error);
-      }
-      dispose();
-    });
+      fail(error);
+    }
   };
   const resize = (size: RenderSize) => {
     if (disposed || size.width <= 0 || size.height <= 0) return;
@@ -106,8 +115,7 @@ export function createRenderer(options: BrowserRendererOptions<TriangleLedContro
   };
   const ready = initialize().catch((error: unknown) => {
     if (disposed) return;
-    if (!reportedError) { reportedError = true; options.onError?.(error); }
-    dispose();
+    fail(error);
     throw error;
   });
   return { ready, setControls, invalidate() {}, resize, dispose };
@@ -128,10 +136,12 @@ export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbnailO
       time += dt;
       gpu.frame((frame) => scene.renderFrame(frame, { time, dt }));
     }
-    await gpu.settled();
-    await gpu.gpu.queue.onSubmittedWorkDone();
   } finally {
-    scene.destroy();
+    await Promise.allSettled([
+      Promise.resolve().then(() => gpu.gpu.queue.onSubmittedWorkDone()),
+      Promise.resolve().then(() => gpu.settled()),
+    ]);
+    try { scene.destroy(); } catch { /* Preserve the original render failure. */ }
   }
 }
 
