@@ -17,7 +17,7 @@ const docsDataBundle = path.join(cacheDir, 'docs-data.mjs');
 
 /** @typedef {{ slug: string; module: string; exportName: string }} CustomRendererEntry */
 /** @type {CustomRendererEntry[]} */
-const customRendererEntries = [
+const legacyRendererEntries = [
   { slug: 'triangle-led-front', module: '../examples/triangle-led-front/example.ts', exportName: 'renderThumb' },
   { slug: 'anti-aliasing', module: '../examples/anti-aliasing/example.ts', exportName: 'renderThumb' },
   { slug: 'post-processing', module: '../examples/post-processing/example.ts', exportName: 'renderThumb' },
@@ -28,6 +28,22 @@ const customRendererEntries = [
   { slug: 'batch-rendering', module: '../examples/batch-rendering/example.ts', exportName: 'renderThumb' },
   { slug: 'fft-ocean', module: '../examples/fft-ocean/example.ts', exportName: 'renderThumb' },
 ];
+
+const customRendererEntries = (await Promise.all([
+  { slug: 'gradient', module: undefined, exportName: undefined },
+  ...legacyRendererEntries,
+].map(async (legacy) => {
+  const rendererFile = path.join(docsDir, 'examples', legacy.slug, 'renderer.ts');
+  const source = await readFile(rendererFile, 'utf8').catch((error) => {
+    if (error?.code === 'ENOENT') return '';
+    throw error;
+  });
+  const hasStandardExport = /export\s+(?:async\s+)?function\s+renderThumbnail\b|export\s+const\s+renderThumbnail\b/.test(source);
+  if (hasStandardExport) {
+    return { slug: legacy.slug, module: `../examples/${legacy.slug}/renderer.ts`, exportName: 'renderThumbnail' };
+  }
+  return legacy.module && legacy.exportName ? legacy : undefined;
+}))).filter(Boolean);
 
 const sizes = args.proofDir ? { proof: [160, 90] } : {
   card: [1280, 720],
@@ -205,14 +221,14 @@ function resolveFragmentFile(example, exampleSources) {
   if (preferred) return preferred;
   const metaListed = example.meta.files?.find((file) => file.endsWith('.wgsl'));
   if (metaListed) return metaListed;
-  const generated = exampleSources[slug]?.find((item) => item.lang === 'wgsl');
-  return generated?.name;
+  const generated = exampleSources[slug]?.files.find((item) => item.language === 'wgsl');
+  return generated?.path;
 }
 
 function sourceFor(exampleSources, slug, fileName) {
-  const file = exampleSources[slug]?.find((item) => item.name === fileName);
+  const file = exampleSources[slug]?.files.find((item) => item.path === fileName);
   if (!file) throw new Error(`Missing generated source for ${slug}/${fileName}. Run scripts/ingest-examples.mjs first.`);
-  return file.code;
+  return file.content;
 }
 
 function lumaVariance(bytes) {
