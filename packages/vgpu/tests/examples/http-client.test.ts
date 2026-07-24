@@ -18,9 +18,9 @@ async function fixture(change: Record<string, unknown> = {}) {
   const server = createServer((req, res) => {
     requests.push(req.url!);
     const send = (body: Buffer, type = "application/json; charset=utf-8", etag?: string) => { res.setHeader("content-type", change.wrongType ? "text/html" : type); if(etag)res.setHeader("etag",etag); res.end(body); };
-    if (req.url === "/.well-known/vgpu-examples.json") { if(change.etag&&req.headers["if-none-match"]==='"discovery"'){res.statusCode=304;return res.end()} return send(change.oversize ? Buffer.alloc(32769) : discovery,undefined,change.etag?'"discovery"':undefined); }
+    if (req.url === "/.well-known/vgpu-examples.json") { if(change.etag&&req.headers["if-none-match"]==='"discovery"'){res.statusCode=304;res.setHeader("etag",'"discovery"');return res.end()} return send(change.oversize ? Buffer.alloc(32769) : discovery,undefined,change.etag?'"discovery"':undefined); }
     if (req.url === "/api/examples/v1/latest.json") return send(pointer);
-    if (req.url === `/examples/v1/revisions/${revision}/index.json`) { const tag=`"${sha256(indexBytes)}"`;if(change.etag&&req.headers["if-none-match"]===tag){res.statusCode=304;return res.end()}return send(indexBytes,undefined,change.etag?tag:undefined); }
+    if (req.url === `/examples/v1/revisions/${revision}/index.json`) { const tag=`"${sha256(indexBytes)}"`;if(change.etag&&req.headers["if-none-match"]===tag){res.statusCode=304;res.setHeader("etag",tag);return res.end()}return send(indexBytes,undefined,change.etag?tag:undefined); }
     if (req.url?.endsWith("/manifest.json")) return send(manifestBytes);
     if (req.url?.endsWith("/example.ts.raw")) { if(change.truncateFile){res.setHeader("content-type","text/typescript");res.setHeader("content-length",source.length+10);res.write(source.subarray(0,4));return setImmediate(()=>res.destroy());} return send(change.badFile ? Buffer.concat([source, Buffer.from("x")]) : source, "text/typescript"); }
     res.statusCode = 404; res.end();
@@ -34,10 +34,10 @@ async function fixture(change: Record<string, unknown> = {}) {
   const entry = { id: manifest.id, title: manifest.title, description: manifest.description, tags: manifest.tags, capabilities: manifest.capabilities, fileCount: 1, aggregateSha256: manifest.aggregateSha256, manifestUrl: `${origin}/examples/v1/revisions/${revision}/examples/${manifest.id}/manifest.json`, manifestSha256: sha256(manifestBytes) };
   indexBytes = Buffer.from(JSON.stringify({ schemaVersion: 1, contractId: "vgpu-examples/v1", revision, source: { repository: "repo", gitCommit: "commit" }, examples: [entry] }));
   pointer = Buffer.from(JSON.stringify({ schemaVersion: 1, contractId: "vgpu-examples/v1", revision, indexUrl: `${origin}/examples/v1/revisions/${revision}/index.json`, indexSha256: sha256(indexBytes) }));
-  discovery = Buffer.from(JSON.stringify({ protocol: "vgpu-examples", discoveryVersion: 1, contracts: [
+  const contracts:any[]=[
     { id: "vgpu-examples/v2", schemaSha256: "2".repeat(64), status: "active", minimumCliVersion: "0.1.0", indexUrl: `${origin}/api/examples/v2/latest.json` },
     { id: "vgpu-examples/v1", schemaSha256: change.schema ?? EXAMPLES_SCHEMA_SHA256, status: change.status ?? "active", minimumCliVersion: change.minimum ?? "0.1.0", indexUrl: `${origin}/api/examples/v1/latest.json` },
-  ] }));
+  ];if(change.duplicate)contracts.push({...contracts[1],status:"revoked"});discovery = Buffer.from(JSON.stringify({ protocol: "vgpu-examples", discoveryVersion: 1, contracts }));
   cleanup.push(() => new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve())));
   return { origin, requests, poisonPointer(){ pointer=Buffer.from(JSON.stringify({schemaVersion:1,contractId:"vgpu-examples/v1",revision,indexUrl:`${origin}/examples/v1/revisions/${revision}/index.json`,indexSha256:"f".repeat(64)})); } };
 }
@@ -67,12 +67,15 @@ test.each([
   [{ status: "revoked" }, "VGPU-EXAMPLES-INCOMPATIBLE-API"],
   [{ schema: "0".repeat(64) }, "VGPU-EXAMPLES-INCOMPATIBLE-API"],
   [{ minimum: "99.0.0" }, "VGPU-EXAMPLES-CLI-TOO-OLD"],
+  [{ duplicate: true }, "VGPU-EXAMPLES-INTEGRITY"],
 ])("fails discovery before fetching index", async (change, code) => {
   const f = await fixture(change), result = await runExamples(["search", "x", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });
   expect(result.code).toBe(5); expect(JSON.parse(result.stderr!).error.code).toBe(code); expect(f.requests).toEqual(["/.well-known/vgpu-examples.json"]);
 });
 
 test("keeps cat stdout empty when the source body breaks after headers",async()=>{const f=await fixture({truncateFile:true}),result=await runExamples(["cat","raymarched-fractal","example.ts","--base-url",f.origin],{version:"0.1.6",env:await testEnv()});expect(result.code).toBe(4);expect(result.stdout).toBeUndefined()});
+
+test("uses SemVer prerelease precedence for the minimum CLI kill switch",async()=>{const prerelease=await fixture({minimum:"0.1.6"}),old=await runExamples(["search","x","--base-url",prerelease.origin],{version:"0.1.6-beta.1",env:await testEnv()});expect(old.code).toBe(5);expect(JSON.parse(old.stderr!).error.code).toBe("VGPU-EXAMPLES-CLI-TOO-OLD");const release=await fixture({minimum:"0.1.6-beta.1"}),ok=await runExamples(["search","raymarching","--base-url",release.origin],{version:"0.1.6",env:await testEnv()});expect(ok.code).toBe(0)});
 
 test.each([{ oversize: true }, { wrongType: true }, { badFile: true }])("keeps cat stdout empty on hostile transport", async (change) => {
   const f = await fixture(change), result = await runExamples(["cat", "raymarched-fractal", "example.ts", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });

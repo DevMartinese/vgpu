@@ -8,10 +8,10 @@ export function trustedOrigin(baseUrl) {
  if(u.username||u.password||u.search||u.hash) throw integrity('Invalid examples API origin');
  return u.origin;
 }
-export function assertTrustedUrl(value, origin, immutable=false) {
+export function assertTrustedUrl(value, origin, revision) {
  let u; try{u=new URL(value);}catch{throw integrity(`Invalid API URL: ${value}`);}
- if(u.origin!==origin||u.username||u.password||u.hash) throw integrity(`API URL leaves trusted origin: ${value}`);
- if(immutable&&!/^\/(?:api\/)?examples\/v1\/revisions\/[a-f0-9]{64}\//.test(u.pathname)) throw integrity(`Invalid immutable artifact URL: ${value}`);
+ if(u.origin!==origin||u.username||u.password||u.search||u.hash) throw integrity(`API URL leaves trusted origin: ${value}`);
+ if(revision){const match=u.pathname.match(/^\/(?:api\/)?examples\/v1\/revisions\/([a-f0-9]{64})\//);if(!match||match[1]!==revision)throw integrity(`Invalid immutable artifact URL: ${value}`);}
  return u.href;
 }
 export async function requestBytes(url,{fetchImpl=fetch,limit,contentTypes,etag,timeoutMs=10000}={}) {
@@ -19,8 +19,8 @@ export async function requestBytes(url,{fetchImpl=fetch,limit,contentTypes,etag,
  let response;
  try { response=await fetchImpl(url,{redirect:'error',signal:controller.signal,headers:etag?{'if-none-match':etag}:{}}); }
  catch(e){clearTimeout(timer); throw network(e?.name==='AbortError'?`Request timed out: ${url}`:`Request failed: ${url}`);}
- if(response.status===304){clearTimeout(timer); return {notModified:true,etag:response.headers.get('etag')||etag};}
- if(!response.ok){clearTimeout(timer); throw network(`HTTP ${response.status} from ${url}`);}
+ if(response.status===304){clearTimeout(timer);const returned=response.headers.get('etag');if(!etag||!/^"[^"\r\n]+"$/.test(etag)||returned!==etag)throw network(`Invalid conditional response from ${url}`);return {notModified:true,etag};}
+ if(response.status!==200){clearTimeout(timer); throw network(`HTTP ${response.status} from ${url}`);}
  const type=(response.headers.get('content-type')||'').toLowerCase();
  if(!contentTypes.some(t=>type===t||type===`${t}; charset=utf-8`)) {clearTimeout(timer); throw integrity(`Unexpected content-type from ${url}: ${type||'(missing)'}`);}
  const length=response.headers.get('content-length'); if(length!==null&&(+length>limit||!Number.isSafeInteger(+length)||+length<0)){clearTimeout(timer); throw integrity(`Response exceeds ${limit} bytes`);}
