@@ -21,6 +21,13 @@ test('canonical, metadata, generated source, and bridge registries cover exactly
   expect(Object.keys(exampleComponentLoaders).filter((slug) => slug in exampleRunners)).toEqual([]);
 });
 
+test('React component loaders resolve the migrated example modules', async () => {
+  for (const [slug, load] of Object.entries(exampleComponentLoaders)) {
+    const module = await load();
+    expect(module.Example, `${slug} loader has no Example export`).toBeTypeOf('function');
+  }
+});
+
 test('generated metadata and files preserve the canonical and explicit order', () => {
   expect(Object.keys(exampleSources)).toEqual([...exampleSlugs]);
   for (const slug of exampleSlugs) {

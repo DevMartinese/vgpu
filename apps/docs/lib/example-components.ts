@@ -12,6 +12,12 @@ export type ExampleComponentLoader = () => Promise<ExampleComponentModule>;
  * partial lets the preview bridge route the remaining examples to legacy runners.
  */
 export const exampleComponentLoaders = {
+  gradient: () => import('../examples/gradient'),
+  'anti-aliasing': () => import('../examples/anti-aliasing'),
+  'post-processing': () => import('../examples/post-processing'),
+  'black-hole': () => import('../examples/black-hole'),
+  'instanced-rendering': () => import('../examples/instanced-rendering'),
+  'batch-rendering': () => import('../examples/batch-rendering'),
 } satisfies Partial<Record<ExampleSlug, ExampleComponentLoader>>;
 
 export function getExampleComponentLoader(slug: ExampleSlug): ExampleComponentLoader | undefined {

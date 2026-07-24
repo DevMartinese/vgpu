@@ -3,8 +3,11 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 vi.mock('vgpu', async () => import('vgpu/mock'));
 vi.mock('server-only', () => ({}));
 
+import { exampleRunnerSlugs } from './example-runner-slugs';
 import { exampleRunners } from './example-runners';
 import { examples } from './examples-registry';
+
+const runnerExamples = examples.filter(({ meta }) => exampleRunnerSlugs.includes(meta.slug as typeof exampleRunnerSlugs[number]));
 
 class StubElement {
   style: Record<string, string> = {};
@@ -66,11 +69,11 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-test('runner map exactly covers the examples registry', () => {
-  expect(Object.keys(exampleRunners).sort()).toEqual(examples.map(({ meta }) => meta.slug).sort());
+test('runner map exactly covers the legacy runner slugs', () => {
+  expect(Object.keys(exampleRunners)).toEqual(exampleRunnerSlugs);
 });
 
-test.each(examples)('boots setup, first frame, and cleanup for $meta.slug', async ({ meta }) => {
+test.each(runnerExamples)('boots legacy setup, first frame, and cleanup for $meta.slug', async ({ meta }) => {
   const cleanup = await exampleRunners[meta.slug as keyof typeof exampleRunners](stubCanvas());
   const firstFrame = frames.entries().next().value as [number, FrameRequestCallback] | undefined;
   expect(firstFrame, `${meta.slug} did not schedule its first frame`).toBeDefined();

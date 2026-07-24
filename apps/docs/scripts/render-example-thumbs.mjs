@@ -17,33 +17,24 @@ const docsDataBundle = path.join(cacheDir, 'docs-data.mjs');
 
 /** @typedef {{ slug: string; module: string; exportName: string }} CustomRendererEntry */
 /** @type {CustomRendererEntry[]} */
+const standardRendererEntries = [
+  { slug: 'gradient', module: '../examples/gradient/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'anti-aliasing', module: '../examples/anti-aliasing/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'post-processing', module: '../examples/post-processing/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'black-hole', module: '../examples/black-hole/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'instanced-rendering', module: '../examples/instanced-rendering/renderer.ts', exportName: 'renderThumbnail' },
+  { slug: 'batch-rendering', module: '../examples/batch-rendering/renderer.ts', exportName: 'renderThumbnail' },
+];
+
+/** @type {CustomRendererEntry[]} */
 const legacyRendererEntries = [
   { slug: 'triangle-led-front', module: '../examples/triangle-led-front/example.ts', exportName: 'renderThumb' },
-  { slug: 'anti-aliasing', module: '../examples/anti-aliasing/example.ts', exportName: 'renderThumb' },
-  { slug: 'post-processing', module: '../examples/post-processing/example.ts', exportName: 'renderThumb' },
-  { slug: 'black-hole', module: '../examples/black-hole/example.ts', exportName: 'renderThumb' },
   { slug: 'raymarched-fractal', module: '../examples/raymarched-fractal/example.ts', exportName: 'renderThumb' },
   { slug: 'fluid', module: '../examples/fluid/validation.ts', exportName: 'renderThumb' },
-  { slug: 'instanced-rendering', module: '../examples/instanced-rendering/example.ts', exportName: 'renderThumb' },
-  { slug: 'batch-rendering', module: '../examples/batch-rendering/example.ts', exportName: 'renderThumb' },
   { slug: 'fft-ocean', module: '../examples/fft-ocean/example.ts', exportName: 'renderThumb' },
 ];
 
-const customRendererEntries = (await Promise.all([
-  { slug: 'gradient', module: undefined, exportName: undefined },
-  ...legacyRendererEntries,
-].map(async (legacy) => {
-  const rendererFile = path.join(docsDir, 'examples', legacy.slug, 'renderer.ts');
-  const source = await readFile(rendererFile, 'utf8').catch((error) => {
-    if (error?.code === 'ENOENT') return '';
-    throw error;
-  });
-  const hasStandardExport = /export\s+(?:async\s+)?function\s+renderThumbnail\b|export\s+const\s+renderThumbnail\b/.test(source);
-  if (hasStandardExport) {
-    return { slug: legacy.slug, module: `../examples/${legacy.slug}/renderer.ts`, exportName: 'renderThumbnail' };
-  }
-  return legacy.module && legacy.exportName ? legacy : undefined;
-}))).filter(Boolean);
+const customRendererEntries = [...standardRendererEntries, ...legacyRendererEntries];
 
 const sizes = args.proofDir ? { proof: [160, 90] } : {
   card: [1280, 720],
