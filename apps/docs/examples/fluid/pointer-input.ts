@@ -8,8 +8,9 @@ export interface StirInput {
   dispose(): void;
 }
 
-export function installStirInput(canvas: HTMLCanvasElement, showOverlay = true): StirInput {
+export function installStirInput(canvas: HTMLCanvasElement): StirInput {
   let pressed = false;
+  let activePointerId = -1;
   let from: [number, number] = [.5, .5];
   let to: [number, number] = [.5, .5];
   let velocity: [number, number] = [0, 0];
@@ -17,32 +18,22 @@ export function installStirInput(canvas: HTMLCanvasElement, showOverlay = true):
   let decay = 0;
   let stroke = 0;
   const previousTouchAction = canvas.style.touchAction;
-  const parent = canvas.parentElement;
-  const previousParentPosition = parent?.style.position ?? '';
-  let changedParentPosition = false;
   canvas.style.touchAction = 'none';
-
-  const overlay = showOverlay ? document.createElement('div') : undefined;
-  if (overlay) {
-    overlay.textContent = 'move to stir';
-    Object.assign(overlay.style, { position: 'absolute', left: '50%', bottom: '18px', transform: 'translateX(-50%)', color: 'rgba(255,255,255,.8)', font: '500 12px system-ui', letterSpacing: '.08em', textTransform: 'uppercase', pointerEvents: 'none', transition: 'opacity 400ms', zIndex: '2' });
-    if (parent) { if (getComputedStyle(parent).position === 'static') { parent.style.position = 'relative'; changedParentPosition = true; } parent.append(overlay); }
-  }
 
   const point = (event: PointerEvent): [number, number] => {
     const r = canvas.getBoundingClientRect();
     return [Math.max(0, Math.min(1, (event.clientX - r.left) / Math.max(1, r.width))), Math.max(0, Math.min(1, 1 - (event.clientY - r.top) / Math.max(1, r.height)))];
   };
   const down = (event: PointerEvent) => {
-    if (!event.isPrimary) return;
+    if (!event.isPrimary || pressed) return;
     canvas.setPointerCapture(event.pointerId);
+    activePointerId = event.pointerId;
     pressed = true;
     stroke++;
     from = to = point(event);
     lastTime = event.timeStamp;
     velocity = [0, 0];
     decay = 2;
-    if (overlay) overlay.style.opacity = '0';
   };
   const move = (event: PointerEvent) => {
     if (!event.isPrimary) return;
@@ -61,15 +52,14 @@ export function installStirInput(canvas: HTMLCanvasElement, showOverlay = true):
     ];
     lastTime = event.timeStamp;
     decay = 2;
-    if (overlay) overlay.style.opacity = '0';
   };
-  const up = (event: PointerEvent) => { if (event.isPrimary) { pressed = false; decay = 2; } };
+  const up = (event: PointerEvent) => { if (event.isPrimary && event.pointerId === activePointerId) { if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId); pressed = false; activePointerId = -1; decay = 2; } };
   const leave = () => { if (!pressed) { lastTime = 0; decay = 0; } };
   canvas.addEventListener('pointerdown', down); canvas.addEventListener('pointermove', move); canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up); canvas.addEventListener('pointerleave', leave);
 
   return {
     get active() { return pressed || decay > 0; }, get from() { return from; }, get to() { return to; }, get velocity() { return velocity; }, get stroke() { return stroke; },
     consumeStep() { from = to; if (!pressed && decay > 0) { velocity = [velocity[0] * .45, velocity[1] * .45]; decay--; } },
-    dispose() { canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('pointermove', move); canvas.removeEventListener('pointerup', up); canvas.removeEventListener('pointercancel', up); canvas.removeEventListener('pointerleave', leave); overlay?.remove(); canvas.style.touchAction = previousTouchAction; if (changedParentPosition && parent) parent.style.position = previousParentPosition; },
+    dispose() { canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('pointermove', move); canvas.removeEventListener('pointerup', up); canvas.removeEventListener('pointercancel', up); canvas.removeEventListener('pointerleave', leave); if (pressed && canvas.hasPointerCapture?.(activePointerId)) canvas.releasePointerCapture(activePointerId); pressed = false; canvas.style.touchAction = previousTouchAction; },
   };
 }
