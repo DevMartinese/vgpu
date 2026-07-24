@@ -1,5 +1,5 @@
 import type { Bundle, Gpu, Surface, Target } from 'vgpu';
-import type { StirInput } from './controls';
+import type { StirInput } from './pointer-input';
 import { GRID_HEIGHT, GRID_WIDTH, idleEmitters } from './math';
 import advectVelocityWgsl from './advect-velocity.wgsl';
 import curlWgsl from './curl.wgsl';
