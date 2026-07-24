@@ -93,10 +93,18 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     loop = gpu.frame.loop((frame) => render(frame, scene!, blit!, target!, surface!, gpu!.time));
   };
 
+  function handleFailure(error: unknown): void {
+    if (disposed) return;
+    if (!reportedError) {
+      reportedError = true;
+      try { options.onError?.(error); } catch { /* error reporting must not block teardown */ }
+    }
+    dispose();
+  }
+
   const ready = initialize().catch((error: unknown) => {
     if (disposed) return;
-    if (!reportedError) { reportedError = true; options.onError?.(error); }
-    dispose();
+    handleFailure(error);
     throw error;
   });
 
@@ -105,18 +113,22 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
 
 export async function renderThumbnail(gpu: Gpu, output: Target, opts: ThumbOptions = {}): Promise<void> {
   const target = gpu.target({ size: output.size, format: 'rgba8unorm', depth: true });
-  const blit = createBlit(gpu, target, output);
-  const scene = await createScene(gpu, target);
-  await blit.compile(output);
-  let time = opts.time ?? 2.4;
-  for (let i = 0; i < (opts.warmupFrames ?? 3); i++) {
-    time += opts.dt ?? 1 / 60;
-    gpu.frame((frame) => render(frame, scene, blit, target, output, time));
+  let scene: Scene | undefined;
+  try {
+    const blit = createBlit(gpu, target, output);
+    scene = await createScene(gpu, target);
+    await blit.compile(output);
+    let time = opts.time ?? 2.4;
+    for (let i = 0; i < (opts.warmupFrames ?? 3); i++) {
+      time += opts.dt ?? 1 / 60;
+      gpu.frame((frame) => render(frame, scene!, blit, target, output, time));
+    }
+    await gpu.gpu.queue.onSubmittedWorkDone();
+    await gpu.settled();
+  } finally {
+    scene?.mesh.destroy();
+    (target as { destroy?: () => void }).destroy?.();
   }
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
-  scene.mesh.destroy();
-  (target as { destroy?: () => void }).destroy?.();
 }
 
 async function createScene(gpu: Gpu, target: Target): Promise<Scene> {
@@ -131,22 +143,27 @@ async function createScene(gpu: Gpu, target: Target): Promise<Scene> {
     label: 'batch-rendering-packed-primitives',
     buffers: [{ data, stride: 36, attributes: { position: 'float32x3', normal: 'float32x3', color: 'float32x3' } }],
   });
-  const slices = counts.map((vertexCount, i) => mesh.slice({
-    firstVertex: counts.slice(0, i).reduce((a, b) => a + b, 0), vertexCount, label: ['cubes', 'pyramids', 'octahedra', 'icosahedra'][i],
-  }));
-  const draws = slices.map((slice, i) => gpu.draw({ shader: sceneWgsl, mesh: slice, label: `batch-${i}` }));
-  const initial = camera(2.4, target);
-  for (const draw of draws) draw.set({ light: [-0.45, -0.75, -0.35], time: 2.4, viewProjection: initial });
-  await Promise.all(draws.map((draw) => draw.compile(target)));
-  // Slices freeze their ranges; this bundle also captures the pyramid's equivalent call-level override.
-  // A changing range would require a direct pass.draw override or re-recording the bundle.
-  const bundle = gpu.bundle({ target, label: 'batch-rendering-primitives' }, (b) => {
-    b.draw(draws[0]!);
-    b.draw(draws[1]!, { firstVertex: slices[1]!.firstVertex, vertices: slices[1]!.vertexCount });
-    b.draw(draws[2]!);
-    b.draw(draws[3]!);
-  });
-  return { mesh, draws, bundle };
+  try {
+    const slices = counts.map((vertexCount, i) => mesh.slice({
+      firstVertex: counts.slice(0, i).reduce((a, b) => a + b, 0), vertexCount, label: ['cubes', 'pyramids', 'octahedra', 'icosahedra'][i],
+    }));
+    const draws = slices.map((slice, i) => gpu.draw({ shader: sceneWgsl, mesh: slice, label: `batch-${i}` }));
+    const initial = camera(2.4, target);
+    for (const draw of draws) draw.set({ light: [-0.45, -0.75, -0.35], time: 2.4, viewProjection: initial });
+    await Promise.all(draws.map((draw) => draw.compile(target)));
+    // Slices freeze their ranges; this bundle also captures the pyramid's equivalent call-level override.
+    // A changing range would require a direct pass.draw override or re-recording the bundle.
+    const bundle = gpu.bundle({ target, label: 'batch-rendering-primitives' }, (b) => {
+      b.draw(draws[0]!);
+      b.draw(draws[1]!, { firstVertex: slices[1]!.firstVertex, vertices: slices[1]!.vertexCount });
+      b.draw(draws[2]!);
+      b.draw(draws[3]!);
+    });
+    return { mesh, draws, bundle };
+  } catch (error) {
+    mesh.destroy();
+    throw error;
+  }
 }
 
 function render(frame: Frame, scene: Scene, blit: Effect, target: Target, output: Output, time: number): void {
