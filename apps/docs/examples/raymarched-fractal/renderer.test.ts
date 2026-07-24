@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock('vgpu', () => ({ init: mocks.init }));
 
-import { createRenderer } from './renderer';
+import { createRenderer, renderThumbnail } from './renderer';
 
 const canvas = {
   style: { touchAction: '' },
@@ -12,6 +12,26 @@ const canvas = {
 } as unknown as HTMLCanvasElement;
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+test('thumbnail prewarm failure waits for submitted work and destroys all targets', async () => {
+  const failure = new Error('prewarm failed');
+  let effectIndex = 0;
+  const effect = vi.fn(() => ({
+    set: vi.fn(),
+    compile: effectIndex++ === 0 ? vi.fn(async () => { throw failure; }) : vi.fn(async () => {}),
+  }));
+  const destroyed = [vi.fn(), vi.fn(), vi.fn()];
+  let targetIndex = 0;
+  const target = vi.fn(() => ({
+    size: [100, 50] as const, format: 'rgba16float', texelSize: [0.01, 0.02],
+    color: { destroy: destroyed[targetIndex++]! }, resize: vi.fn(),
+  }));
+  const onSubmittedWorkDone = vi.fn(async () => {});
+  const gpu = { effect, sampler: vi.fn(() => ({})), target, gpu: { queue: { onSubmittedWorkDone } } };
+  await expect(renderThumbnail(gpu as never, { size: [100, 50], format: 'rgba8unorm' } as never)).rejects.toBe(failure);
+  expect(onSubmittedWorkDone).toHaveBeenCalledOnce();
+  for (const destroy of destroyed) expect(destroy).toHaveBeenCalledOnce();
+});
 
 test('dispose before readiness is idempotent and destroys a GPU that resolves late', async () => {
   vi.stubGlobal('window', { devicePixelRatio: 1, addEventListener: vi.fn(), removeEventListener: vi.fn() });

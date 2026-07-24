@@ -1,3 +1,5 @@
+import type { ExampleMetaDefinition } from '../../lib/example-meta';
+
 export const meta = {
   slug: 'raymarched-fractal',
   title: 'Raymarched fractal',
@@ -6,4 +8,4 @@ export const meta = {
   capabilities: ['webgpu', 'demand-rendering', 'pointer-orbit', 'multi-pass', 'responsive-canvas'],
   thumb: { warmupFrames: 1 },
   files: ['index.tsx', 'renderer.ts', 'pointer-input.ts', 'fractal-math.ts', 'fractal.wgsl', 'bright-pass.wgsl', 'blur.wgsl', 'composite.wgsl'],
-} as const;
+} as const satisfies ExampleMetaDefinition;
