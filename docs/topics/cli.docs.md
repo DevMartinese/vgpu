@@ -149,7 +149,7 @@ npx vgpu doctor --pretty
 
 ## examples
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu examples` commands let you search and inspect the source code of the vgpu example gallery without cloning the repository. Use `search` to find examples, `show` to list an example's files and metadata, `cat` to print a single file, and `pull` to copy an example's complete source into a local directory.
 
 ```text
 vgpu examples — inspect canonical gallery source (never executes code)
