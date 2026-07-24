@@ -14,7 +14,8 @@ const componentsFile = path.join(docsDir, 'lib', 'example-components.ts');
 const runnersFile = path.join(docsDir, 'lib', 'example-runners.ts');
 
 function normalizeLf(source) {
-  return source.replace(/\r\n?/g, '\n');
+  const normalized = source.replace(/\r\n?/g, '\n');
+  return normalized.endsWith('\n') ? normalized : `${normalized}\n`;
 }
 
 function languageFor(file) {

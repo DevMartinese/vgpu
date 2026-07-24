@@ -30,6 +30,10 @@ test('generated metadata and files preserve the canonical and explicit order', (
     expect(generated.title).toBe(metadata.title);
     expect(generated.description).toBe(metadata.description);
     expect(generated.files.map((file) => file.path)).toEqual(metadata.files);
+    for (const file of generated.files) {
+      expect(file.content.endsWith('\n')).toBe(true);
+      expect(file.content).not.toContain('\r');
+    }
   }
 });
 
