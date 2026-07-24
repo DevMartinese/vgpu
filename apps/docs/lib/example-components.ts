@@ -8,16 +8,16 @@ export interface ExampleComponentModule {
 export type ExampleComponentLoader = () => Promise<ExampleComponentModule>;
 
 export const exampleComponentLoaders = {
-  gradient: () => import('../examples/gradient'),
-  'triangle-led-front': () => import('../examples/triangle-led-front'),
-  'anti-aliasing': () => import('../examples/anti-aliasing'),
-  'post-processing': () => import('../examples/post-processing'),
-  'black-hole': () => import('../examples/black-hole'),
-  fluid: () => import('../examples/fluid'),
-  'instanced-rendering': () => import('../examples/instanced-rendering'),
-  'batch-rendering': () => import('../examples/batch-rendering'),
-  'fft-ocean': () => import('../examples/fft-ocean'),
-  'raymarched-fractal': () => import('../examples/raymarched-fractal'),
+  gradient: () => import('../examples/gradient/index'),
+  'triangle-led-front': () => import('../examples/triangle-led-front/index'),
+  'anti-aliasing': () => import('../examples/anti-aliasing/index'),
+  'post-processing': () => import('../examples/post-processing/index'),
+  'black-hole': () => import('../examples/black-hole/index'),
+  fluid: () => import('../examples/fluid/index'),
+  'instanced-rendering': () => import('../examples/instanced-rendering/index'),
+  'batch-rendering': () => import('../examples/batch-rendering/index'),
+  'fft-ocean': () => import('../examples/fft-ocean/index'),
+  'raymarched-fractal': () => import('../examples/raymarched-fractal/index'),
 } satisfies Record<ExampleSlug, ExampleComponentLoader>;
 
 export function getExampleComponentLoader(slug: ExampleSlug): ExampleComponentLoader {
