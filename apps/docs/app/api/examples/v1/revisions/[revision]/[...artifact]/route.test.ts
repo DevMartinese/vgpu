@@ -3,14 +3,15 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createLegacyByteGraph } from '../../../../../../../lib/examples-api/adapter-v0';
+import { exampleSources } from '../../../../../../../lib/examples-source.generated';
+import { adaptCanonicalSourceExport } from '../../../../../../../lib/examples-api/adapter-v1';
 import { generateExampleArtifacts, writeArtifactTree } from '../../../../../../../lib/examples-api/artifact-generator';
 import * as discoveryRoute from '../../../../../../.well-known/vgpu-examples.json/route';
 import * as latestRoute from '../../../latest.json/route';
 import * as revisionRoute from './route';
 
 const origin = 'https://vgpu.labs.vercel.dev';
-const graph = createLegacyByteGraph({ repository: 'https://github.com/vgpu/vgpu', gitCommit: '75cd72b10d1cd8e629391f9fc6276c50e3553d26' });
+const graph = adaptCanonicalSourceExport(exampleSources, { repository: 'https://github.com/vgpu/vgpu', gitCommit: '62d8f7227850d1d792e8bbf71b9568d74d4eb414' });
 const set = generateExampleArtifacts(graph);
 let root: string;
 const previousMode = process.env.VGPU_EXAMPLES_ARTIFACT_STORE;

@@ -2,7 +2,7 @@
 
 Date: 2026-07-24
 
-This is evidence only. It does not activate adapter v1, replace checked-in adapter-v0 artifacts, or open the production publish gate.
+This report records the pre-integration evidence. Adapter v1 was activated only after the React migration merged to main and the author approved the integration flip.
 
 ## Inputs
 
@@ -85,11 +85,13 @@ fft-ocean: index.tsx, renderer.ts, ocean-graph.ts, tuning.ts, camera.ts, ocean-c
 raymarched-fractal: index.tsx, renderer.ts, pointer-input.ts, fractal-math.ts, fractal.wgsl, bright-pass.wgsl, blur.wgsl, composite.wgsl
 ```
 
-## Later integration flip
+## Integration flip
 
-After the React branch merges to main, controlled vocabulary reconciliation passes, and the author approves launch:
+After the React migration merged to main and the author approved launch, the integration commit:
 
-1. Switch the generation script from `createLegacyByteGraph`/adapter v0 to `adaptCanonicalSourceExport(exampleSources, source)`/adapter v1.
-2. Regenerate and review the checked-in artifact tree; rerun all byte, schema, vocabulary, determinism, route, CLI E2E, and production-build gates.
-3. Change the script's `publicAdapter` launch guard from `v0` to `v1` (or remove the now-satisfied adapter-v0 block) in the same reviewed integration commit.
-4. Perform the author-approved publish: create/verify immutable objects, verify deployed routes, advance discovery, and advance/verify latest last.
+1. switched generation to `adaptCanonicalSourceExport(exampleSources, source)`/adapter v1;
+2. regenerated and reviewed the checked-in artifact tree;
+3. removed the now-satisfied adapter-v0 publication block; and
+4. reran byte, schema, vocabulary, determinism, route, CLI E2E, and production-build gates.
+
+Production publishing remains an explicit operator action: create and verify immutable objects, verify deployed routes, advance discovery, and advance and verify latest last.

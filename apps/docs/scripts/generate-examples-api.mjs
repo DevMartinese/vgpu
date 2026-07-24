@@ -13,10 +13,6 @@ const commit = process.env.VGPU_EXAMPLES_GIT_COMMIT ?? execFileSync(
   { cwd: root, encoding: 'utf8' },
 ).trim();
 const publish = process.argv.includes('--publish');
-const publicAdapter = 'v0'; // Phase 4 changes this only alongside the adapter-v1 import/parity gate.
-if (publish && publicAdapter !== 'v1') {
-  throw new Error('Production publish blocked until adapter-v1 all-ten parity is committed');
-}
 const deploymentUrl = process.env.VERCEL_DEPLOYMENT_URL;
 if (publish && !deploymentUrl) throw new Error('Missing VERCEL_DEPLOYMENT_URL for pre-pointer verification');
 const temporaryDirectory = await mkdtemp(resolve(tmpdir(), 'vgpu-examples-generator-'));
@@ -26,12 +22,13 @@ try {
   await build({
     stdin: {
       contents: `
-        import { createLegacyByteGraph } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/adapter-v0.ts'))};
+        import { exampleSources } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-source.generated.ts'))};
+        import { adaptCanonicalSourceExport } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/adapter-v1.ts'))};
         import { generateExampleArtifacts, writeArtifactTree } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/artifact-generator.ts'))};
         import { publishArtifactSet } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/publisher.ts'))};
         import { VercelBlobPublisher } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/vercel-blob-publisher.ts'))};
         import { sha256 } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/hashing.ts'))};
-        const graph = createLegacyByteGraph({ repository: 'https://github.com/vgpu/vgpu', gitCommit: ${JSON.stringify(commit)} });
+        const graph = adaptCanonicalSourceExport(exampleSources, { repository: 'https://github.com/vgpu/vgpu', gitCommit: ${JSON.stringify(commit)} });
         const set = generateExampleArtifacts(graph, ${JSON.stringify(process.env.VGPU_EXAMPLES_ORIGIN ?? 'https://vgpu.labs.vercel.dev')});
         await writeArtifactTree(set, ${JSON.stringify(output)});
         const verifyDeployed = async ({ artifacts }) => {
@@ -62,6 +59,13 @@ try {
       sourcefile: 'generate-examples-api-runner.ts',
       loader: 'ts',
     },
+    plugins: [{
+      name: 'server-only-stub',
+      setup(esbuild) {
+        esbuild.onResolve({ filter: /^server-only$/ }, () => ({ path: 'server-only', namespace: 'server-only-stub' }));
+        esbuild.onLoad({ filter: /.*/, namespace: 'server-only-stub' }, () => ({ contents: '' }));
+      },
+    }],
     outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node20', logLevel: 'silent',
   });
   await import(`${pathToFileURL(bundle).href}?${Date.now()}`);

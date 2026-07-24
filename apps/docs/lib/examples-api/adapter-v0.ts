@@ -1,14 +1,3 @@
-import { exampleSources, type ExampleSourceFile } from '../examples-source.generated';
-import { meta as gradient } from '../../examples/gradient/meta';
-import { meta as triangleLedFront } from '../../examples/triangle-led-front/meta';
-import { meta as antiAliasing } from '../../examples/anti-aliasing/meta';
-import { meta as postProcessing } from '../../examples/post-processing/meta';
-import { meta as blackHole } from '../../examples/black-hole/meta';
-import { meta as fluid } from '../../examples/fluid/meta';
-import { meta as instancedRendering } from '../../examples/instanced-rendering/meta';
-import { meta as batchRendering } from '../../examples/batch-rendering/meta';
-import { meta as fftOcean } from '../../examples/fft-ocean/meta';
-import { meta as raymarchedFractal } from '../../examples/raymarched-fractal/meta';
 import type { ExampleByteGraph, ExampleGraphSource, ExampleMetadata, UnhashedExampleRecord } from './byte-graph';
 import { buildByteGraph } from './hashing';
 
@@ -18,13 +7,13 @@ export interface LegacyMeta {
   readonly description: string;
 }
 
-const orderedMetas: readonly LegacyMeta[] = [
-  gradient, triangleLedFront, antiAliasing, postProcessing, blackHole,
-  fluid, instancedRendering, batchRendering, fftOcean, raymarchedFractal,
-];
+export interface LegacySourceFile {
+  readonly name: string;
+  readonly code: string;
+}
 
-// v0 supplies controlled metadata absent from the regex-era meta files. It is removed
-// when adapter-v1 switches to React's typed data-only metadata contract.
+// Historical v0 metadata remains available for compatibility tests and retained
+// artifact archaeology. Public generation uses adapter v1.
 const legacyVocabulary: Readonly<Record<string, Pick<ExampleMetadata, 'tags' | 'capabilities'>>> = {
   gradient: { tags: ['gradient', 'rendering'], capabilities: [] },
   'triangle-led-front': { tags: ['animation', 'rendering'], capabilities: ['controls'] },
@@ -42,7 +31,7 @@ const legacyVocabulary: Readonly<Record<string, Pick<ExampleMetadata, 'tags' | '
 };
 
 export function adaptLegacySources(
-  sources: Readonly<Record<string, readonly ExampleSourceFile[]>>,
+  sources: Readonly<Record<string, readonly LegacySourceFile[]>>,
   metas: readonly LegacyMeta[],
   source: ExampleGraphSource,
 ): ExampleByteGraph {
@@ -62,10 +51,6 @@ export function adaptLegacySources(
     };
   });
   return buildByteGraph(records, source);
-}
-
-export function createLegacyByteGraph(source: ExampleGraphSource): ExampleByteGraph {
-  return adaptLegacySources(exampleSources, orderedMetas, source);
 }
 
 function contentType(path: string): 'text/typescript' | 'text/wgsl' | 'text/plain' {

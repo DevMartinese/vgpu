@@ -17,7 +17,7 @@ export interface CanonicalSourceExportRecord {
 
 /**
  * Adapts React's data-only generated export without sorting or transforming bytes.
- * Public generation remains on adapter-v0 until the all-ten migration checkpoint.
+ * This is the public artifact-generation adapter after the all-ten migration checkpoint.
  */
 export function adaptCanonicalSourceExport(
   exported: Readonly<Record<string, CanonicalSourceExportRecord>>,

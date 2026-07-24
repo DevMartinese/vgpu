@@ -2,12 +2,13 @@ import { mkdtemp, readdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createLegacyByteGraph } from './adapter-v0';
+import { exampleSources } from '../examples-source.generated';
+import { adaptCanonicalSourceExport } from './adapter-v1';
 import { generateExampleArtifacts } from './artifact-generator';
 import { LocalFsPublisher } from './local-fs-publisher';
 import { publishArtifactSet, type ArtifactPublisher } from './publisher';
 
-const set = generateExampleArtifacts(createLegacyByteGraph({ repository: 'repo', gitCommit: 'abc' }));
+const set = generateExampleArtifacts(adaptCanonicalSourceExport(exampleSources, { repository: 'repo', gitCommit: 'abc' }));
 
 describe('LocalFsPublisher', () => {
   it('publishes immutable revisions create-only and advances the pointer last', async () => {
@@ -76,7 +77,7 @@ describe('LocalFsPublisher', () => {
     const publisher = new LocalFsPublisher(root);
     await publishArtifactSet(publisher, set);
     const old = set.artifacts.find((artifact) => artifact.immutable)!;
-    const changedGraph = createLegacyByteGraph({ repository: 'repo', gitCommit: 'def' });
+    const changedGraph = adaptCanonicalSourceExport(exampleSources, { repository: 'repo', gitCommit: 'def' });
     await publishArtifactSet(publisher, generateExampleArtifacts(changedGraph));
     expect(await publisher.get(old.key)).toEqual(old.bytes);
   });

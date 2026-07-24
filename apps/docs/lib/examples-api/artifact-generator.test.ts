@@ -2,11 +2,12 @@ import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createLegacyByteGraph } from './adapter-v0';
+import { exampleSources } from '../examples-source.generated';
+import { adaptCanonicalSourceExport } from './adapter-v1';
 import { generateExampleArtifacts, writeArtifactTree } from './artifact-generator';
 import { canonicalRevisionBytes, sha256 } from './hashing';
 
-const graph = createLegacyByteGraph({ repository: 'https://github.com/vgpu/vgpu', gitCommit: '75cd72b10d1cd8e629391f9fc6276c50e3553d26' });
+const graph = adaptCanonicalSourceExport(exampleSources, { repository: 'https://github.com/vgpu/vgpu', gitCommit: '62d8f7227850d1d792e8bbf71b9568d74d4eb414' });
 
 async function tree(root: string, dir = root): Promise<Record<string, string>> {
   const output: Record<string, string> = {};

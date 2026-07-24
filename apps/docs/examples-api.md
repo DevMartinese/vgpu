@@ -38,9 +38,9 @@ Run `.github/workflows/publish-examples-api.yml` manually only after the matchin
 4. Add environment variables `VGPU_EXAMPLES_ORIGIN=https://vgpu.labs.vercel.dev` and `VGPU_EXAMPLES_BLOB_PREFIX=examples/v1` to that GitHub environment.
 5. Add production variables to the Vercel docs project: `VGPU_EXAMPLES_ARTIFACT_STORE=blob` and `VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN=<same store token>`. Preview/local production builds must explicitly use `VGPU_EXAMPLES_ARTIFACT_STORE=local` and `VGPU_EXAMPLES_LOCAL_ROOT=<absolute generated tree>` instead.
 6. Ensure `vgpu.labs.vercel.dev` targets this same docs deployment. The v1 discovery, latest, and revision responses must remain on this host.
-7. Deploy docs first. Then run the publisher workflow with its `VERCEL_DEPLOYMENT_URL`; never publish before the React all-ten adapter-v1 parity gate and author approval.
+7. Deploy docs first. Then run the publisher workflow with its `VERCEL_DEPLOYMENT_URL`. The adapter-v1 all-ten parity gate and integration approval were completed before enabling this step.
 
-The generator currently hard-blocks `--publish` with `Production publish blocked until adapter-v1 all-ten parity is committed`. Phase 4 may change that gate only in the same reviewed change that switches the import to adapter v1 and proves all-ten byte parity.
+The generator now consumes the canonical adapter-v1 export. `--publish` still requires `VERCEL_DEPLOYMENT_URL` and the configured Vercel Blob credentials; immutable verification and the latest-pointer-last transaction remain mandatory.
 
 Production will intentionally return a storage error if Blob mode is selected without the exact token; it does not silently fall back to deployment files.
 
