@@ -1,130 +1,34 @@
 import type { Draw, Effect, Frame, Gpu, Surface, Target } from 'vgpu';
-
-import blurWgsl from './blur.wgsl';
-import gradeWgsl from './grade.wgsl';
-import sceneWgsl from './scene.wgsl';
-import thresholdWgsl from './threshold.wgsl';
-import type { PostProcessingFlags } from './legacy-controls';
-
+import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
+import { DEFAULT_POST_PROCESSING_CONTROLS, type PostProcessingControls } from './types';
+import blurWgsl from './blur.wgsl'; import gradeWgsl from './grade.wgsl'; import sceneWgsl from './scene.wgsl'; import thresholdWgsl from './threshold.wgsl';
 export type PostProcessingMode = 'all-off' | 'bloom-only' | 'ca-only';
+interface ThumbOptions extends ThumbnailOptions { onModeRendered?: (mode: PostProcessingMode, pixels: Uint8Array, size: readonly [number, number]) => void | Promise<void> }
+interface EffectChain { scene: Draw; sceneVertexBuffer: GPUBuffer; threshold: Effect; blurH: Effect; blurV: Effect; grade: Effect; sampler: GPUSampler }
+interface ChainTargets { scene: Target; bright: Target; blurA: Target; blurB: Target }
+const FORMAT: GPUTextureFormat = 'rgba8unorm'; const SCENE_CLEAR: readonly [number, number, number, number] = [0.004, 0.006, 0.014, 1];
+const THUMB_MODES: readonly [PostProcessingMode, PostProcessingControls][] = [['all-off', { bloom: false, ca: false }], ['bloom-only', { bloom: true, ca: false }], ['ca-only', { bloom: false, ca: true }]];
 
-interface ThumbOptions {
-  warmupFrames?: number;
-  dt?: number;
-  time?: number;
-  onModeRendered?: (
-    mode: PostProcessingMode,
-    pixels: Uint8Array,
-    size: readonly [number, number],
-  ) => void | Promise<void>;
+export function createRenderer(options: BrowserRendererOptions<PostProcessingControls>): ExampleRenderer<PostProcessingControls> {
+ let disposed = false, reportedError = false; let controls = { ...(options.initialControls ?? DEFAULT_POST_PROCESSING_CONTROLS) };
+ let gpu: Gpu | undefined, surface: Surface | undefined, effects: EffectChain | undefined, targets: ChainTargets | undefined, loop: { stop(): void } | undefined, observer: ResizeObserver | undefined;
+ let resizeFrame = 0, pendingSize: RenderSize | undefined, lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+ const applyResize = () => { resizeFrame = 0; const size = pendingSize; pendingSize = undefined; if (disposed || !size || !gpu || !surface || !effects || !targets) return; destroyTargets(targets); targets = createTargets(gpu, [Math.max(1, Math.round(size.width * size.dpr)), Math.max(1, Math.round(size.height * size.dpr))], 'post-processing-live'); setChainBindings(effects, targets, surface); };
+ const resize = (size: RenderSize) => { if (disposed || size.width <= 0 || size.height <= 0) return; pendingSize = size; if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize); };
+ const measure = () => { const rect = options.canvas.getBoundingClientRect(); resize({ width: rect.width, height: rect.height, dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)) }); };
+ const onWindowResize = () => { if (window.devicePixelRatio === lastDpr) return; lastDpr = window.devicePixelRatio; measure(); };
+ const setControls = (next: Readonly<PostProcessingControls>) => { const valid = { bloom: Boolean(next.bloom), ca: Boolean(next.ca) }; if (disposed || (valid.bloom === controls.bloom && valid.ca === controls.ca)) return; controls = valid; if (effects) setGradeFlags(effects.grade, controls); };
+ const dispose = () => { if (disposed) return; disposed = true; loop?.stop(); loop = undefined; if (resizeFrame) cancelAnimationFrame(resizeFrame); resizeFrame = 0; pendingSize = undefined; observer?.disconnect(); observer = undefined; if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize); if (effects) destroyEffects(effects); effects = undefined; if (targets) destroyTargets(targets); targets = undefined; surface?.dispose(); surface = undefined; gpu?.dispose(); gpu = undefined; };
+ const initialize = async () => { const { init } = await import('vgpu'); if (disposed) return; const nextGpu = await init(); if (disposed) { nextGpu.dispose(); return; } gpu = nextGpu; surface = gpu.surface(options.canvas, { dpr: [1, 2] }); effects = createEffects(gpu, 'post-processing-live'); targets = createTargets(gpu, surface.size, 'post-processing-live'); await prewarm(effects, targets, surface); if (disposed) return; setChainConstants(effects); setChainBindings(effects, targets, surface); setGradeFlags(effects.grade, controls); observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure); observer?.observe(options.canvas); window.addEventListener('resize', onWindowResize); measure(); loop = gpu.frame.loop((frame) => { if (!disposed && effects && targets && surface && gpu) renderChain(frame, effects, targets, surface, gpu.time); }); };
+ const ready = initialize().catch((error: unknown) => { if (disposed) return; if (!reportedError) { reportedError = true; options.onError?.(error); } dispose(); throw error; });
+ return { ready, setControls, invalidate() {}, resize, dispose };
 }
 
-interface EffectChain {
-  scene: Draw;
-  sceneVertexBuffer: GPUBuffer;
-  threshold: Effect;
-  blurH: Effect;
-  blurV: Effect;
-  grade: Effect;
-  sampler: GPUSampler;
-}
-
-interface ChainTargets {
-  scene: Target;
-  bright: Target;
-  blurA: Target;
-  blurB: Target;
-}
-
-const FORMAT: GPUTextureFormat = 'rgba8unorm';
-const SCENE_CLEAR: readonly [number, number, number, number] = [0.004, 0.006, 0.014, 1];
-const DEFAULT_FLAGS: PostProcessingFlags = { bloom: true, ca: true };
-const THUMB_MODES: readonly [PostProcessingMode, PostProcessingFlags][] = [
-  ['all-off', { bloom: false, ca: false }],
-  ['bloom-only', { bloom: true, ca: false }],
-  ['ca-only', { bloom: false, ca: true }],
-];
-
-export async function run(canvas: HTMLCanvasElement): Promise<() => void> {
-  const { init } = await import('vgpu');
-  const { installControls } = await import('./legacy-controls');
-  const gpu = await init();
-  const surface = gpu.surface(canvas, { dpr: [1, 2] });
-  const effects = createEffects(gpu, 'post-processing-live');
-  let targets = createTargets(gpu, surface.size, 'post-processing-live');
-  const controls = installControls(canvas);
-  let disposed = false;
-
-  await prewarm(effects, targets, surface);
-  setChainConstants(effects);
-  setChainBindings(effects, targets, surface);
-  setGradeFlags(effects.grade, controls.getFlags());
-  // Toggle state is event-driven: uniforms are written only when a checkbox changes.
-  const unsubscribeFlags = controls.onFlagsChange((flags) => setGradeFlags(effects.grade, flags));
-
-  let sawInitialResize = false;
-  const unsubscribeResize = surface.onResize(() => {
-    if (!sawInitialResize) {
-      sawInitialResize = true;
-      return;
-    }
-    if (disposed) return;
-    destroyTargets(targets);
-    targets = createTargets(gpu, surface.size, 'post-processing-live');
-    setChainBindings(effects, targets, surface);
-  });
-
-  const handle = gpu.frame.loop((frame) => {
-    renderChain(frame, effects, targets, surface, gpu.time);
-  });
-
-  return () => {
-    if (disposed) return;
-    disposed = true;
-    handle.stop();
-    unsubscribeResize();
-    unsubscribeFlags();
-    controls.dispose();
-    destroyEffects(effects);
-    destroyTargets(targets);
-    surface.dispose();
-    gpu.dispose();
-  };
-}
-
-export async function renderThumb(
-  gpu: Gpu,
-  target: Target,
-  opts: ThumbOptions = {},
-): Promise<void> {
-  const effects = createEffects(gpu, 'post-processing-thumb');
-  const targets = createTargets(gpu, target.size, 'post-processing-thumb');
-  await prewarm(effects, targets, target);
-  setChainConstants(effects);
-  setChainBindings(effects, targets, target);
-
-  const dt = opts.dt ?? 1 / 60;
-  let time = opts.time ?? 2.0;
-  // Render semantic captures at one fixed instant so every delta comes from the selected
-  // effect, never from animation. The gallery later finishes on the normal all-on state.
-  for (const [mode, flags] of THUMB_MODES) {
-    setGradeFlags(effects.grade, flags);
-    gpu.frame((frame) => renderChain(frame, effects, targets, target, time));
-    await gpu.gpu.queue.onSubmittedWorkDone();
-    await opts.onModeRendered?.(mode, await target.read(), target.size);
-  }
-
-  setGradeFlags(effects.grade, DEFAULT_FLAGS);
-  const warmupFrames = Math.max(1, opts.warmupFrames ?? 60);
-  for (let i = 0; i < warmupFrames; i += 1) {
-    time += dt;
-    gpu.frame((frame) => renderChain(frame, effects, targets, target, time));
-  }
-
-  await gpu.gpu.queue.onSubmittedWorkDone();
-  await gpu.settled();
-  destroyEffects(effects);
-  destroyTargets(targets);
+export async function renderThumbnail(gpu: Gpu, target: Target, opts: ThumbOptions = {}): Promise<void> {
+ const effects = createEffects(gpu, 'post-processing-thumb'), targets = createTargets(gpu, target.size, 'post-processing-thumb'); await prewarm(effects, targets, target); setChainConstants(effects); setChainBindings(effects, targets, target); const dt = opts.dt ?? 1 / 60; let time = opts.time ?? 2;
+ for (const [mode, flags] of THUMB_MODES) { setGradeFlags(effects.grade, flags); gpu.frame((frame) => renderChain(frame, effects, targets, target, time)); await gpu.gpu.queue.onSubmittedWorkDone(); await opts.onModeRendered?.(mode, await target.read(), target.size); }
+ setGradeFlags(effects.grade, DEFAULT_POST_PROCESSING_CONTROLS); for (let i = 0; i < Math.max(1, opts.warmupFrames ?? 60); i++) { time += dt; gpu.frame((frame) => renderChain(frame, effects, targets, target, time)); }
+ await gpu.gpu.queue.onSubmittedWorkDone(); await gpu.settled(); destroyEffects(effects); destroyTargets(targets);
 }
 
 function createEffects(gpu: Gpu, label: string): EffectChain {
@@ -208,7 +112,7 @@ function setChainBindings(effects: EffectChain, targets: ChainTargets, output: S
   effects.grade.set({ resolution: output.size, scene_tex: targets.scene, bloom_tex: targets.blurB });
 }
 
-function setGradeFlags(grade: Effect, flags: PostProcessingFlags): void {
+function setGradeFlags(grade: Effect, flags: PostProcessingControls): void {
   grade.set({
     bloomOn: flags.bloom ? 1 : 0,
     caOn: flags.ca ? 1 : 0,
