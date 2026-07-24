@@ -51,7 +51,7 @@ export function methodNotAllowedResponse(): Response {
 }
 
 function errorResponse(status: number, code: string, message: string): Response {
-  const body = `${JSON.stringify({ code, message })}\n`;
+  const body = `${JSON.stringify({ error: { code, message } })}\n`;
   return new Response(body, {
     status,
     headers: {

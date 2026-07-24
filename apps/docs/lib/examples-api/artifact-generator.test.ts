@@ -4,7 +4,7 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createLegacyByteGraph } from './adapter-v0';
 import { generateExampleArtifacts, writeArtifactTree } from './artifact-generator';
-import { sha256 } from './hashing';
+import { canonicalRevisionBytes, sha256 } from './hashing';
 
 const graph = createLegacyByteGraph({ repository: 'https://github.com/vgpu/vgpu', gitCommit: '75cd72b10d1cd8e629391f9fc6276c50e3553d26' });
 
@@ -45,5 +45,16 @@ describe('revision artifact generator', () => {
     const changed = structuredClone(graph);
     (changed.examples[0]!.files[0] as { text: string }).text += '// changed\n';
     expect(() => generateExampleArtifacts(changed)).toThrow(/integrity|revision/i);
+  });
+
+  it('rejects pointer URLs and source strings that violate the frozen index schema', () => {
+    expect(() => generateExampleArtifacts(graph, 'not a url')).toThrow(/origin|uri/i);
+
+    for (const field of ['repository', 'gitCommit'] as const) {
+      const emptySource = structuredClone(graph);
+      (emptySource.source as { repository: string; gitCommit: string })[field] = '';
+      (emptySource as { revision: string }).revision = sha256(canonicalRevisionBytes(emptySource));
+      expect(() => generateExampleArtifacts(emptySource)).toThrow(/source|repository|commit/i);
+    }
   });
 });

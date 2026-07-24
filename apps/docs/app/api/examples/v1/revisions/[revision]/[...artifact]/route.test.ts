@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -71,6 +71,9 @@ describe('examples API App Router handlers', () => {
     const post = await discoveryRoute.POST(request('/.well-known/vgpu-examples.json'));
     expect(post.status).toBe(405);
     expect(post.headers.get('allow')).toBe('GET, HEAD, OPTIONS');
+    expect(await post.json()).toEqual({
+      error: { code: 'VGPU-EXAMPLES-METHOD-NOT-ALLOWED', message: 'Only GET, HEAD, and OPTIONS are allowed' },
+    });
   });
 
   it('serves latest briefly and immutable revision bytes with declared content types', async () => {
@@ -120,6 +123,26 @@ describe('examples API App Router handlers', () => {
     expect((await manifest.json()).files.map(({ path }: { path: string }) => path)).toEqual(fractal.files.map(({ path }) => path));
   });
 
+  it('does not follow a symlinked local-store parent outside the configured root', async () => {
+    const unsafeRoot = await mkdtemp(resolve(tmpdir(), 'vgpu-route-symlink-root-'));
+    const external = await mkdtemp(resolve(tmpdir(), 'vgpu-route-symlink-external-'));
+    await symlink(external, resolve(unsafeRoot, '.well-known'), 'dir');
+    const discovery = set.artifacts.find((artifact) => artifact.key === set.discoveryKey)!;
+    await writeFile(resolve(external, 'vgpu-examples.json'), discovery.bytes);
+    process.env.VGPU_EXAMPLES_LOCAL_ROOT = unsafeRoot;
+    try {
+      const response = await discoveryRoute.GET(request('/.well-known/vgpu-examples.json'));
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: { code: 'VGPU-EXAMPLES-STORAGE', message: 'Artifact storage verification failed' },
+      });
+    } finally {
+      process.env.VGPU_EXAMPLES_LOCAL_ROOT = root;
+      await rm(unsafeRoot, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
+    }
+  });
+
   it('does not serve an allowlisted object beyond the source response cap', async () => {
     const revision = 'f'.repeat(64);
     const relative = ['examples', 'oversized', 'files', 'source.ts.raw'];
@@ -139,11 +162,20 @@ describe('examples API App Router handlers', () => {
     const missing = await revisionRoute.GET(request('/ignored'), context('0'.repeat(64), ['index.json']));
     expect(missing.status).toBe(404);
     expect(missing.headers.get('access-control-allow-origin')).toBe('*');
+    expect(await missing.json()).toEqual({
+      error: { code: 'VGPU-EXAMPLES-NOT-FOUND', message: 'Artifact not found' },
+    });
 
     const escaped = await revisionRoute.GET(request('/ignored'), context(set.revision, ['..', 'index.json']));
     expect(escaped.status).toBe(404);
+    expect(await escaped.json()).toEqual({
+      error: { code: 'VGPU-EXAMPLES-NOT-FOUND', message: 'Artifact not found' },
+    });
     const post = await revisionRoute.POST(request('/ignored'), context(set.revision, ['index.json']));
     expect(post.status).toBe(405);
+    expect(await post.json()).toEqual({
+      error: { code: 'VGPU-EXAMPLES-METHOD-NOT-ALLOWED', message: 'Only GET, HEAD, and OPTIONS are allowed' },
+    });
     expect(existsSync(resolve(process.cwd(), 'apps/docs/app/api/examples/v1/search/route.ts'))).toBe(false);
   });
 });

@@ -23,9 +23,10 @@ Response caps are 32 KiB for discovery/latest, 1 MiB for index/revision document
 3. fresh-read and verify size, content type, and SHA-256 for every retained object;
 4. update and verify discovery;
 5. verify the new index → `raymarched-fractal` manifest → raw file through the already-successful docs deployment;
-6. overwrite `examples/v1/latest.json` last.
+6. overwrite `examples/v1/latest.json` last;
+7. fresh-read latest without cache and verify its size, content type, and SHA-256 before reporting success.
 
-A failed create or verification leaves latest unchanged. Retrying is safe only when the retained object is byte-identical. Revisions are never deleted or overwritten.
+A failed create or pre-pointer verification leaves latest unchanged. A failed post-write latest verification fails publication loudly so operators do not treat an unverified pointer as successful. Retrying is safe only when the retained object is byte-identical. Revisions are never deleted or overwritten.
 
 Run `.github/workflows/publish-examples-api.yml` manually only after the matching docs commit has deployed successfully. Supply that successful deployment's URL as `deployment_url`; the workflow performs pre-pointer verification there and then verifies the official discovery chain after latest advances.
 

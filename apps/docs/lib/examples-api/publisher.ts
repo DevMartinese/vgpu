@@ -35,8 +35,10 @@ export async function publishArtifactSet(
   await publisher.advancePointer(discovery);
   await verifyPublishedObject(publisher, discovery);
   await options.beforeLatest?.(set);
-  // Publication transaction boundary: nothing after this write may fail.
+  // Latest is the publication transaction boundary. A fresh read must prove
+  // the mutable write retained the exact pointer before success is reported.
   await publisher.advancePointer(latest);
+  await verifyPublishedObject(publisher, latest);
 }
 
 export async function verifyPublishedObject(publisher: ArtifactPublisher, artifact: GeneratedArtifact): Promise<void> {

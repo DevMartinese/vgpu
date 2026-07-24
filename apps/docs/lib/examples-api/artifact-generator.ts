@@ -35,11 +35,12 @@ const url = (origin: string, key: string) => {
 
 export function generateExampleArtifacts(
   graph: ExampleByteGraph,
-  origin = EXAMPLES_ORIGIN,
+  origin: string = EXAMPLES_ORIGIN,
   minimumCliVersion = '0.1.6',
 ): GeneratedArtifactSet {
   verifyGraph(graph);
   const normalizedOrigin = origin.replace(/\/$/, '');
+  validateUri(normalizedOrigin, 'Artifact origin');
   const base = `${EXAMPLES_BLOB_PREFIX}/revisions/${graph.revision}`;
   const artifacts: GeneratedArtifact[] = [];
   const add = (key: string, bytes: Uint8Array, contentType: string, immutable: boolean) => {
@@ -112,6 +113,10 @@ export async function writeArtifactTree(set: GeneratedArtifactSet, outputDirecto
 }
 
 function verifyGraph(graph: ExampleByteGraph): void {
+  if (typeof graph.source.repository !== 'string' || graph.source.repository.length === 0 ||
+      typeof graph.source.gitCommit !== 'string' || graph.source.gitCommit.length === 0) {
+    throw new Error('Graph source repository and git commit must be non-empty strings');
+  }
   if (sha256(canonicalRevisionBytes(graph)) !== graph.revision) throw new Error('Graph revision hash mismatch');
   let total = 0;
   for (const example of graph.examples) {
@@ -123,4 +128,13 @@ function verifyGraph(graph: ExampleByteGraph): void {
     }
   }
   if (total > 32 * 1024 * 1024) throw new Error('Graph source exceeds 32 MiB');
+}
+
+function validateUri(value: string, name: string): void {
+  try {
+    const parsed = new URL(value);
+    if (!parsed.protocol) throw new Error('missing scheme');
+  } catch {
+    throw new Error(`${name} must be an absolute URI`);
+  }
 }

@@ -1,7 +1,7 @@
 import { get } from '@vercel/blob';
-import { lstat, readFile } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { sha256 } from './hashing';
+import { readSafeLocalFile } from './safe-local-path';
 import {
   DISCOVERY_ARTIFACT_KEY,
   LATEST_ARTIFACT_KEY,
@@ -86,16 +86,7 @@ async function readRawObject(key: string, maximumBytes: number): Promise<Uint8Ar
 async function readLocalObject(key: string, maximumBytes: number): Promise<Uint8Array | undefined> {
   const configuredRoot = process.env.VGPU_EXAMPLES_LOCAL_ROOT;
   const root = resolve(configuredRoot ?? resolve(process.cwd(), 'generated/examples-api'));
-  const destination = resolve(root, key);
-  if (!destination.startsWith(`${root}${sep}`)) return undefined;
-  try {
-    const stat = await lstat(destination);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maximumBytes) return undefined;
-    return new Uint8Array(await readFile(destination));
-  } catch (error) {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  }
+  return readSafeLocalFile(root, key, maximumBytes);
 }
 
 async function readBlobObject(key: string, maximumBytes: number): Promise<Uint8Array | undefined> {
@@ -126,8 +117,4 @@ async function readBlobObject(key: string, maximumBytes: number): Promise<Uint8A
 
 function withCharset(contentType: string): string {
   return contentType.startsWith('text/') && !contentType.includes(';') ? `${contentType}; charset=utf-8` : contentType;
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
 }

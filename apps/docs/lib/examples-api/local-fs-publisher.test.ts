@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,17 @@ describe('LocalFsPublisher', () => {
     const immutable = set.artifacts.find((artifact) => artifact.immutable)!;
     await expect(publisher.putImmutable(immutable)).rejects.toMatchObject({ code: 'EEXIST' });
     expect(await publisher.get(immutable.key)).toEqual(immutable.bytes);
+  });
+
+  it('rejects a symlinked parent instead of publishing outside its root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vgpu-publisher-symlink-'));
+    const external = await mkdtemp(join(tmpdir(), 'vgpu-publisher-external-'));
+    await symlink(external, join(root, 'examples'), 'dir');
+    const publisher = new LocalFsPublisher(root);
+    const immutable = set.artifacts.find((artifact) => artifact.immutable)!;
+
+    await expect(publisher.putImmutable(immutable)).rejects.toThrow(/symbolic link|unsafe/i);
+    expect(await readdir(external)).toEqual([]);
   });
 
   it('does not advance latest when immutable publication fails', async () => {
@@ -44,6 +55,20 @@ describe('LocalFsPublisher', () => {
     })).rejects.toThrow('injected deployment verification failure');
     expect(await publisher.get(set.latestKey)).toBeUndefined();
     expect(await publisher.get(set.discoveryKey)).toBeDefined();
+  });
+
+  it('fails loudly when the latest pointer write is not freshly retained', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vgpu-publisher-noop-latest-'));
+    const local = new LocalFsPublisher(root);
+    const noOpLatest: ArtifactPublisher = {
+      putImmutable: local.putImmutable.bind(local), get: local.get.bind(local), head: local.head.bind(local),
+      advancePointer: async (artifact) => {
+        if (artifact.key !== set.latestKey) await local.advancePointer(artifact);
+      },
+    };
+
+    await expect(publishArtifactSet(noOpLatest, set)).rejects.toThrow(`Published object head mismatch: ${set.latestKey}`);
+    expect(await local.get(set.latestKey)).toBeUndefined();
   });
 
   it('retains an old revision when a new latest revision is published', async () => {
