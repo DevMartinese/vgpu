@@ -12,8 +12,16 @@ export function createDeduplicatedExampleErrorReporter(
   return (error) => {
     if (reported) return;
     reported = true;
-    displayError(error);
-    postError(error);
+    try {
+      displayError(error);
+    } catch {
+      // Error reporting must never interfere with renderer teardown.
+    }
+    try {
+      postError(error);
+    } catch {
+      // Parent-window delivery is best-effort and isolated from display state.
+    }
   };
 }
 
