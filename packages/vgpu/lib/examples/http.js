@@ -26,7 +26,7 @@ export async function requestBytes(url,{fetchImpl=fetch,limit,contentTypes,etag,
  const length=response.headers.get('content-length'); if(length!==null&&(+length>limit||!Number.isSafeInteger(+length)||+length<0)){clearTimeout(timer); throw integrity(`Response exceeds ${limit} bytes`);}
  const chunks=[];let size=0;
  try { const reader=response.body?.getReader(); if(!reader) throw new Error('missing response body'); while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();throw integrity(`Response exceeds ${limit} bytes`);}chunks.push(value);} }
- catch(e){clearTimeout(timer);if(e?.code)throw e;throw network(`Truncated or timed out response: ${url}`);} clearTimeout(timer);
+ catch(e){clearTimeout(timer);if(typeof e?.code==='string'&&e.code.startsWith('VGPU-'))throw e;throw network(`Truncated or timed out response: ${url}`);} clearTimeout(timer);
  return {bytes:Buffer.concat(chunks.map(x=>Buffer.from(x)),size),etag:response.headers.get('etag')||undefined};
 }
 export async function requestJson(url,opts){const r=await requestBytes(url,opts);if(r.notModified)return r;try{return {...r,value:JSON.parse(r.bytes.toString('utf8'))};}catch{throw integrity(`Invalid JSON from ${url}`);}}
