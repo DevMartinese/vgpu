@@ -128,7 +128,7 @@ npx vgpu docs symbols
 
 ## doctor
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu doctor` command verifies that the current machine can render headless with vgpu. It runs its checks end to end — including a real render unless you pass `--no-render` — and prints a JSON verdict with suggested fixes. The command exits `0` when the environment is healthy and non-zero when it is not.
 
 ```text
 Usage: vgpu doctor [--no-render] [--pretty]
