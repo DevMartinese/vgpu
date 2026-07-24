@@ -1,3 +1,5 @@
+import type { ExampleMetaDefinition } from '../../lib/example-meta';
+
 export const meta = {
   slug: 'triangle-led-front',
   title: 'Triangle LED Hero',
@@ -31,4 +33,4 @@ export const meta = {
     'shaders/themes/dark/main-scene-floor.wgsl',
     'shaders/themes/light/main-scene-floor.wgsl',
   ],
-} as const;
+} as const satisfies ExampleMetaDefinition;
