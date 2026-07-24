@@ -33,13 +33,36 @@ export interface Fluid {
 }
 
 export function createFluid(gpu: Gpu): Fluid {
-  const velocity = gpu.pingPongStorage(CELLS * 8);
-  const dye = gpu.pingPongStorage(DYE_CELLS * 16);
-  const pressure = gpu.pingPongStorage(CELLS * 4);
-  const divergence = gpu.storage(CELLS * 4, 'read-write');
-  const curl = gpu.storage(CELLS * 4, 'read-write');
-  const passes = createPasses(gpu);
-  return { gpu, velocity, dye, pressure, divergence, curl, passes, step: 0, lastInputStep: -1000 };
+  const allocated: object[] = [];
+  try {
+    const velocity = gpu.pingPongStorage(CELLS * 8);
+    allocated.push(velocity.read, velocity.write);
+    const dye = gpu.pingPongStorage(DYE_CELLS * 16);
+    allocated.push(dye.read, dye.write);
+    const pressure = gpu.pingPongStorage(CELLS * 4);
+    allocated.push(pressure.read, pressure.write);
+    const divergence = gpu.storage(CELLS * 4, 'read-write');
+    allocated.push(divergence);
+    const curl = gpu.storage(CELLS * 4, 'read-write');
+    allocated.push(curl);
+    const passes = createPasses(gpu);
+    return { gpu, velocity, dye, pressure, divergence, curl, passes, step: 0, lastInputStep: -1000 };
+  } catch (error) {
+    for (const buffer of allocated) (buffer as { gpu?: GPUBuffer }).gpu?.destroy();
+    throw error;
+  }
+}
+
+export function destroyFluid(fluid: Fluid): void {
+  const buffers = [
+    fluid.velocity.read, fluid.velocity.write,
+    fluid.dye.read, fluid.dye.write,
+    fluid.pressure.read, fluid.pressure.write,
+    fluid.divergence, fluid.curl,
+  ];
+  for (const buffer of buffers) {
+    (buffer as typeof buffer & { gpu?: GPUBuffer }).gpu?.destroy();
+  }
 }
 
 function createPasses(gpu: Gpu) {

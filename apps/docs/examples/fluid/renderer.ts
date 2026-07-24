@@ -3,7 +3,7 @@ import type { Gpu, Surface, Target } from 'vgpu';
 import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
 import { fixedStepCount } from './math';
 import { installStirInput } from './pointer-input';
-import { createFluid, prepareFluid, renderFluid, stepFluid, type Fluid } from './simulation';
+import { createFluid, destroyFluid, prepareFluid, renderFluid, stepFluid, type Fluid } from './simulation';
 import { renderThumb, type FluidValidationStats } from './validation';
 
 export interface FluidThumbnailOptions extends ThumbnailOptions {
@@ -23,7 +23,9 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
   let unsubscribeResize: (() => void) | undefined;
   let animationFrame = 0;
   let resizeFrame = 0;
-  let prepareGeneration = 0;
+  let prepareRunning = false;
+  let prepareQueued = false;
+  let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
   let accumulator = 0;
   let previous = typeof performance === 'undefined' ? 0 : performance.now();
 
@@ -36,18 +38,36 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     dispose();
   };
 
-  const prepareCurrentOutput = () => {
+  const prepareCurrentOutput = async () => {
+    if (prepareRunning) { prepareQueued = true; return; }
+    prepareRunning = true;
+    try {
+      do {
+        prepareQueued = false;
+        if (disposed || !fluid || !surface) return;
+        await prepareFluid(fluid, surface);
+      } while (prepareQueued && !disposed);
+    } catch (error) {
+      reportFailure(error);
+    } finally {
+      prepareRunning = false;
+    }
+  };
+
+  const flushResize = () => {
     resizeFrame = 0;
-    if (disposed || !fluid || !surface) return;
-    const generation = ++prepareGeneration;
-    void prepareFluid(fluid, surface).then(() => {
-      if (disposed || generation !== prepareGeneration) return;
-    }, reportFailure);
+    void prepareCurrentOutput();
+  };
+
+  const requestResize = () => {
+    if (disposed) return;
+    prepareQueued = true;
+    if (!prepareRunning && !resizeFrame) resizeFrame = requestAnimationFrame(flushResize);
   };
 
   const resize = (size: RenderSize) => {
     if (disposed || size.width <= 0 || size.height <= 0) return;
-    if (!resizeFrame) resizeFrame = requestAnimationFrame(prepareCurrentOutput);
+    requestResize();
   };
 
   const measure = () => {
@@ -57,6 +77,12 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
       height: rect.height,
       dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
     });
+  };
+
+  const onWindowResize = () => {
+    if (window.devicePixelRatio === lastDpr) return;
+    lastDpr = window.devicePixelRatio;
+    measure();
   };
 
   const tick = (now: number) => {
@@ -75,17 +101,19 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
   function dispose() {
     if (disposed) return;
     disposed = true;
-    prepareGeneration++;
+    prepareQueued = false;
     if (animationFrame) cancelAnimationFrame(animationFrame);
     animationFrame = 0;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
     resizeFrame = 0;
     observer?.disconnect();
     observer = undefined;
+    if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
     unsubscribeResize?.();
     unsubscribeResize = undefined;
     input?.dispose();
     input = undefined;
+    if (fluid) destroyFluid(fluid);
     surface?.dispose();
     surface = undefined;
     gpu?.dispose();
@@ -104,9 +132,10 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     input = installStirInput(options.canvas);
     await prepareFluid(fluid, surface);
     if (disposed) return;
-    unsubscribeResize = surface.onResize(prepareCurrentOutput);
+    unsubscribeResize = surface.onResize(requestResize);
     observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
     observer?.observe(options.canvas);
+    window.addEventListener('resize', onWindowResize);
     previous = performance.now();
     animationFrame = requestAnimationFrame(tick);
   };
