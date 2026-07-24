@@ -7,7 +7,7 @@ vi.mock('vgpu', () => ({ init: mocks.init }));
 vi.mock('./scene-renderer', () => ({ createHeroRenderer: mocks.createHeroRenderer }));
 
 import { Controls } from './controls';
-import { createRenderer } from './renderer';
+import { createRenderer, renderThumbnail } from './renderer';
 import { DEFAULT_TRIANGLE_LED_CONTROLS } from './types';
 
 function deferred<T = void>() {
@@ -135,4 +135,70 @@ test('silences stale resize failures and disposes on the current generation fail
   expect(env.surface.dispose).toHaveBeenCalledOnce();
   expect(env.gpu.dispose).toHaveBeenCalledOnce();
   await renderer.ready;
+});
+
+test('a throwing error reporter cannot bypass initialization teardown', async () => {
+  const env = setup();
+  const initError = new Error('initial prewarm failed');
+  const onError = vi.fn(() => { throw new Error('reporter failed'); });
+  env.scene.prewarm.mockRejectedValueOnce(initError);
+
+  const renderer = createRenderer({ canvas: env.canvas, onError });
+  await expect(renderer.ready).rejects.toBe(initError);
+
+  expect(onError).toHaveBeenCalledOnce();
+  expect(onError).toHaveBeenCalledWith(initError);
+  expect(env.scene.destroy).toHaveBeenCalledOnce();
+  expect(env.surface.dispose).toHaveBeenCalledOnce();
+  expect(env.gpu.dispose).toHaveBeenCalledOnce();
+});
+
+test('a synchronous resize rebuild failure reports once and fully tears down', async () => {
+  const env = setup();
+  const resizeError = new Error('rebuild failed');
+  const onError = vi.fn();
+  const renderer = createRenderer({ canvas: env.canvas, onError });
+  await renderer.ready;
+  env.scene.rebuild.mockImplementationOnce(() => { throw resizeError; });
+
+  const entry = env.frames.entries().next().value as [number, FrameRequestCallback] | undefined;
+  expect(entry).toBeDefined();
+  env.frames.delete(entry![0]);
+  expect(() => entry![1](16)).not.toThrow();
+
+  expect(onError).toHaveBeenCalledOnce();
+  expect(onError).toHaveBeenCalledWith(resizeError);
+  expect(env.stop).toHaveBeenCalledOnce();
+  expect(env.disconnect).toHaveBeenCalledOnce();
+  expect(env.scene.destroy).toHaveBeenCalledOnce();
+  expect(env.surface.dispose).toHaveBeenCalledOnce();
+  expect(env.gpu.dispose).toHaveBeenCalledOnce();
+});
+
+test('thumbnail failure settles submitted work before destroying the scene', async () => {
+  const events: string[] = [];
+  const renderError = new Error('thumbnail render failed');
+  const scene = {
+    setOutputTarget: vi.fn(), setHero: vi.fn(), setRgbDeployActive: vi.fn(), setBrush: vi.fn(),
+    prewarm: vi.fn(async () => {}), renderFrame: vi.fn(),
+    destroy: vi.fn(() => { events.push('destroy'); }),
+  };
+  mocks.createHeroRenderer.mockReturnValueOnce(scene);
+  const frame = vi.fn(() => {
+    events.push('render');
+    throw renderError;
+  });
+  const gpu = {
+    frame,
+    gpu: { queue: { onSubmittedWorkDone: vi.fn(async () => {
+      events.push('drain');
+      throw new Error('queue drain failed');
+    }) } },
+    settled: vi.fn(async () => { events.push('settle'); }),
+  } as unknown as Parameters<typeof renderThumbnail>[0];
+  const target = { size: [200, 100] } as unknown as Parameters<typeof renderThumbnail>[1];
+
+  await expect(renderThumbnail(gpu, target, { warmupFrames: 1 })).rejects.toBe(renderError);
+  expect(events).toEqual(['render', 'drain', 'settle', 'destroy']);
+  expect(scene.destroy).toHaveBeenCalledOnce();
 });
