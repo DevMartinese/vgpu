@@ -1,4 +1,4 @@
-import { examples } from './examples-registry';
+import { examplesMetadata } from './examples-metadata';
 
 import {
   getGuideRecord,
@@ -63,7 +63,7 @@ const guideGroups = [
 ] as const;
 
 
-const exampleItems: NavItem[] = examples.map(({ meta }) => ({
+const exampleItems: NavItem[] = examplesMetadata.map((meta) => ({
   title: meta.title,
   href: `/examples/${meta.slug}`,
 }));
