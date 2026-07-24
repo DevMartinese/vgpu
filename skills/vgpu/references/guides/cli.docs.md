@@ -255,7 +255,7 @@ npx vgpu examples cache clear
 
 ## install-dawn
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu install-dawn` command downloads and verifies the portable Dawn prebuild, the native WebGPU implementation vgpu uses to render in Node.js. Run it when `vgpu doctor` reports a missing Dawn runtime.
 
 ```text
 Usage: vgpu install-dawn
@@ -270,7 +270,7 @@ npx vgpu install-dawn
 
 ## install-software-renderer
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu install-software-renderer` command downloads and verifies a portable CPU renderer. Use it on machines without a usable GPU — such as CI runners or headless servers — so vgpu can still render.
 
 ```text
 Usage: vgpu install-software-renderer
