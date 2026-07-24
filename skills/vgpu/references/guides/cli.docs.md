@@ -33,7 +33,6 @@ The `examples` commands never execute fetched code.
 | `install-dawn` | Download and verify the portable Node Dawn prebuild |
 | `install-software-renderer` | Download and verify the portable CPU renderer |
 | `doctor` | Verify this machine can render headless (JSON verdict + fixes) |
-| `wgsl` | Coming soon |
 
 ## check
 
@@ -303,18 +302,6 @@ Usage: vgpu snapshot [--ci] [--update] [--baseline <path>]
 VGPU_DOCKER_TEST=1 npx vgpu snapshot --ci
 VGPU_DOCKER_TEST=1 npx vgpu snapshot --update
 VGPU_DOCKER_TEST=1 npx vgpu snapshot --baseline <path>
-```
-
-## wgsl
-
-<!-- DRAFT PROSE PENDING AUTHOR -->
-
-```text
-vgpu wgsl is coming soon.
-```
-
-```terminal
-npx vgpu wgsl
 ```
 
 ## Global options
