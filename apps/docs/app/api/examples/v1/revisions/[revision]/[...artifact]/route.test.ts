@@ -143,6 +143,21 @@ describe('examples API App Router handlers', () => {
     }
   });
 
+  it('returns the structured storage error for a local object beyond its response cap', async () => {
+    const discovery = set.artifacts.find((artifact) => artifact.key === set.discoveryKey)!;
+    const discoveryPath = resolve(root, discovery.key);
+    await writeFile(discoveryPath, new Uint8Array(32 * 1024 + 1));
+    try {
+      const response = await discoveryRoute.GET(request('/.well-known/vgpu-examples.json'));
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: { code: 'VGPU-EXAMPLES-STORAGE', message: 'Artifact storage verification failed' },
+      });
+    } finally {
+      await writeFile(discoveryPath, discovery.bytes);
+    }
+  });
+
   it('does not serve an allowlisted object beyond the source response cap', async () => {
     const revision = 'f'.repeat(64);
     const relative = ['examples', 'oversized', 'files', 'source.ts.raw'];

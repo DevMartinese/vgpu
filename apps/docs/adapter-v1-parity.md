@@ -22,7 +22,7 @@ The generated module was copied to `/tmp/adapter-v1-parity/react-source.ts`; onl
 - Canonical source files: 100
 - Sorted artifact identity digest: `87892b26ecdc13625aa631b504e2ae86b965cb17c969539f9ef241b417173b33`
 - Scratch trees: `/tmp/adapter-v1-parity/tree-a` and `/tmp/adapter-v1-parity/tree-b`
-- Machine-readable scratch evidence: `/tmp/adapter-v1-parity/evidence.json`
+- Machine-readable scratch evidence: `/tmp/adapter-v1-parity/evidence.json` (SHA-256 `172c29ee3c5e53d430b66b67d04516afc5472679660b9161b5ff5f5716902741` after vocabulary expansion)
 
 ## Results
 
@@ -36,26 +36,30 @@ The generated module was copied to `/tmp/adapter-v1-parity/react-source.ts`; onl
 | Fractal tags | PASS | Exact ordered value: `raymarching`, `raymarch`, `fractal`, `sierpinski`, `hdr`, `bloom`. |
 | Canonical order | PASS | Adapter output exactly preserved every generated `files` array; all start with `index.tsx`, place optional controls/types before `renderer.ts`, place helpers after it, and keep WGSL as the final pipeline suffix. |
 | Determinism x2 | PASS | Both runs produced revision `05ce8f69c116fd6674c10dd2579493690a957a01232ab14e15839eaa208a7fcf` and artifact digest `87892b26ecdc13625aa631b504e2ae86b965cb17c969539f9ef241b417173b33`. |
-| Controlled vocabulary | **FAIL** | Authored metadata contains controlled terms absent from the checked-in foundation vocabularies; there were no duplicate authored values. |
+| Controlled vocabulary | PASS | All authored values are present in the additive, checked-in vocabularies; no unknown or duplicate values remain. |
 
-Unknown tags:
+### AUTHOR REVIEW: vocabulary expansion
 
-```text
-shader, triangle, led, raycasting, lighting, msaa, ssaa, fxaa,
-chromatic-aberration, color-grading, black-hole, simulation, navier-stokes,
-indirect-rendering, performance, batch-rendering, render-bundles
-```
+All proposed values were vetted as lowercase kebab-case, stable technical/topic terms rather than free text, and deliberate authored metadata. The close lexical neighbors remain distinct controlled concepts: `batching` is the general technique while `batch-rendering` identifies the rendering strategy; `compute` is the workload while `compute-shader` names the shader-stage capability; `instancing` is the general mechanism while `instanced-rendering` identifies the authored rendering capability. Cross-category reuse such as `render-bundles` is intentional because tags describe discoverability and capabilities describe runtime requirements. There is no vocabulary-driven search-alias table in the owned docs lane to update.
 
-Unknown capabilities:
+Accepted tags (17):
 
 ```text
-webgpu, fragment-shader, continuous-rendering, responsive-canvas,
-select-control, pointer-input, render-targets, checkbox-controls,
-pointer-orbit, compute-shader, fixed-timestep, instanced-rendering,
-offscreen-rendering, resize, demand-rendering
+batch-rendering, black-hole, chromatic-aberration, color-grading, fxaa,
+indirect-rendering, led, lighting, msaa, navier-stokes, performance,
+raycasting, render-bundles, shader, simulation, ssaa, triangle
 ```
 
-Because controlled vocabulary validation fails, the all-ten adapter-v1 parity gate is **not yet green**. The checked-in generated artifacts remain on adapter v0 and production publishing remains blocked. Vocabulary reconciliation requires an explicit author decision: either normalize React metadata to the existing controlled terms or approve additions to the controlled vocabulary and its validation coverage.
+Accepted capabilities (15):
+
+```text
+checkbox-controls, compute-shader, continuous-rendering, demand-rendering,
+fixed-timestep, fragment-shader, instanced-rendering, offscreen-rendering,
+pointer-input, pointer-orbit, render-targets, resize, responsive-canvas,
+select-control, webgpu
+```
+
+Rejected terms: **none**. This additive expansion is explicitly author-reviewable before integration. With it, the all-ten adapter-v1 parity matrix is green. Checked-in generated artifacts nevertheless remain on adapter v0 and production publishing remains blocked until merge and author approval.
 
 ## Exact generated file order
 

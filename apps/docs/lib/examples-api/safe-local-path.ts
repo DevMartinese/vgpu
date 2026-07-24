@@ -79,6 +79,35 @@ export async function withSafeLocalParent<T>(
   }
 }
 
+interface BoundedReadableFile {
+  stat(): Promise<{ readonly size: number; isFile(): boolean }>;
+  read(buffer: Uint8Array, offset: number, length: number, position: number): Promise<{ readonly bytesRead: number }>;
+}
+
+/** Reads the fstat size plus one byte at most, so in-place growth cannot bypass a response cap. */
+export async function readBoundedLocalFile(
+  handle: BoundedReadableFile,
+  maximumBytes: number,
+  key: string,
+): Promise<Uint8Array | undefined> {
+  const stat = await handle.stat();
+  if (!stat.isFile()) return undefined;
+  if (stat.size > maximumBytes) throw new Error(`Stored artifact exceeds response limit: ${key}`);
+
+  const bytes = new Uint8Array(stat.size);
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const { bytesRead } = await handle.read(bytes, offset, bytes.byteLength - offset, offset);
+    if (bytesRead === 0) return bytes.subarray(0, offset);
+    offset += bytesRead;
+  }
+
+  const growthProbe = new Uint8Array(1);
+  const { bytesRead } = await handle.read(growthProbe, 0, 1, offset);
+  if (bytesRead !== 0) throw new Error(`Stored artifact exceeds response limit: ${key}`);
+  return bytes;
+}
+
 export async function readSafeLocalFile(
   rootDirectory: string,
   key: string,
@@ -88,11 +117,10 @@ export async function readSafeLocalFile(
     let handle;
     try {
       const beforeOpen = await lstat(destination);
-      if (beforeOpen.isSymbolicLink() || !beforeOpen.isFile() || beforeOpen.size > maximumBytes) return undefined;
+      if (beforeOpen.isSymbolicLink() || !beforeOpen.isFile()) return undefined;
+      if (beforeOpen.size > maximumBytes) throw new Error(`Stored artifact exceeds response limit: ${key}`);
       handle = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
-      const stat = await handle.stat();
-      if (!stat.isFile() || stat.size > maximumBytes) return undefined;
-      return new Uint8Array(await handle.readFile());
+      return await readBoundedLocalFile(handle, maximumBytes, key);
     } catch (error) {
       if (isNotFound(error) || isUnsafeLink(error)) return undefined;
       throw error;
