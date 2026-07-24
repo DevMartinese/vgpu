@@ -49,7 +49,7 @@ npx vgpu check ./shaders/main.wgsl
 
 ## docs
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu docs` commands let you explore the vgpu documentation from the terminal. The full corpus — API reference and guides — ships inside the package, so every query runs locally and works offline. Use `ls` to browse the documentation tree, `cat` to print a page or symbol, `grep` to search across content, and `find` to look up entries by name.
 
 ```text
 Usage: vgpu docs <command> [args] [flags]
