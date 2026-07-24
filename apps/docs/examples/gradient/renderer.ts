@@ -15,10 +15,17 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
 
   const applyResize = () => {
     resizeFrame = 0;
-    if (disposed || !pendingSize) return;
+    const size = pendingSize;
     pendingSize = undefined;
-    // The surface owns canvas measurement; this coalesced route keeps DPR and
-    // ResizeObserver notifications from introducing a second render loop.
+    if (disposed || !size || !surface) return;
+    try {
+      surface.resize([
+        Math.max(1, Math.round(size.width * size.dpr)),
+        Math.max(1, Math.round(size.height * size.dpr)),
+      ]);
+    } catch (error) {
+      handleFailure(error);
+    }
   };
   const resize = (size: RenderSize) => {
     if (disposed || size.width <= 0 || size.height <= 0) return;
@@ -78,13 +85,18 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     });
   };
 
-  const ready = initialize().catch((error: unknown) => {
+  function handleFailure(error: unknown): void {
     if (disposed) return;
     if (!reportedError) {
       reportedError = true;
-      options.onError?.(error);
+      try { options.onError?.(error); } catch { /* error reporting must not block teardown */ }
     }
     dispose();
+  }
+
+  const ready = initialize().catch((error: unknown) => {
+    if (disposed) return;
+    handleFailure(error);
     throw error;
   });
 
@@ -96,12 +108,18 @@ export async function renderThumbnail(
   target: Target,
   options: ThumbnailOptions = {},
 ): Promise<void> {
-  const effect = gpu.effect(fragment);
-  effect.set({
-    uniforms: {
-      time: options.time ?? Math.PI / 4,
-      resolution: target.size,
-    },
-  });
-  gpu.frame((frame) => frame.pass({ target }, (pass) => pass.draw(effect)));
+  try {
+    const effect = gpu.effect(fragment);
+    effect.set({
+      uniforms: {
+        time: options.time ?? Math.PI / 4,
+        resolution: target.size,
+      },
+    });
+    gpu.frame((frame) => frame.pass({ target }, (pass) => pass.draw(effect)));
+  } finally {
+    // Drain any work submitted before a render/encoding failure is observed.
+    await gpu.gpu.queue.onSubmittedWorkDone();
+  }
+  await gpu.settled();
 }

@@ -15,25 +15,30 @@ function deferred<T>() {
 
 function browser() {
   const listeners = new Map<string, EventListener>();
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0;
   vi.stubGlobal('window', {
     devicePixelRatio: 1,
     addEventListener: vi.fn((name: string, listener: EventListener) => listeners.set(name, listener)),
     removeEventListener: vi.fn((name: string) => listeners.delete(name)),
   });
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
-  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  }));
+  vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => frames.delete(id)));
   const disconnect = vi.fn();
   vi.stubGlobal('ResizeObserver', class {
     observe = vi.fn();
     disconnect = disconnect;
   });
   const canvas = { getBoundingClientRect: () => ({ width: 100, height: 50 }) } as HTMLCanvasElement;
-  return { canvas, listeners, disconnect };
+  return { canvas, listeners, frames, disconnect };
 }
 
 function gpu() {
   const stop = vi.fn();
-  const surface = { size: [100, 50], dispose: vi.fn() };
+  const surface = { size: [100, 50], resize: vi.fn(), dispose: vi.fn() };
   const instance = {
     time: 0,
     surface: vi.fn(() => surface),
@@ -64,13 +69,34 @@ test('dispose during init cleans a late GPU without starting a loop', async () =
   expect(late.instance.frame.loop).not.toHaveBeenCalled();
 });
 
-test('owns one loop and removes resize resources synchronously', async () => {
-  const { canvas, listeners, disconnect } = browser();
+test('reports an initialization failure once, rejects ready, and self-disposes', async () => {
+  const { canvas } = browser();
+  const failed = gpu();
+  const error = new Error('surface failed');
+  failed.instance.surface.mockImplementationOnce(() => { throw error; });
+  mocks.init.mockResolvedValueOnce(failed.instance);
+  const onError = vi.fn(() => { throw new Error('reporter failed'); });
+  const renderer = createRenderer({ canvas, onError });
+  await expect(renderer.ready).rejects.toBe(error);
+  expect(onError).toHaveBeenCalledOnce();
+  expect(failed.instance.dispose).toHaveBeenCalledOnce();
+  renderer.dispose();
+  expect(failed.instance.dispose).toHaveBeenCalledOnce();
+});
+
+test('owns one loop, applies the latest coalesced resize, and removes resources', async () => {
+  const { canvas, listeners, frames, disconnect } = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
   const renderer = createRenderer({ canvas });
   await renderer.ready;
   expect(live.instance.frame.loop).toHaveBeenCalledOnce();
+  renderer.resize({ width: 200, height: 100, dpr: 1 });
+  renderer.resize({ width: 300, height: 150, dpr: 2 });
+  expect(frames.size).toBe(1);
+  [...frames.values()][0]?.(16);
+  expect(live.surface.resize).toHaveBeenCalledOnce();
+  expect(live.surface.resize).toHaveBeenCalledWith([600, 300]);
   renderer.dispose();
   renderer.dispose();
   expect(live.stop).toHaveBeenCalledOnce();
