@@ -1,5 +1,5 @@
 import type { Gpu, Surface, Target } from 'vgpu';
-import { createHeroRenderer } from './renderer';
+import { createHeroRenderer } from './scene-renderer';
 import { DEFAULT_BRUSH } from './settings';
 import { brushState, heroStateForActiveClick, simulationBrushState } from './sim-sizing';
 import { isPointInsideTriangle } from './triangle-hit';
