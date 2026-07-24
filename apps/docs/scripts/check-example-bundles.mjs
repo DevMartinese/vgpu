@@ -4,8 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 const docsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const chunksDir = path.join(docsDir, '.next', 'static', 'chunks');
-const budgets = JSON.parse(await readFile(new URL('./example-chunk-budgets.json', import.meta.url), 'utf8'));
+const chunksDir = process.env.VGPU_EXAMPLE_CHUNKS_DIR
+  ? path.resolve(process.env.VGPU_EXAMPLE_CHUNKS_DIR)
+  : path.join(docsDir, '.next', 'static', 'chunks');
+const budgetsFile = process.env.VGPU_EXAMPLE_BUDGETS_FILE
+  ? path.resolve(process.env.VGPU_EXAMPLE_BUDGETS_FILE)
+  : new URL('./example-chunk-budgets.json', import.meta.url);
+const budgets = JSON.parse(await readFile(budgetsFile, 'utf8'));
 const slugs = Object.keys(budgets.examples);
 
 function escapeRegExp(value) {
