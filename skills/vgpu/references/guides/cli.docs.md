@@ -37,7 +37,7 @@ The `examples` commands never execute fetched code.
 
 ## check
 
-<!-- DRAFT PROSE PENDING AUTHOR -->
+The `vgpu check` command validates a WGSL file without running it. On success it prints the shader's reflection data as JSON; on failure it reports the validation errors and exits non-zero. Use it to catch shader problems early, in your editor, pre-commit hooks, or CI.
 
 ```text
 Usage: vgpu check <file.wgsl>
