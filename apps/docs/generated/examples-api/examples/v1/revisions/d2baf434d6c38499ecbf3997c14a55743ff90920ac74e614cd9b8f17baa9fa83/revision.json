@@ -17,8 +17,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/gradient/manifest.json",
-      "size": 1166,
-      "sha256": "4a37a4f9f87ffe9a2d4e94bfac13b298ede24ea4f96526befbc28a52304c6a74",
+      "size": 1174,
+      "sha256": "a40cabd4a8b45fa861e9e472cfa41032187f9576edec7e8a673b25cd964d79e8",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -149,8 +149,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/triangle-led-front/manifest.json",
-      "size": 8610,
-      "sha256": "1a7822263d5bd592bd7b36ad7c03f371e32b3024b55a797d5eb5cd0d91f61b76",
+      "size": 8694,
+      "sha256": "7dacb17096727c30a217df2d20e1d7d4d1a6e6765370c1dcb53432662912dcbf",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -185,8 +185,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/anti-aliasing/manifest.json",
-      "size": 2338,
-      "sha256": "cc343ac98a97fe83d97d599dcd4307e7665307e81917d3e58e441604892c2a29",
+      "size": 2358,
+      "sha256": "f882e57b6910aeaf56ecf448c358f95340e745fb8754e538bf78a5c035069315",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -227,8 +227,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/post-processing/manifest.json",
-      "size": 2728,
-      "sha256": "8235ccb76bdb15ee83db8304db6def46099d0524bf7efeab8f116cfb5ea239db",
+      "size": 2752,
+      "sha256": "59f0e8f520e16a909104299b8ad8f8a59f2d48061afb73a2674cb177c2d81829",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -263,8 +263,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/manifest.json",
-      "size": 2418,
-      "sha256": "3577abb7934aa777a4a5afa6763b66346cca6fb8ab67cf1a52e379857dbd2f06",
+      "size": 2438,
+      "sha256": "22cf2934260e03d7c9f00e355b8d91b3b1df7dab4063c68109963ada612c961e",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -347,8 +347,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/fluid/manifest.json",
-      "size": 5165,
-      "sha256": "ad9144913a78920b93eff3773859f4f07887fd4b54815dd5c4e7231416291156",
+      "size": 5217,
+      "sha256": "7f53bb6fd87f02952b5cf9b1c34d3c2b3a8e52ac83e0e6a58afacc6b54b68b1f",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -371,8 +371,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/manifest.json",
-      "size": 1590,
-      "sha256": "699f21318f37cfd370467a9a0818fcd490c18741eb39cf70f9dab1584f66bf1f",
+      "size": 1602,
+      "sha256": "a22312c574e6eb529f82a65e9659330db0d05c8032a988b5040003d95e27390d",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -395,8 +395,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/batch-rendering/manifest.json",
-      "size": 1561,
-      "sha256": "cdbc9673d33483c52418085107adb9e94668a69d7faf42b056889f6f065e3670",
+      "size": 1573,
+      "sha256": "c17c052604fce6d324c1f0e7b88b58a74cd177880c4603b56fedabc4f3af1114",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -509,8 +509,8 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/fft-ocean/manifest.json",
-      "size": 7227,
-      "sha256": "79afd521f610f58d8ff1af8756633825cb073fee51a3d5e7a6f38d735d4b68ef",
+      "size": 7299,
+      "sha256": "a10e703226e01ca398a0f2185c35e376b08ab656ab36181cac9261e214027efb",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -557,14 +557,14 @@
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/raymarched-fractal/manifest.json",
-      "size": 3213,
-      "sha256": "a67a8b400077a485c7483bc7b3c2d1f3331a695aaedff2d29266e6e42dc302ee",
+      "size": 3241,
+      "sha256": "8598731b398d092ae43d872039083ca5e18797d16dbc3a3708cc18d13e0b0bdb",
       "contentType": "application/json; charset=utf-8"
     },
     {
       "key": "examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/index.json",
-      "size": 7919,
-      "sha256": "b1c8bdbfc97862aa129a52f4bd78d91d7a8f9c888465c18bbf82823ff6aaeb68",
+      "size": 7959,
+      "sha256": "e0e1c7488146ff29d70ab45f94e9445002cd9016b5cf99e2abcaeacc5c57eaf6",
       "contentType": "application/json; charset=utf-8"
     }
   ]

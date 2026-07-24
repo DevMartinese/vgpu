@@ -17,14 +17,14 @@
       "contentType": "text/typescript",
       "size": 601,
       "sha256": "567e0dc3fe65ff3c5cf57e94461e2455b9acba9f0c716b031baead06e61aac55",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/gradient/files/example.ts.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/gradient/files/example.ts.raw"
     },
     {
       "path": "shader.wgsl",
       "contentType": "text/wgsl",
       "size": 362,
       "sha256": "f47603ed166e4473fa72f94a8547bf2920370dd9f7654a9698f951a26b184d8c",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/gradient/files/shader.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/gradient/files/shader.wgsl.raw"
     }
   ]
 }

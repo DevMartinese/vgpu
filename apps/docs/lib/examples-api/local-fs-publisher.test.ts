@@ -33,6 +33,19 @@ describe('LocalFsPublisher', () => {
     expect(await local.get(set.latestKey)).toBeUndefined();
   });
 
+  it('keeps latest unchanged when pre-pointer deployment verification fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vgpu-publisher-pre-pointer-'));
+    const publisher = new LocalFsPublisher(root);
+    await expect(publishArtifactSet(publisher, set, {
+      beforeLatest: async () => {
+        expect(await publisher.get(set.latestKey)).toBeUndefined();
+        throw new Error('injected deployment verification failure');
+      },
+    })).rejects.toThrow('injected deployment verification failure');
+    expect(await publisher.get(set.latestKey)).toBeUndefined();
+    expect(await publisher.get(set.discoveryKey)).toBeDefined();
+  });
+
   it('retains an old revision when a new latest revision is published', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vgpu-publisher-retain-'));
     const publisher = new LocalFsPublisher(root);

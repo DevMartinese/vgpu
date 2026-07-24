@@ -19,21 +19,21 @@
       "contentType": "text/typescript",
       "size": 6291,
       "sha256": "fef77d72f03e5614cb660f8689feeb60b0cebbaa6e051966f39b2cdbf8b6a796",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/files/example.ts.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/files/example.ts.raw"
     },
     {
       "path": "scene.wgsl",
       "contentType": "text/wgsl",
       "size": 1763,
       "sha256": "a0e520cad5e2994dd3391118fd2a815acab42b5727d8cdf3a945e8c94048052b",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/files/scene.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/files/scene.wgsl.raw"
     },
     {
       "path": "blit.wgsl",
       "contentType": "text/wgsl",
       "size": 348,
       "sha256": "1d6957358650364304515e7deb8728bf20186482b84dcd361e5525b60c0c6566",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/files/blit.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/instanced-rendering/files/blit.wgsl.raw"
     }
   ]
 }

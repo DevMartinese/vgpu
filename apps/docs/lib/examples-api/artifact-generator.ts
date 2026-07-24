@@ -28,7 +28,10 @@ export interface GeneratedArtifactSet {
 
 const encoder = new TextEncoder();
 const json = (value: unknown) => encoder.encode(`${JSON.stringify(value, null, 2)}\n`);
-const url = (origin: string, key: string) => `${origin}/${key.split('/').map(encodeURIComponent).join('/')}`;
+const url = (origin: string, key: string) => {
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+  return `${origin}/${key.startsWith(`${EXAMPLES_BLOB_PREFIX}/`) ? 'api/' : ''}${encodedKey}`;
+};
 
 export function generateExampleArtifacts(
   graph: ExampleByteGraph,

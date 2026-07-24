@@ -22,35 +22,35 @@
       "contentType": "text/typescript",
       "size": 8866,
       "sha256": "52644c33f75f30b2312659c64391f36dca6818f7c3c9cffcf408264658cfd14c",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/example.ts.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/example.ts.raw"
     },
     {
       "path": "black-hole.wgsl",
       "contentType": "text/wgsl",
       "size": 8136,
       "sha256": "2fa99edaaf336a26a09da538b88e69fff1e46ed45941e1bfbf9b2ad8cde62e64",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/black-hole.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/black-hole.wgsl.raw"
     },
     {
       "path": "bright-pass.wgsl",
       "contentType": "text/wgsl",
       "size": 800,
       "sha256": "3bbfddccbaf4d5ae5851a47bef59d1018503141ded370b599f52ef4fec99241d",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/bright-pass.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/bright-pass.wgsl.raw"
     },
     {
       "path": "blur.wgsl",
       "contentType": "text/wgsl",
       "size": 781,
       "sha256": "646df3afc74960f0769afbaca1ff8963c24b626eb2782ed77d0fd73f05d99924",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/blur.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/blur.wgsl.raw"
     },
     {
       "path": "composite.wgsl",
       "contentType": "text/wgsl",
       "size": 1033,
       "sha256": "5fd0d27848cc5c693d36de88f8a2b4f434e89d5867a6c5b1dd28c64007ba5736",
-      "url": "https://vgpu.labs.vercel.dev/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/composite.wgsl.raw"
+      "url": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/d2baf434d6c38499ecbf3997c14a55743ff90920ac74e614cd9b8f17baa9fa83/examples/black-hole/files/composite.wgsl.raw"
     }
   ]
 }

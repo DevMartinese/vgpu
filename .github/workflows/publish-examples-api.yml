@@ -41,7 +41,12 @@ jobs:
           test "$VGPU_EXAMPLES_ORIGIN" = "https://vgpu.labs.vercel.dev" || { echo "::error::Unexpected production origin"; exit 1; }
           test "$VGPU_EXAMPLES_BLOB_PREFIX" = "examples/v1" || { echo "::error::Unexpected blob prefix"; exit 1; }
           test -n "$VERCEL_DEPLOYMENT_URL" || { echo "::error::Missing VERCEL_DEPLOYMENT_URL"; exit 1; }
-      - name: Generate, create-only publish, fresh-read verify, then advance latest
+      - name: Confirm the matching docs deployment is already live
+        run: |
+          deployment="$VERCEL_DEPLOYMENT_URL"
+          case "$deployment" in http://*|https://*) ;; *) deployment="https://$deployment" ;; esac
+          curl --fail --silent --show-error --location --max-redirs 0 --max-time 30 "$deployment/" >/dev/null
+      - name: Generate, create-only publish, pre-pointer route verify, then advance latest
         run: node apps/docs/scripts/generate-examples-api.mjs --publish
       - name: Verify official discovery to fractal source chain
         run: |

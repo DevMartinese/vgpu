@@ -13,6 +13,12 @@ const commit = process.env.VGPU_EXAMPLES_GIT_COMMIT ?? execFileSync(
   { cwd: root, encoding: 'utf8' },
 ).trim();
 const publish = process.argv.includes('--publish');
+const publicAdapter = 'v0'; // Phase 4 changes this only alongside the adapter-v1 import/parity gate.
+if (publish && publicAdapter !== 'v1') {
+  throw new Error('Production publish blocked until adapter-v1 all-ten parity is committed');
+}
+const deploymentUrl = process.env.VERCEL_DEPLOYMENT_URL;
+if (publish && !deploymentUrl) throw new Error('Missing VERCEL_DEPLOYMENT_URL for pre-pointer verification');
 const temporaryDirectory = await mkdtemp(resolve(tmpdir(), 'vgpu-examples-generator-'));
 const bundle = resolve(temporaryDirectory, 'run.mjs');
 try {
@@ -24,10 +30,32 @@ try {
         import { generateExampleArtifacts, writeArtifactTree } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/artifact-generator.ts'))};
         import { publishArtifactSet } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/publisher.ts'))};
         import { VercelBlobPublisher } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/vercel-blob-publisher.ts'))};
+        import { sha256 } from ${JSON.stringify(resolve(root, 'apps/docs/lib/examples-api/hashing.ts'))};
         const graph = createLegacyByteGraph({ repository: 'https://github.com/vgpu/vgpu', gitCommit: ${JSON.stringify(commit)} });
         const set = generateExampleArtifacts(graph, ${JSON.stringify(process.env.VGPU_EXAMPLES_ORIGIN ?? 'https://vgpu.labs.vercel.dev')});
         await writeArtifactTree(set, ${JSON.stringify(output)});
-        if (${JSON.stringify(publish)}) await publishArtifactSet(new VercelBlobPublisher(), set);
+        const verifyDeployed = async ({ artifacts }) => {
+          const deployment = new URL(${JSON.stringify(deploymentUrl ? (deploymentUrl.startsWith('http') ? deploymentUrl : `https://${deploymentUrl}`) : 'https://invalid.local')});
+          const index = artifacts.find(({ key }) => key.endsWith('/index.json'));
+          const indexDocument = JSON.parse(new TextDecoder().decode(index.bytes));
+          const fractalIndex = indexDocument.examples.find(({ id }) => id === 'raymarched-fractal');
+          const manifestPath = new URL(fractalIndex.manifestUrl).pathname;
+          const manifest = artifacts.find(({ key }) => '/api/' + key === manifestPath);
+          const manifestDocument = JSON.parse(new TextDecoder().decode(manifest.bytes));
+          const filePath = new URL(manifestDocument.files[0].url).pathname;
+          const file = artifacts.find(({ key }) => '/api/' + key === filePath);
+          for (const artifact of [index, manifest, file]) {
+            const response = await fetch(new URL('/api/' + artifact.key, deployment), { redirect: 'error', cache: 'no-store' });
+            if (!response.ok || response.headers.get('content-type') !== (artifact.contentType.startsWith('text/') ? artifact.contentType + '; charset=utf-8' : artifact.contentType)) {
+              throw new Error('Pre-pointer deployment verification failed: ' + artifact.key);
+            }
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            if (bytes.byteLength !== artifact.bytes.byteLength || sha256(bytes) !== artifact.sha256) {
+              throw new Error('Pre-pointer deployment integrity failed: ' + artifact.key);
+            }
+          }
+        };
+        if (${JSON.stringify(publish)}) await publishArtifactSet(new VercelBlobPublisher(), set, { beforeLatest: verifyDeployed });
         console.log(JSON.stringify({ revision: set.revision, artifacts: set.artifacts.length, published: ${JSON.stringify(publish)}, output: ${JSON.stringify(output)} }));
       `,
       resolveDir: root,
