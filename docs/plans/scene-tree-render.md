@@ -143,7 +143,7 @@ const controls = orbitControls(camera, {
   element: canvas,
   target: [0, 0.5, 0],
   damping: 0.1,                 // 0 disables easing
-  zoom: { min: 1, max: 20 },
+  distance: { min: 1, max: 20 },
   pitch: { min: -1.2, max: 1.2 },
 });
 gpu.frame.loop(() => {

@@ -172,10 +172,10 @@ declare abstract class SceneMaterial {
 ## Examples
 
 ```ts
-import { unlitMaterial, type SceneMaterial } from "vgpu/scene";
+import { UnlitMaterial, unlitMaterial, type SceneMaterial } from "vgpu/scene";
 
 const material: SceneMaterial = unlitMaterial();
-if (material.kind === "unlit") void material.color;
+if (material instanceof UnlitMaterial) void material.color;
 ```
 
 ## Notes

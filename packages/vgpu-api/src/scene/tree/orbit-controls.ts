@@ -15,11 +15,13 @@ interface OrbitWheelEvent {
 
 /**
  * Structural event-target contract so controls work with an `HTMLCanvasElement` without
- * requiring DOM types, and with mocks in Node tests.
+ * requiring DOM types, and with mocks in Node tests. Listener parameters are intentionally
+ * loose (`any`) so the DOM's overloaded `addEventListener` stays assignable.
  */
 export interface OrbitControlsElement {
-  addEventListener(type: string, listener: (event: never) => void, options?: { passive?: boolean } | boolean): void;
-  removeEventListener(type: string, listener: (event: never) => void): void;
+  // `any` keeps the DOM's overloaded addEventListener assignable to this contract.
+  addEventListener(type: string, listener: (event: any) => void, options?: { passive?: boolean } | boolean): void;
+  removeEventListener(type: string, listener: (event: any) => void): void;
   setPointerCapture?(pointerId: number): void;
   releasePointerCapture?(pointerId: number): void;
 }
@@ -137,11 +139,11 @@ export class OrbitControls {
     const element = options.element;
     if (element) {
       this.#element = element;
-      element.addEventListener("pointerdown", this.#onPointerDown as never);
-      element.addEventListener("pointermove", this.#onPointerMove as never);
-      element.addEventListener("pointerup", this.#onPointerUp as never);
-      element.addEventListener("pointercancel", this.#onPointerUp as never);
-      element.addEventListener("wheel", this.#onWheel as never, { passive: false });
+      element.addEventListener("pointerdown", this.#onPointerDown);
+      element.addEventListener("pointermove", this.#onPointerMove);
+      element.addEventListener("pointerup", this.#onPointerUp);
+      element.addEventListener("pointercancel", this.#onPointerUp);
+      element.addEventListener("wheel", this.#onWheel, { passive: false });
     }
   }
 
@@ -212,11 +214,11 @@ export class OrbitControls {
     this.#disposed = true;
     const element = this.#element;
     if (element) {
-      element.removeEventListener("pointerdown", this.#onPointerDown as never);
-      element.removeEventListener("pointermove", this.#onPointerMove as never);
-      element.removeEventListener("pointerup", this.#onPointerUp as never);
-      element.removeEventListener("pointercancel", this.#onPointerUp as never);
-      element.removeEventListener("wheel", this.#onWheel as never);
+      element.removeEventListener("pointerdown", this.#onPointerDown);
+      element.removeEventListener("pointermove", this.#onPointerMove);
+      element.removeEventListener("pointerup", this.#onPointerUp);
+      element.removeEventListener("pointercancel", this.#onPointerUp);
+      element.removeEventListener("wheel", this.#onWheel);
     }
     this.#element = undefined;
   }

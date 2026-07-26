@@ -122,6 +122,9 @@ interface OrbitControlsElement {
   setPointerCapture?(pointerId: number): void;
   releasePointerCapture?(pointerId: number): void;
 }
+
+// (listener parameters are typed loosely in the real declaration so the DOM's
+// overloaded addEventListener stays assignable)
 ```
 
 ## Examples
