@@ -53,13 +53,13 @@ interface StorageBuffer {
 | gpu.compute.opts | `ComputeOptions` | ✖ | `{}` | Initial compute options. |
 | opts.label | `string` | ✖ | `"compute"` | Used in shader reflection, GPU labels, and error `where` fields. |
 | opts.set | `Record<string, unknown>` | ✖ | `undefined` | Initial `.set()` call. |
-| opts.constants | `Readonly<Record<string, number \| boolean>>` | ✖ | WGSL defaults | Constructor-only values for WGSL `override` constants, applied to the compute stage. Key by override name, or by the decimal string of `N` when the declaration has `@id(N)` (the name is not usable then). Values must be finite numbers or booleans (booleans become `1`/`0`); every override declared without a default must be provided. |
-| opts.entry | `string` | ✖ | first `@compute` entry point | Constructor-only entry point selection for shaders that declare several `@compute` functions. The name must exist in the shader with the `@compute` stage. Binding visibility, bind group layouts, and the storage-aliasing preflight follow the selected entry. |
+| opts.constants | `Readonly<Record<string, number \| boolean>>` | ✖ | WGSL defaults | Constructor-only values for WGSL `override` constants, applied to the compute stage. Use them to tune workgroup size per device or workload at pipeline creation: `@workgroup_size(WG)` with `override WG: u32`. Keying (`@id(N)` → decimal string of `N`) and number/boolean conversion match `DrawOptions.constants`. |
+| opts.entry | `string` | ✖ | first `@compute` entry point | Constructor-only entry point selection when one WGSL module packs several `@compute` kernels sharing structs and bindings (e.g. emit/simulate/compact). The name must exist in the shader with the `@compute` stage. Binding visibility, bind group layouts, and the storage-aliasing preflight follow the selected entry. |
 | compute.set.values | `Record<string, unknown>` | ✔ | — | Binding values by WGSL variable name. JS values are packed; buffers/resources are bound by identity. |
 | compute.dispatch.x | `number` | ✔ | — | Workgroup count X passed to `dispatchWorkgroups`. |
 | compute.dispatch.y | `number` | ✖ | `1` | Workgroup count Y. |
 | compute.dispatch.z | `number` | ✖ | `1` | Workgroup count Z. |
-| compute.dispatch.opts.indirect | `StorageBuffer \| { buffer, offset? }` | ✔ in the overload | — | GPU-driven dispatch: the GPU reads 3 u32 workgroup counts (12 bytes) from the buffer at the byte `offset` (default `0`) via `dispatchWorkgroupsIndirect`. Requires a buffer created with `gpu.storage(bytes, { indirect: true })`; `offset` must be a multiple of 4 and `offset + 12 <= size`. Cannot be combined with explicit counts. |
+| compute.dispatch.opts.indirect | `StorageBuffer \| { buffer, offset? }` | ✔ in the overload | — | GPU-driven dispatch via `dispatchWorkgroupsIndirect`: the GPU reads `[x, y, z]` workgroup counts (3 tightly packed u32, 12 bytes) from the buffer at the byte `offset` (default `0`). Use it when an earlier pass decides how much work exists — variable particle populations, stream compaction. Requires a buffer created with `gpu.storage(bytes, { indirect: true })`; `offset` must be a multiple of 4 and `offset + 12 <= size`. Cannot be combined with explicit counts. |
 | gpu.storage.bytes | `number` | ✔ | — | Byte size for a main API (`vgpu`) storage buffer. |
 | gpu.storage.access | `StorageAccess \| StorageOptions` | ✖ | `"read-write"` | Access string, or a `StorageOptions` bag with `access` and `indirect`. Stored on the resource facade and used by binding normalization. |
 | gpu.storage.access.indirect | `boolean` | ✖ | `false` | Appends the `"indirect"` buffer usage so the buffer can supply GPU-read draw/dispatch arguments. |
@@ -113,23 +113,54 @@ particles.swap();
 import { init } from "vgpu/mock";
 
 const gpu = await init();
-const counts = gpu.storage(12, { indirect: true });
-counts.write(new Uint32Array([4, 1, 1]));
+const wg = 64; // tune per device or workload without editing WGSL
+const data = gpu.storage(4 * 256);
+const scale = gpu.compute(`
+  override WG: u32 = 64;
+  @group(0) @binding(0) var<storage, read_write> data: array<f32>;
+  @compute @workgroup_size(WG)
+  fn cs_main(@builtin(global_invocation_id) id: vec3u) { data[id.x] = data[id.x] * 2.0; }
+`, { constants: { WG: wg }, set: { data } });
 
-const sim = gpu.compute(`
-  @compute @workgroup_size(1) fn cs_main() {}
-`, { label: "sim" });
-
-sim.dispatch({ indirect: counts });
+scale.dispatch(Math.ceil(256 / wg));
 ```
+
+One JS constant drives both the pipeline's workgroup size and the dispatch math, so retuning `wg` cannot desynchronize them.
+
+```ts
+import { init } from "vgpu/mock";
+
+const gpu = await init();
+const alive = gpu.storage(4, "read");             // live-particle count, e.g. from emission/compaction
+const args = gpu.storage(12, { indirect: true }); // [x, y, z] workgroup counts
+const particles = gpu.storage(4 * 1024);
+
+const prepare = gpu.compute(`
+  @group(0) @binding(0) var<storage, read> alive: u32;
+  @group(0) @binding(1) var<storage, read_write> args: array<u32, 3>;
+  @compute @workgroup_size(1) fn cs_main() {
+    args[0] = (alive + 63u) / 64u; args[1] = 1u; args[2] = 1u; // one workgroup per 64 live particles
+  }
+`, { set: { alive, args } });
+
+const step = gpu.compute(`
+  @group(0) @binding(0) var<storage, read_write> particles: array<f32>;
+  @compute @workgroup_size(64)
+  fn cs_main(@builtin(global_invocation_id) id: vec3u) { particles[id.x] = particles[id.x] + 0.016; }
+`, { set: { particles } });
+
+prepare.dispatch(1);               // GPU computes how much work exists
+step.dispatch({ indirect: args }); // GPU reads the counts; JS never sees them
+```
+
+GPU-driven dispatch: the first pass writes the workgroup counts from GPU-side state, so the population can vary every frame without a readback stall.
 
 ## Notes
 
 - Use `gpu.pingPongStorage(bytes)` when a compute step reads previous state and writes next state; binding the same writable storage identity twice is rejected before dispatch.
 - Bindings use compute visibility only when statically reachable from the selected compute entry point; unused declarations stay in the layout with visibility `0`.
-- `constants` maps to `GPUProgrammableStage.constants` of the compute stage. An override with `@id(N)` is keyed by the decimal string of `N`; all others by name. Booleans convert to `1`/`0` (WebGPU converts the double to the override's WGSL type: bool/i32/u32/f32/f16). The option is constructor-only — the pipeline is created in `gpu.compute()` — and an absent option or an empty `{}` keeps the descriptor byte-identical to before.
-- `entry` selects which `@compute` function the pipeline compiles when the shader declares several; omitted, the first `@compute` entry point is used, exactly as before. The option is constructor-only — the pipeline is created in `gpu.compute()` — and selection happens before layouts, so binding visibility and bind group layouts reflect the chosen entry.
+- `constants` maps to `GPUProgrammableStage.constants` of the compute stage; the pipeline is created inside `gpu.compute()`, so recreate the compute to change them.
 - Dispatch counts are forwarded to WebGPU; validate domain-specific bounds in your app.
-- `dispatch({ indirect })` encodes `dispatchWorkgroupsIndirect`: the GPU reads `workgroupCountX, workgroupCountY, workgroupCountZ` as 3 tightly packed u32 values (12 bytes) from the buffer at the offset. Write them from another compute pass (bind the same buffer as storage) or from JS via `write()`; a buffer needs `gpu.storage(bytes, { indirect: true })` to be usable this way. The same option shape drives GPU-driven draws via `DrawCallOptions.indirect`.
-- `gpu.storage()` creates storage buffers with `copy_src` and `copy_dst`, so they can be read back and rewritten from JS; `{ indirect: true }` additionally appends the `"indirect"` usage.
+- Write indirect counts from another compute pass (bind the same buffer as storage) or from JS via `write()`. The same option shape drives GPU-driven draws via `DrawCallOptions.indirect`.
+- `gpu.storage()` creates storage buffers with `copy_src` and `copy_dst`, so they can be read back and rewritten from JS.
 - **See also:** `Gpu.compute`, `Draw.set`, `SharedUniforms`, `Target`, `StorageBuffer` from `vgpu/core`.

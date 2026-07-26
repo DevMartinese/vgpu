@@ -63,9 +63,9 @@ interface Gpu {
 | compute.source | `string \| ShaderSource` | ✔ | — | WGSL string or `ShaderSource`. Must contain a `@compute` entry point. |
 | compute.opts | `ComputeOptions` | ✖ | `{}` | `label` defaults to `"compute"`; `set` defaults to no initial bindings. |
 | storage.bytes | `number` | ✔ | — | Byte size for a main API (`vgpu`) storage buffer. |
-| storage.access | `StorageAccess \| StorageOptions` | ✖ | `"read-write"` | Access string, or a `StorageOptions` bag: `{ access?, indirect? }`. `indirect: true` appends the `"indirect"` buffer usage so the buffer can supply GPU-read draw/dispatch arguments. Reflection still controls shader compatibility; writable aliases are checked before compute dispatch. |
-| timer | — | — | — | No parameters. GPU pass timing; needs the `"timestamp-query"` device feature — request it at init: `init({ requiredFeatures: ["timestamp-query"] })` — and throws `VGPU-TIMER-INVALID` at creation without it. Pass `timer.span(name)` as `FramePassOptions.timer`; durations arrive in ms through `timer.onResults`. |
-| visibility.options | `VisibilityOptions` | ✖ | `{}` | Occlusion queries for visibility culling — core WebGPU, no device feature required. `capacity` declares the query slots per frame (default `64`, max `4096`). Pass the instance as `FramePassOptions.visibility` and wrap proxy draws in `pass.occlusion(handle, body)`; condition real draws on `handle.hidden`. |
+| storage.access | `StorageAccess \| StorageOptions` | ✖ | `"read-write"` | Access string, or a `StorageOptions` bag `{ access?, indirect? }`. See `Compute` for storage buffer semantics, including `{ indirect: true }` for GPU-driven draw/dispatch arguments. |
+| timer | — | — | — | No parameters. GPU pass timing; needs the `"timestamp-query"` device feature. See `Timer` for feature gating, spans, and result delivery. |
+| visibility.options | `VisibilityOptions` | ✖ | `{}` | Occlusion queries for visibility culling — core WebGPU, no device feature required. See `Visibility` for capacity and handle semantics. |
 | pingPong.width | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | pingPong.height | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | pingPong.opts | `TargetTextureOptions` | ✖ | `{}` | Texture/attachment options only; size comes from positional width/height. |

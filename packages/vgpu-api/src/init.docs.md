@@ -79,6 +79,20 @@ gpu.frame((frame) => {
 });
 ```
 
+```ts
+import { init, createMockAdapter } from "vgpu/mock";
+
+// Feature-gated device: GPU pass timing needs "timestamp-query".
+const gpu = await init({
+  adapter: createMockAdapter({ features: ["timestamp-query"] }),
+  requiredFeatures: ["timestamp-query"],
+});
+const timer = gpu.timer();
+timer.onResults((spans) => console.table(spans));
+```
+
+The granted feature makes `gpu.timer()` succeed. In a browser, drop the `adapter` option — `requiredFeatures` is forwarded to the real adapter the same way.
+
 ## Notes
 
 - `init(canvas)` is intentionally not supported. Create surfaces explicitly with `gpu.surface(canvas)`.

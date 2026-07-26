@@ -61,7 +61,7 @@ interface PingPongStorage { readonly read: import("vgpu").StorageBuffer; readonl
 | gpu.target.opts | `TargetOptions` | ✔ | — | Creates an offscreen target. `size` is mandatory. |
 | opts.size | `readonly [number, number]` | ✔ | — | Initial offscreen texture size in physical pixels. |
 | opts.format | `GPUTextureFormat` | ✖ | `"rgba8unorm"` | Used for single-color targets when `colors` is omitted. |
-| opts.colors | `readonly { format: GPUTextureFormat }[]` | ✖ | `[{ format: opts.format ?? "rgba8unorm" }]` | MRT color attachments. `target.color` is `colors[0]`. |
+| opts.colors | `readonly { format: GPUTextureFormat }[]` | ✖ | `[{ format: opts.format ?? "rgba8unorm" }]` | Multiple render targets (MRT): one attachment per entry, all written by one pass — the G-buffer layout for deferred shading. `target.color` is `colors[0]`. |
 | opts.depth | `boolean \| GPUTextureFormat` | ✖ | `undefined` | `true` means `"depth24plus"`; a string uses that depth format; omitted means no depth. Combined depth-stencil formats such as `"depth24plus-stencil8"` are supported; stencil-only `"stencil8"` is rejected. |
 | opts.msaa | `boolean \| 4` | ✖ | `false` / sample count `1` | Only `true` or `4` enables MSAA, creating color/depth attachments with sample count `4` and resolving to sampleable `.color(s)`. |
 | opts.label | `string` | ✖ | `undefined` | Prefix for created texture labels. |
@@ -97,6 +97,36 @@ gpu.frame((frame) => {
   frame.pass({ target: scene, clear: [0, 0, 0, 1] }, (pass) => pass.draw(post));
 });
 ```
+
+```ts
+import { init } from "vgpu/mock";
+
+const gpu = await init();
+// G-buffer for deferred shading: albedo, normals, material parameters.
+const gbuffer = gpu.target({
+  size: [512, 512],
+  colors: [{ format: "rgba8unorm" }, { format: "rgba16float" }, { format: "rgba8unorm" }],
+  depth: true,
+});
+const fill = gpu.draw({
+  shader: `
+    @vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+      var p = array<vec2f, 3>(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
+      return vec4f(p[vi], 0, 1);
+    }
+    struct GBuffer { @location(0) albedo: vec4f, @location(1) normal: vec4f, @location(2) material: vec4f }
+    @fragment fn fs_main() -> GBuffer {
+      return GBuffer(vec4f(0.8, 0.2, 0.2, 1), vec4f(0, 0, 1, 0), vec4f(0.5, 0.1, 0, 0));
+    }
+  `,
+});
+
+gpu.frame((frame) => {
+  frame.pass(gbuffer, fill); // one draw fills all three attachments
+});
+```
+
+One geometry pass fills every G-buffer attachment; a later lighting effect samples them as `gbuffer.colors[0]`–`[2]`. Per-attachment blend/write-mask overrides for MRT draws live on `DrawOptions.colors`.
 
 ```ts
 import { init } from "vgpu/mock";

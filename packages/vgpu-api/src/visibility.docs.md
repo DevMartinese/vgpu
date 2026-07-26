@@ -1,6 +1,6 @@
 # Visibility
 
-Occlusion query results for visibility culling, created by `gpu.visibility()`. A pass opened with `FramePassOptions.visibility` can wrap cheap proxy draws in `pass.occlusion(handle, body)`; each scope asks the GPU whether any samples passed depth testing, and the decoded answer latches into the handle asynchronously — typically 1–2 frames after submit. Condition your real draws on `handle.hidden`: it is `true` only when a completed query confirmed zero passing samples, so the safe default is to draw. Core WebGPU — no device feature required.
+GPU occlusion query handles created by `gpu.visibility()`; core WebGPU, no device feature required. Use them for occlusion culling: skipping expensive draws behind occluders in urban streets, interiors, and dense foliage. The pattern is two-phase culling. This frame, draw a cheap proxy under a query; next frame, skip the real object once confirmed hidden. Open the pass with `FramePassOptions.visibility`, wrap proxies in `pass.occlusion(handle, body)`, and gate real draws on `handle.hidden`. Results latch into the handle 1–2 frames after submit.
 
 ## Import
 
@@ -35,16 +35,23 @@ interface VisibilityQuery {
 
 | Param | Type | Required | Default | Notes |
 |---|---|---:|---|---|
-| gpu.visibility.options | `VisibilityOptions` | ✖ | `{}` | No device feature required; occlusion queries are core WebGPU. |
-| options.capacity | `number` | ✖ | `64` | Query slots per frame — the size of the one occlusion query set this instance owns. Integer in `[1, 4096]` (WebGPU `createQuerySet` requires `count <= 4096`). Capacity is a declared contract: it never grows, because the query set is bound to pass descriptors mid-frame. |
+| gpu.visibility.options | `VisibilityOptions` | ✖ | `{}` | Optional; `gpu.visibility()` equals `gpu.visibility({})`. |
+| options.capacity | `number` | ✖ | `64` | Query slots per frame — the size of the one occlusion query set this instance owns. It never grows: the set is bound to pass descriptors mid-frame, so capacity is a declared contract. Size it to the number of handles queried in one frame. |
 | vis.query.label | `string` | ✔ | — | Non-empty result key. Handles are stable — create them once outside the loop. A label stays claimed until its handle is disposed. |
-| query.hidden | `boolean` | — | `false` | `true` ONLY when a completed query confirmed zero passing samples (and no reset since). `"unknown"` and `"visible"` read as `false`: the safe default is to draw. Stable for the duration of a frame. |
-| query.state | `"visible" \| "hidden" \| "unknown"` | — | `"unknown"` | Latched result state. `"visible"` means the last completed query saw at least one passing sample; `"unknown"` means no result since creation or the last reset. |
-| query.age | `number` | — | `Infinity` | Frames since the last applied result; `Infinity` if none yet. Use it to distrust stale results after the camera moved. |
+| query.hidden | `boolean` | — | `false` | `true` only when a completed query confirmed zero passing samples (and no reset since). `"unknown"` and `"visible"` read as `false`: the safe default is to draw. |
+| query.state | `"visible" \| "hidden" \| "unknown"` | — | `"unknown"` | Latched result. `"visible"`: the last completed query saw at least one passing sample. `"unknown"`: no result since creation or the last reset. |
+| query.age | `number` | — | `Infinity` | Frames since the last applied result; `Infinity` before the first. Use it to distrust stale answers after the camera moved. |
 
 **Returns:** `gpu.visibility()` returns `Visibility`; `query()` returns a stable `VisibilityQuery` handle; `reset()` and `dispose()` return `void`.
 
-**Throws:** `VGPU-VIS-CAPACITY-LIMIT` when `capacity` is not an integer in `[1, 4096]`; `VGPU-VIS-LABEL-DUPLICATE` when `vis.query()` receives a label that is already live (not disposed); `VGPU-VIS-DISPOSED` for any use of a disposed handle or a disposed visibility instance; `VGPU-VIS-INVALID` for an empty or non-string label, a non-`Visibility` `FramePassOptions.visibility` value, a non-`VisibilityQuery` `occlusion()` argument, a handle used with a different visibility instance, or a visibility instance used with a different gpu's frames. See `Frame` for the pass-side errors: `VGPU-VIS-NO-DEPTH`, `VGPU-VIS-CAPACITY`, `VGPU-QUERY-NO-VISIBILITY`, `VGPU-QUERY-NESTED`, and `VGPU-QUERY-DUPLICATE`.
+**Throws:**
+
+- `VGPU-VIS-CAPACITY-LIMIT` when `capacity` is not an integer in `[1, 4096]` (WebGPU `createQuerySet` caps `count` at 4096) — lower it, or create several visibility instances.
+- `VGPU-VIS-LABEL-DUPLICATE` when `vis.query()` receives a label that is already live — reuse the existing handle, or `dispose()` the old one first.
+- `VGPU-VIS-DISPOSED` for any use of a disposed handle or instance — create a fresh one with `vis.query(label)` / `gpu.visibility()`.
+- `VGPU-VIS-INVALID` for an empty or non-string label — label each queried object, e.g. `vis.query("statue")`.
+- `VGPU-VIS-INVALID` for mismatched plumbing: a non-`Visibility` pass option, a non-`VisibilityQuery` `occlusion()` argument, a handle from another instance, or an instance used with another gpu's frames — keep one instance per gpu and pass only its own handles.
+- Pass-side errors (`VGPU-VIS-NO-DEPTH`, `VGPU-VIS-CAPACITY`, `VGPU-QUERY-NO-VISIBILITY`, `VGPU-QUERY-NESTED`, `VGPU-QUERY-DUPLICATE`) are documented on `Frame`.
 
 ## Examples
 
@@ -55,23 +62,26 @@ const gpu = await init();
 const scene = gpu.target({ size: [256, 256], depth: true });
 const world = gpu.effect(`@fragment fn fs_main() -> @location(0) vec4f { return vec4f(1); }`);
 const statue = gpu.draw({ shader: `@fragment fn fs_main() -> @location(0) vec4f { return vec4f(0.5); }` });
-const statueProxy = gpu.draw({ shader: `@fragment fn fs_main() -> @location(0) vec4f { return vec4f(0); }` });
-const towerProxy = gpu.draw({ shader: `@fragment fn fs_main() -> @location(0) vec4f { return vec4f(0); }` });
+const statueProxy = gpu.draw({
+  shader: `@fragment fn fs_main() -> @location(0) vec4f { return vec4f(0); }`,
+  writeMask: [],           // write no color channels
+  depth: { write: false }, // test depth, never write it
+});
 
 const vis = gpu.visibility({ capacity: 8 });
 const qStatue = vis.query("statue");
-const qTower = vis.query("tower");
 
 const loop = gpu.frame.loop((f) => {
   f.pass({ target: scene, visibility: vis }, (p) => {
-    p.draw(world);
-    p.occlusion(qStatue, statueProxy);
-    p.occlusion(qTower, () => p.draw(towerProxy));
-    if (!qStatue.hidden) p.draw(statue);
+    p.draw(world);                       // occluders fill depth first
+    p.occlusion(qStatue, statueProxy);   // bounding proxy under the query
+    if (!qStatue.hidden) p.draw(statue); // skip the real draw once confirmed hidden
   });
 });
 loop.stop();
 ```
+
+The proxy must test against the scene without touching it: `writeMask: []` writes no color and `depth: { write: false }` tests but never writes depth — a writing proxy would stamp its pixels into the image. The query counts samples that pass the tests, so a non-writing draw still measures visibility; once a readback confirms zero passing samples, `qStatue.hidden` flips and the statue is skipped.
 
 ```ts
 import { init } from "vgpu/mock";
@@ -93,10 +103,10 @@ console.log(q.state, q.hidden, q.age); // "unknown" false Infinity
 
 - Results are **zero vs non-zero only**, mirroring WebGPU occlusion query semantics: a resolved value of `0` means no samples passed depth testing inside the scope; any non-zero value is unspecified. vgpu decodes that to `"hidden"` / `"visible"` and never exposes a sample count.
 - The occlusion scope body **always executes** — the proxy draw is what the GPU measures, so it cannot be skipped. Cull the real draws outside the scope by checking `q.hidden`.
-- Latch contract: handle state only changes between frames (when a readback applies) and through `reset()`, so `hidden`/`state`/`age` are stable while a frame callback runs. Because results lag 1–2 frames, expect one frame of popping when an object becomes visible again; use proxies slightly larger than the real object to soften it.
-- `reset()` (per handle or whole instance) flips state to `"unknown"` immediately, and readbacks from pre-reset frames are discarded — a stale in-flight result can never resurrect after a camera cut.
+- Latch contract: handle state changes only between frames (when a readback applies) and through `reset()`, so `hidden`/`state`/`age` are stable while a frame callback runs. Expect one frame of popping when an object comes back into view; oversized proxies soften popping at the cost of overdraw — the looser the proxy, the more the real object draws.
+- `reset()` (per handle or whole instance) discards readbacks from pre-reset frames — a stale in-flight result can never resurrect after a camera cut.
 - Slots are allocated per frame in `occlusion()` call order and resolved as one contiguous range appended to the frame encoder before submit; readback never blocks a frame (when readbacks lag more frames than the staging ring holds, that frame's results are dropped, and handles keep their previous state). `await gpu.settled()` covers pending readbacks for deterministic tests and teardown.
 - `handle.dispose()` frees the label for reuse immediately. This is safe because in-flight readbacks resolve to handle object references captured per frame — never by label — and a disposed handle discards late results, so a new same-label handle can never observe the old handle's stale state.
-- The pass target needs a depth attachment (`VGPU-VIS-NO-DEPTH` otherwise): without depth testing every rasterized sample passes and each query would always report `"visible"`, useless for culling. MSAA targets and `depthReadOnly` passes both work — read-only depth still tests.
-- One visibility instance owns one occlusion query set plus resolve/staging buffers; `dispose()` releases them. Create it once and reuse the handles; handles are tied to the creating instance and gpu.
+- The pass target needs a depth attachment: without depth testing every rasterized sample passes and each query would report `"visible"`, useless for culling (`VGPU-VIS-NO-DEPTH`). MSAA targets and `depthReadOnly` passes both work — read-only depth still tests.
+- One visibility instance owns one occlusion query set plus resolve/staging buffers; `dispose()` releases them. Create the instance once and reuse it across frames.
 - **See also:** `Gpu.visibility`, `Frame`, `FramePassOptions.visibility`, `FramePass.occlusion`.
