@@ -161,6 +161,24 @@ export function passClearDepthInvalidError(value: unknown): VGPUError {
   });
 }
 
+export function passViewportInvalidError(reason: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-VIEWPORT-INVALID",
+    message: `Invalid viewport: ${reason}`,
+    fix: `Use { x?, y?, width, height, minDepth?, maxDepth? } finite numbers within device limits; omit it for the full target.`,
+    where: "Frame.pass",
+  });
+}
+
+export function passScissorInvalidError(reason: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-SCISSOR-INVALID",
+    message: `Invalid scissor: ${reason}`,
+    fix: `Use [x, y, width, height] non-negative integers with x + width and y + height within the target's current pixel size; omit it for the full target.`,
+    where: "Frame.pass",
+  });
+}
+
 export function passPreserveClearDepthError(): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-PRESERVE-CLEARDEPTH",

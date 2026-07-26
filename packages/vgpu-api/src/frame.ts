@@ -5,7 +5,7 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { encodeDraw, type Draw, type DrawCallOptions } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passPreserveClearDepthError, passPreserveMsaaError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passPreserveClearDepthError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { isTarget, type ClearColor } from "./target-utils.ts";
 
@@ -15,6 +15,17 @@ export interface FramePassOptions {
   readonly clear?: boolean | ClearColor;
   /** Depth clear value used when the pass clears. Defaults to 1. Use 0 with depth: { compare: "greater" } for reversed-Z. */
   readonly clearDepth?: number;
+  /** Viewport for every draw in this pass. Defaults to the full target. */
+  readonly viewport?: {
+    readonly x?: number;
+    readonly y?: number;
+    readonly width: number;
+    readonly height: number;
+    readonly minDepth?: number;
+    readonly maxDepth?: number;
+  };
+  /** Scissor rectangle [x, y, width, height] for every draw in this pass. Integers. Note: does not affect the clear — loadOp "clear" always clears the full attachment. */
+  readonly scissor?: readonly [number, number, number, number];
 }
 
 export interface FrameLoopHandle { stop(): void }
@@ -59,7 +70,11 @@ export class Frame {
       if (typeof clearDepth !== "number" || !(clearDepth >= 0 && clearDepth <= 1)) throw passClearDepthInvalidError(clearDepth);
       if (preserve) throw passPreserveClearDepthError();
     }
+    const viewport = targetOnly ? undefined : validatedViewport(target.viewport, this.device.gpu.limits, resolvedTarget.size);
+    const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
     const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth));
+    if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
+    if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
     try { cb(new FramePass(encoder, resolvedTarget, this.#validations)); }
     catch (error) {
       discardClaimedGroupValidationResults(this.#validations);
@@ -136,6 +151,60 @@ export class FramePass {
 function encodeFrameDrawable(drawable: Draw | Effect, encoder: GPURenderPassEncoder, target: Target, opts: DrawCallOptions, claimValidation: (result: ClaimedGroupValidationResult) => void): void {
   if ("layout" in drawable) return encodeDraw(drawable as never, encoder, target, opts, claimValidation);
   encodeDraw(effectDraw(drawable), encoder, target, opts, claimValidation);
+}
+
+/**
+ * Mirrors the WebGPU setViewport device-timeline validation (arguments are floats;
+ * bounds check against device limits, not the attachment): with maxViewportRange =
+ * maxTextureDimension2D × 2, requires x ≥ -maxViewportRange, y ≥ -maxViewportRange,
+ * 0 ≤ width/height ≤ maxTextureDimension2D, x + width ≤ maxViewportRange − 1,
+ * y + height ≤ maxViewportRange − 1, 0 ≤ minDepth ≤ 1, 0 ≤ maxDepth ≤ 1, and
+ * minDepth ≤ maxDepth.
+ */
+function validatedViewport(viewport: FramePassOptions["viewport"], limits: GPUSupportedLimits, targetSize: readonly [number, number]): { x: number; y: number; width: number; height: number; minDepth: number; maxDepth: number } | undefined {
+  if (viewport === undefined) return undefined;
+  if (typeof viewport !== "object" || viewport === null || Array.isArray(viewport)) throw passViewportInvalidError(`received ${previewValue(viewport)}; expected { x?, y?, width, height, minDepth?, maxDepth? }.`);
+  const { x = 0, y = 0, width, height, minDepth = 0, maxDepth = 1 } = viewport;
+  for (const [name, value] of [["x", x], ["y", y], ["width", width], ["height", height], ["minDepth", minDepth], ["maxDepth", maxDepth]] as const) {
+    if (typeof value !== "number" || !Number.isFinite(value)) throw passViewportInvalidError(`${name} received ${previewValue(value)}; expected a finite number.`);
+  }
+  const max = limits.maxTextureDimension2D;
+  const maxViewportRange = max * 2;
+  const sizeNote = `target is ${targetSize[0]}x${targetSize[1]}px, device maxTextureDimension2D is ${max}`;
+  if (!(width >= 0 && width <= max)) throw passViewportInvalidError(`width ${width} is outside [0, ${max}] (${sizeNote}).`);
+  if (!(height >= 0 && height <= max)) throw passViewportInvalidError(`height ${height} is outside [0, ${max}] (${sizeNote}).`);
+  if (!(x >= -maxViewportRange && x + width <= maxViewportRange - 1)) throw passViewportInvalidError(`x ${x} with width ${width} is outside [${-maxViewportRange}, ${maxViewportRange - 1}] (${sizeNote}).`);
+  if (!(y >= -maxViewportRange && y + height <= maxViewportRange - 1)) throw passViewportInvalidError(`y ${y} with height ${height} is outside [${-maxViewportRange}, ${maxViewportRange - 1}] (${sizeNote}).`);
+  if (!(minDepth >= 0 && minDepth <= 1)) throw passViewportInvalidError(`minDepth ${minDepth} is outside [0, 1].`);
+  if (!(maxDepth >= 0 && maxDepth <= 1)) throw passViewportInvalidError(`maxDepth ${maxDepth} is outside [0, 1].`);
+  if (!(minDepth <= maxDepth)) throw passViewportInvalidError(`minDepth ${minDepth} exceeds maxDepth ${maxDepth}.`);
+  return { x, y, width, height, minDepth, maxDepth };
+}
+
+/**
+ * Mirrors the WebGPU setScissorRect validation: arguments are GPUIntegerCoordinate
+ * (non-negative integers), and the rectangle must satisfy x + width ≤ attachment
+ * width and y + height ≤ attachment height against the target's current size.
+ */
+function validatedScissor(scissor: FramePassOptions["scissor"], targetSize: readonly [number, number]): readonly [number, number, number, number] | undefined {
+  if (scissor === undefined) return undefined;
+  if (!Array.isArray(scissor) || scissor.length !== 4) throw passScissorInvalidError(`received ${previewValue(scissor)}; expected [x, y, width, height].`);
+  const [x, y, width, height] = scissor;
+  for (const [name, value] of [["x", x], ["y", y], ["width", width], ["height", height]] as const) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw passScissorInvalidError(`${name} received ${previewValue(value)}; expected a non-negative integer.`);
+  }
+  const [targetWidth, targetHeight] = targetSize;
+  if (x + width > targetWidth || y + height > targetHeight) {
+    throw passScissorInvalidError(`[${x}, ${y}, ${width}, ${height}] exceeds the target's current size ${targetWidth}x${targetHeight}px (x + width <= ${targetWidth}, y + height <= ${targetHeight}).`);
+  }
+  return [x, y, width, height];
+}
+
+function previewValue(value: unknown): string {
+  if (typeof value === "string") return `'${value}'`;
+  if (Array.isArray(value)) return `[${value.map((entry) => previewValue(entry)).join(", ")}]`;
+  if (typeof value === "object" && value !== null) return "an object";
+  return String(value);
 }
 
 export class FrameRunner {

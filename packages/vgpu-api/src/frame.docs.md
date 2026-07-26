@@ -17,6 +17,15 @@ interface FramePassOptions {
   readonly target: Target;
   readonly clear?: boolean | ClearColor;
   readonly clearDepth?: number;
+  readonly viewport?: {
+    readonly x?: number;
+    readonly y?: number;
+    readonly width: number;
+    readonly height: number;
+    readonly minDepth?: number;
+    readonly maxDepth?: number;
+  };
+  readonly scissor?: readonly [number, number, number, number];
 }
 
 interface FrameLoopHandle { stop(): void; }
@@ -52,6 +61,8 @@ declare class FrameRunner {
 | opts.target | `Target` | ✔ | — | Required inside `FramePassOptions`. Use a `Surface` from `gpu.surface(canvas)` or an offscreen `Target` from `gpu.target({ size })`. |
 | opts.clear | `boolean \| ClearColor` | ✖ | `true` | Omitted or `true` clears with `gpu.clearColor`; `false` preserves existing color and depth with load ops; a color clears with that color. |
 | opts.clearDepth | `number` | ✖ | `1` | Depth clear value used when the pass clears, in `[0, 1]`. Use `0` with `depth: { compare: "greater" }` for reversed-Z. Invalid alongside `clear: false`, which preserves depth. |
+| opts.viewport | `{ x?, y?, width, height, minDepth?, maxDepth? }` | ✖ | full target | Viewport for every draw in this pass, in pixels (floats; fractional values allowed). Defaults: `x`/`y` `0`, `minDepth` `0`, `maxDepth` `1`. Validated at pass open against device limits (see Notes). |
+| opts.scissor | `readonly [number, number, number, number]` | ✖ | full target | Scissor rectangle `[x, y, width, height]` for every draw in this pass. Non-negative integers; `x + width` and `y + height` must fit the target's **current** pixel size at pass open. Does not affect the clear. |
 | frame.pass.body | `Effect \| Draw \| ((pass: FramePass) => void)` | ✔ | — | Pass a drawable directly for a single draw, or a callback to encode multiple draw and bundle commands. |
 | pass.draw.drawable | `Draw \| Effect` | ✔ | — | A main API (`vgpu`) draw or fullscreen effect. |
 | pass.draw.opts | `DrawCallOptions` | ✖ | `{}` | Per-call counts and dynamic offsets. Target is the frame pass target. |
@@ -61,7 +72,7 @@ declare class FrameRunner {
 
 **Returns:** `gpu.frame()` / `FrameRunner.frame()` return `Frame`; `Frame.pass()` and `Frame.submit()` return `void`; `FramePass.draw()` and `.bundles()` return `void`; `loop()` returns `FrameLoopHandle` with `stop()`.
 
-**Throws:** `VGPU-TARGET-REQUIRED` for runtime JS calls that omit a frame pass target; `VGPU-CLEAR-COLOR-INVALID` for invalid `gpu.clearColor` assignments or clear colors; `VGPU-PASS-PRESERVE-MSAA` when `clear: false` is used on an MSAA target; `VGPU-PASS-CLEARDEPTH-INVALID` when `clearDepth` is not a number in `[0, 1]`; `VGPU-PASS-PRESERVE-CLEARDEPTH` when `clearDepth` is combined with `clear: false`; `VGPU-FRAME-REENTRANT` when a frame is started from another frame or from a surface resize callback; `VGPU-R3-BUNDLE-STALE` or `VGPU-R3-BUNDLE-INVALID` when replaying invalid/stale bundles; draw/pass binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
+**Throws:** `VGPU-TARGET-REQUIRED` for runtime JS calls that omit a frame pass target; `VGPU-CLEAR-COLOR-INVALID` for invalid `gpu.clearColor` assignments or clear colors; `VGPU-PASS-PRESERVE-MSAA` when `clear: false` is used on an MSAA target; `VGPU-PASS-CLEARDEPTH-INVALID` when `clearDepth` is not a number in `[0, 1]`; `VGPU-PASS-PRESERVE-CLEARDEPTH` when `clearDepth` is combined with `clear: false`; `VGPU-PASS-VIEWPORT-INVALID` when `viewport` is malformed or outside device limits; `VGPU-PASS-SCISSOR-INVALID` when `scissor` is malformed or exceeds the target's current pixel size; `VGPU-FRAME-REENTRANT` when a frame is started from another frame or from a surface resize callback; `VGPU-R3-BUNDLE-STALE` or `VGPU-R3-BUNDLE-INVALID` when replaying invalid/stale bundles; draw/pass binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
 
 ## Examples
 
@@ -103,6 +114,9 @@ handle.stop();
 - There is no default target and no implicit canvas target; every `frame.pass` names its target.
 - Omitted `clear` and `clear: true` clear with `gpu.clearColor`. Pass a color to clear one pass with that color without changing the default.
 - `clearDepth` sets the depth attachment's clear value for one pass (default `1`). It only applies when the pass clears; combining it with `clear: false` throws because preserved depth is never cleared.
+- `viewport` and `scissor` are set once right after the pass opens and apply to every draw in the pass, including replayed bundles. Both are in physical pixels: surfaces size their textures by `devicePixelRatio`, so a CSS-pixel rectangle must be scaled by dpr.
+- `viewport` follows WebGPU `setViewport` rules: floats (fractional allowed), `width`/`height` in `[0, maxTextureDimension2D]`, `x`/`y` may be negative down to `-2 * maxTextureDimension2D` with `x + width`/`y + height` at most `2 * maxTextureDimension2D - 1`, `minDepth`/`maxDepth` in `[0, 1]` with `minDepth <= maxDepth`. It may extend past the target; it is not clamped to the attachment.
+- `scissor` follows WebGPU `setScissorRect` rules: non-negative integers with `x + width`/`y + height` within the target's size, validated at pass open against the **current** size (targets are resizable). It clips draws only — a clearing pass (`loadOp: "clear"`) still clears the full attachment; to clear a sub-rectangle, draw it with a scissored pass instead.
 - `clear: false` preserves color and depth contents within the same target. On `Surface`, repeated passes in one frame layer onto the same current texture; the first preserved surface pass of a new browser frame reads the swapchain's fresh contents, not the previous frame's image.
 - MSAA targets cannot be preserved because their multisample attachments use `storeOp: "discard"`; render accumulation/preserve passes into a non-MSAA target instead.
 - **Hot loops:** options bags and pass callbacks are read synchronously, so you can hoist and reuse them. For zero-per-frame-JS-cost replay, record stable work with `gpu.bundle` and replay the bundle.
