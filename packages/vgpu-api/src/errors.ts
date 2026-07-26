@@ -278,6 +278,15 @@ export function passPreserveClearStencilError(): VGPUError {
   });
 }
 
+export function passDepthReadOnlyError(reason: string, fix: string, where: "Frame.pass" | "FramePass.draw" | "FramePass.bundles" = "Frame.pass"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-DEPTH-READONLY",
+    message: `depthReadOnly ${reason}`,
+    fix,
+    where,
+  });
+}
+
 
 export function targetRequiredError(where = "Gpu.frame"): VGPUError {
   return new VGPUError({

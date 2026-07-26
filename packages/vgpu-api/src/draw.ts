@@ -988,6 +988,41 @@ export function drawUsesBlendConstant(draw: Draw): boolean { return drawState(dr
 /** Render bundle encoders cannot set the pass stencil reference; gpu.bundle uses this to reject such draws at recording. */
 export function drawUsesStencilReference(draw: Draw): boolean { return drawState(draw).stencilRef !== undefined; }
 
+/**
+ * FramePass uses this to pre-validate draws against read-only depth passes. Mirrors the WebGPU
+ * [[writesDepth]] pipeline slot: "If depthStencil.depthWriteEnabled is provided: Set
+ * pipeline.[[writesDepth]] to depthStencil.depthWriteEnabled." — vgpu always provides it on depth
+ * targets, defaulting to true.
+ */
+export function drawWritesDepth(draw: Draw): boolean {
+  return (drawState(draw).depthState ?? DEFAULT_DEPTH_STATE).depthWriteEnabled;
+}
+
+/**
+ * Stencil ops that make this draw write stencil, e.g. `front.pass: "replace"`; empty when the draw
+ * cannot write stencil. FramePass uses this to pre-validate draws against read-only stencil passes.
+ * Mirrors the WebGPU [[writesStencil]] computation: only when "depthStencil.stencilWriteMask is not 0",
+ * a face op is "not \"keep\"", and the face is not culled ("If cullMode is not \"front\", and any of
+ * stencilFront.passOp, stencilFront.depthFailOp, or stencilFront.failOp is not \"keep\"" — and the
+ * mirrored rule for stencilBack with "back") does the pipeline write stencil.
+ */
+export function drawStencilWritingOps(draw: Draw): readonly string[] {
+  const state = drawState(draw);
+  const stencil = state.stencilState;
+  if (!stencil || stencil.stencilWriteMask === 0) return [];
+  const cullMode = state.cullMode ?? "none";
+  const ops: string[] = [];
+  const collect = (faceName: "front" | "back", face: GPUStencilFaceState | undefined): void => {
+    if (!face) return;
+    for (const [name, op] of [["fail", face.failOp], ["depthFail", face.depthFailOp], ["pass", face.passOp]] as const) {
+      if (op !== undefined && op !== "keep") ops.push(`${faceName}.${name}: "${op}"`);
+    }
+  };
+  if (cullMode !== "front") collect("front", stencil.stencilFront);
+  if (cullMode !== "back") collect("back", stencil.stencilBack);
+  return ops;
+}
+
 export function encodeDraw(draw: InternalDraw, pass: GPURenderPassEncoder, target: Target | TargetSignature, opts: DrawCallOptions = {}, claimValidation?: (result: ClaimedGroupValidationResult) => void): void {
   draw.encode(pass, target, opts, claimValidation);
 }

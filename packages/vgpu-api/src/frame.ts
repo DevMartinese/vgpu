@@ -2,10 +2,10 @@ import type { Device } from "@vgpu/core";
 import { claimedGroupValidationDone, discardClaimedGroupValidationResults, discardClaimedGroupValidationScopes, popLastClaimedGroupValidationScope, preferClaimedGroupValidationResult, pushClaimedGroupValidationScope, submittedWorkDone, type ClaimedGroupValidationResult, type ValidationErrorSink } from "./claim-validation.ts";
 import { endRenderPassWithClaimValidation } from "./claim-validation-encode.ts";
 import { replayBundles, type Bundle } from "./bundle.ts";
-import { encodeDraw, type Draw, type DrawCallOptions } from "./draw.ts";
+import { drawStencilWritingOps, drawWritesDepth, encodeDraw, type Draw, type DrawCallOptions, type InternalDraw } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
 
@@ -17,6 +17,8 @@ export interface FramePassOptions {
   readonly clearDepth?: number;
   /** Stencil clear value used when the pass clears. Defaults to 0. Requires a depth format with a stencil aspect. */
   readonly clearStencil?: number;
+  /** Opens the pass with a read-only depth attachment: depth can be tested against and sampled as a texture in the same pass, but not written. For combined depth-stencil formats the stencil aspect is read-only too. Defaults to false. */
+  readonly depthReadOnly?: boolean;
   /** Viewport for every draw in this pass. Defaults to the full target. */
   readonly viewport?: {
     readonly x?: number;
@@ -83,12 +85,24 @@ export class Frame {
       const depthFormat = resolvedTarget.depth?.format;
       if (!hasStencilAspect(depthFormat)) throw passClearStencilInvalidError(`received ${String(clearStencil)}, but the target's depth format ${depthFormat ? `"${depthFormat}"` : "(none)"} has no stencil aspect, so clearStencil would have no effect.`);
     }
+    const depthReadOnly = targetOnly ? undefined : target.depthReadOnly;
+    if (depthReadOnly !== undefined && typeof depthReadOnly !== "boolean") {
+      throw passDepthReadOnlyError(`received ${previewValue(depthReadOnly)}; expected a boolean.`, "Pass depthReadOnly: true to open the pass with a read-only depth attachment, or omit it.");
+    }
+    if (depthReadOnly) {
+      // Dead-option and contradiction rules: color attachments still load/clear normally in a read-only
+      // pass, so clear (color) stays legal, but the read-only depth/stencil aspects omit their ops entirely
+      // and can never be cleared.
+      if (!resolvedTarget.depth) throw passDepthReadOnlyError("is set, but the target has no depth attachment, so there is nothing to make read-only.", "Create the target with depth: true (or a depth format), or drop depthReadOnly.");
+      if (clearDepth !== undefined) throw passDepthReadOnlyError("cannot be combined with clearDepth; a read-only depth aspect omits its load/store ops and is never cleared.", "Remove clearDepth, or drop depthReadOnly.");
+      if (clearStencil !== undefined) throw passDepthReadOnlyError("cannot be combined with clearStencil; a read-only stencil aspect omits its load/store ops and is never cleared.", "Remove clearStencil, or drop depthReadOnly.");
+    }
     const viewport = targetOnly ? undefined : validatedViewport(target.viewport, this.device.gpu.limits, resolvedTarget.size);
     const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
-    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil));
+    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly));
     if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
     if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
-    try { cb(new FramePass(encoder, resolvedTarget, this.#validations)); }
+    try { cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true)); }
     catch (error) {
       discardClaimedGroupValidationResults(this.#validations);
       this.#validations.length = 0;
@@ -152,12 +166,37 @@ export class Frame {
 }
 
 export class FramePass {
-  constructor(private readonly encoder: GPURenderPassEncoder, readonly target: Target, private readonly validations: ClaimedGroupValidationResult[]) {}
+  constructor(private readonly encoder: GPURenderPassEncoder, readonly target: Target, private readonly validations: ClaimedGroupValidationResult[], private readonly depthReadOnly = false) {}
   draw(drawable: Draw | Effect, opts: DrawCallOptions = {}): void {
+    if (this.depthReadOnly) assertDrawableAllowedInReadOnlyPass(drawable, this.target);
     encodeFrameDrawable(drawable, this.encoder, this.target, opts, (result) => this.validations.push(result));
   }
   bundles(...bundles: readonly Bundle[]): void {
+    // WebGPU executeBundles: "If this.[[depthReadOnly]] is true, bundle.[[depthReadOnly]] must be true.
+    // If this.[[stencilReadOnly]] is true, bundle.[[stencilReadOnly]] must be true." gpu.bundle always
+    // records bundles with both flags false, so no recorded bundle can replay into a read-only pass;
+    // reject up front instead of leaving it to native validation.
+    if (this.depthReadOnly) throw passDepthReadOnlyError("pass cannot replay bundles: gpu.bundle records bundles with writable depth/stencil, and WebGPU only executes read-only-recorded bundles in a read-only pass.", "Encode the draws directly with pass.draw(...) inside the depthReadOnly pass.", "FramePass.bundles");
     replayBundles(this.target, bundles, (gpuBundles) => this.encoder.executeBundles(gpuBundles));
+  }
+}
+
+/**
+ * Early equivalent of the WebGPU setPipeline device-timeline checks: "If pipeline.[[writesDepth]]:
+ * this.[[depthReadOnly]] must be false. If pipeline.[[writesStencil]]: this.[[stencilReadOnly]] must be
+ * false." A depthReadOnly pass marks the stencil aspect read-only too (combined formats), so both are
+ * validated here with actionable errors before encoding.
+ */
+function assertDrawableAllowedInReadOnlyPass(drawable: Draw | Effect, target: Target): void {
+  const draw = ("layout" in drawable ? drawable : effectDraw(drawable)) as InternalDraw;
+  if (drawWritesDepth(draw)) {
+    throw passDepthReadOnlyError(`pass cannot encode draw '${draw.label}': its depth state writes depth (the default is write: true). Give the draw depth: { write: false } (or depth: false to disable depth testing).`, "Use depth: { write: false } on the draw, or open the pass without depthReadOnly.", "FramePass.draw");
+  }
+  if (hasStencilAspect(target.depth?.format)) {
+    const ops = drawStencilWritingOps(draw);
+    if (ops.length) {
+      throw passDepthReadOnlyError(`pass cannot encode draw '${draw.label}': its stencil ops can write (${ops.join(", ")}), and the pass's stencil aspect is read-only too.`, `Use "keep" for those ops or stencil writeMask: 0, or open the pass without depthReadOnly.`, "FramePass.draw");
+    }
   }
 }
 
