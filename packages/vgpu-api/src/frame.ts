@@ -5,10 +5,11 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { drawStencilWritingOps, drawWritesDepth, encodeDraw, type Draw, type DrawCallOptions, type InternalDraw } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError, timerInvalidError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, queryNestedError, queryNoVisibilityError, surfaceNotInFrameError, targetRequiredError, timerInvalidError, visibilityInvalidError, visibilityNoDepthError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
 import { isTimerSpan, type InternalTimer, type TimerSpan } from "./timer.ts";
+import { isVisibility, type InternalVisibility, type Visibility, type VisibilityQuery } from "./visibility.ts";
 
 export interface FramePassOptions {
   readonly target: Target;
@@ -33,6 +34,8 @@ export interface FramePassOptions {
   readonly scissor?: readonly [number, number, number, number];
   /** Times this pass on the GPU: pass `timer.span(name)` from a `gpu.timer()`. The pass duration lands in `timer.onResults` under `name`, in milliseconds. One span name per frame. */
   readonly timer?: TimerSpan;
+  /** Enables occlusion queries in this pass: pass a `gpu.visibility()` instance, then wrap proxy draws in `pass.occlusion(handle, body)`. Requires a target with a depth attachment. */
+  readonly visibility?: Visibility;
 }
 
 export interface FrameLoopHandle { stop(): void }
@@ -51,6 +54,7 @@ export class Frame {
   readonly #encoder: GPUCommandEncoder;
   readonly #validations: ClaimedGroupValidationResult[] = [];
   readonly #timers = new Set<InternalTimer>();
+  readonly #visibilities = new Set<InternalVisibility>();
   #submitted = false;
   constructor(
     private readonly device: Device,
@@ -104,12 +108,16 @@ export class Frame {
     const viewport = targetOnly ? undefined : validatedViewport(target.viewport, this.device.gpu.limits, resolvedTarget.size);
     const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
     const timestampWrites = targetOnly ? undefined : this.#attachTimerSpan(target.timer);
-    // timestampWrites is target-independent pass state: decorate the descriptor after obtaining it from the target.
-    const descriptor = resolvedTarget.renderPassDescriptor({ clear: clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly });
-    const encoder = this.#encoder.beginRenderPass(timestampWrites ? { ...descriptor, timestampWrites } : descriptor);
+    const visibility = targetOnly ? undefined : this.#attachVisibility(target.visibility, resolvedTarget);
+    // timestampWrites and occlusionQuerySet are target-independent pass state: decorate the descriptor after obtaining it from the target.
+    let descriptor = resolvedTarget.renderPassDescriptor({ clear: clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly });
+    if (timestampWrites) descriptor = { ...descriptor, timestampWrites };
+    // Mirrors the WebGPU pass descriptor rule: occlusionQuerySet must be a valid query set of type "occlusion".
+    if (visibility) descriptor = { ...descriptor, occlusionQuerySet: visibility.querySet };
+    const encoder = this.#encoder.beginRenderPass(descriptor);
     if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
     if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
-    try { cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true)); }
+    try { cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true, visibility, this)); }
     catch (error) {
       discardClaimedGroupValidationResults(this.#validations);
       this.#validations.length = 0;
@@ -123,9 +131,10 @@ export class Frame {
   submit(): void {
     if (this.#submitted) return;
     this.#submitted = true;
-    // Timed frames append one resolveQuerySet of each timer's contiguous used range (plus the
-    // staging copy) to the still-open frame encoder — zero extra submissions.
+    // Timed and occlusion-queried frames append one resolveQuerySet of each instance's contiguous
+    // used range (plus the staging copy) to the still-open frame encoder — zero extra submissions.
     for (const timer of this.#timers) timer.finalizeFrame(this, this.#encoder);
+    for (const visibility of this.#visibilities) visibility.finalizeFrame(this, this.#encoder);
     let commandBuffer: GPUCommandBuffer;
     const finishContext = this.#validations[0]?.context;
     if (finishContext) pushClaimedGroupValidationScope(this.device, finishContext);
@@ -159,8 +168,9 @@ export class Frame {
       const result = popLastClaimedGroupValidationScope(this.device);
       if (result) this.#validations[0] = this.#validations[0] ? preferClaimedGroupValidationResult(result, this.#validations[0]) : result;
     }
-    // The submit succeeded: start each timer's non-blocking readback of this frame's resolve.
+    // The submit succeeded: start each timer's and visibility's non-blocking readback of this frame's resolve.
     for (const timer of this.#timers) timer.frameSubmitted(this);
+    for (const visibility of this.#visibilities) visibility.frameSubmitted(this);
     this.done = this.#trackDone(claimedGroupValidationDone(this.device, this.#validations, { errorSink: this.errorSink }));
   }
 
@@ -171,6 +181,19 @@ export class Frame {
     }
     this.#timers.add(span.owner);
     return span.owner.attachSpan(span, this, this.device);
+  }
+
+  #attachVisibility(visibility: Visibility | undefined, resolvedTarget: Target): InternalVisibility | undefined {
+    if (visibility === undefined) return undefined;
+    if (!isVisibility(visibility)) {
+      throw visibilityInvalidError(`FramePassOptions.visibility received ${previewValue(visibility)}; expected a Visibility from gpu.visibility().`, "Create const vis = gpu.visibility() once, then pass { target, visibility: vis } per pass.", "Frame.pass");
+    }
+    // Spec-legal but a dead option for culling: without a depth attachment nothing is depth-tested,
+    // so any rasterized sample passes and every query reports "visible". Start strict.
+    if (!resolvedTarget.depth) throw visibilityNoDepthError();
+    visibility.attachFrame(this, this.device);
+    this.#visibilities.add(visibility);
+    return visibility;
   }
 
   async #deliverValidationError(label: string, group: number, cause: unknown): Promise<void> {
@@ -187,10 +210,32 @@ export class Frame {
 }
 
 export class FramePass {
-  constructor(private readonly encoder: GPURenderPassEncoder, readonly target: Target, private readonly validations: ClaimedGroupValidationResult[], private readonly depthReadOnly = false) {}
+  #occlusionActive = false;
+  constructor(private readonly encoder: GPURenderPassEncoder, readonly target: Target, private readonly validations: ClaimedGroupValidationResult[], private readonly depthReadOnly = false, private readonly visibility?: InternalVisibility, private readonly frame?: Frame) {}
   draw(drawable: Draw | Effect, opts: DrawCallOptions = {}): void {
     if (this.depthReadOnly) assertDrawableAllowedInReadOnlyPass(drawable, this.target);
     encodeFrameDrawable(drawable, this.encoder, this.target, opts, (result) => this.validations.push(result));
+  }
+  /**
+   * Wraps one or more draws in begin/endOcclusionQuery. The body ALWAYS executes; condition your
+   * real draws on `q.hidden` outside.
+   */
+  occlusion(query: VisibilityQuery, body: Draw | Effect | (() => void)): void {
+    if (!this.visibility) throw queryNoVisibilityError();
+    // WebGPU beginOcclusionQuery: "no occlusion query must be active for this" — one scope at a time.
+    if (this.#occlusionActive) throw queryNestedError();
+    const index = this.visibility.beginQuery(query, this.frame);
+    this.encoder.beginOcclusionQuery(index);
+    this.#occlusionActive = true;
+    try {
+      if (typeof body === "function") body();
+      else this.draw(body);
+    } finally {
+      // vgpu's scope shape makes an unclosed query structurally impossible: end in finally, so a
+      // throwing body can never leave a query open at pass end (which would invalidate the encoder).
+      this.#occlusionActive = false;
+      this.encoder.endOcclusionQuery();
+    }
   }
   bundles(...bundles: readonly Bundle[]): void {
     // WebGPU executeBundles: "If this.[[depthReadOnly]] is true, bundle.[[depthReadOnly]] must be true.

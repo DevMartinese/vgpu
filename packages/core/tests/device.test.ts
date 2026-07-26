@@ -81,3 +81,22 @@ test("mock resolveQuerySet writes deterministic u64 values and copyBufferToBuffe
   staging.gpu.unmap();
   expect([...values]).toEqual([0n, 1_000_000n, 4_000_000n, 9_000_000n]);
 });
+
+test("mock render pass encoders record occlusion query scopes; bundle encoders have no query methods, matching WebGPU", () => {
+  const gpu = createMockGPUDevice();
+  const encoder = gpu.createCommandEncoder();
+  const pass = encoder.beginRenderPass({ colorAttachments: [] });
+
+  pass.beginOcclusionQuery(0);
+  pass.endOcclusionQuery();
+  pass.beginOcclusionQuery(3);
+  pass.endOcclusionQuery();
+  pass.end();
+
+  const instrumentation = getMockGPUDeviceInstrumentation(gpu);
+  expect(instrumentation.occlusionQueryOps).toEqual([["begin", 0], ["end"], ["begin", 3], ["end"]]);
+  // GPURenderBundleEncoder has no beginOcclusionQuery/endOcclusionQuery in WebGPU; the mock matches.
+  const bundleEncoder = gpu.createRenderBundleEncoder({ colorFormats: ["rgba8unorm"] });
+  expect("beginOcclusionQuery" in bundleEncoder).toBe(false);
+  expect("endOcclusionQuery" in bundleEncoder).toBe(false);
+});

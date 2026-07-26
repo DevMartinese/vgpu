@@ -23,6 +23,8 @@ export interface MockGPUDeviceInstrumentation {
   readonly createRenderPipelineAsyncDescriptors: GPURenderPipelineDescriptor[];
   readonly createComputePipelineDescriptors: GPUComputePipelineDescriptor[];
   readonly createQuerySetDescriptors: GPUQuerySetDescriptor[];
+  /** Render-pass occlusion scope ops in encode order: ["begin", queryIndex] / ["end"]. */
+  readonly occlusionQueryOps: Array<readonly ["begin", number] | readonly ["end"]>;
 }
 
 const mockInstrumentationKey = "__vgpuMockInstrumentation";
@@ -139,6 +141,8 @@ export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevi
           // Deterministic fake query values so map/decode paths are testable end-to-end without a GPU:
           // query index i resolves to the u64 i * i * 1e6. Read as timestamp ns ticks, a begin/end pair
           // at indices (2k, 2k + 1) yields a positive, per-pair-distinct delta of (4k + 1) * 1e6 ns = (4k + 1) ms.
+          // Read as occlusion sample counts (zero vs non-zero), index 0 decodes to "hidden" (0) and every
+          // other index to "visible" (non-zero), covering both decode paths.
           const view = new DataView(destination.__vgpuMockBytes.buffer, destination.__vgpuMockBytes.byteOffset, destination.__vgpuMockBytes.byteLength);
           for (let i = 0; i < queryCount; i++) {
             const index = BigInt(firstQuery + i);
@@ -147,9 +151,15 @@ export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevi
         },
         copyTextureToBuffer() {},
         beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, dispatchWorkgroupsIndirect() {}, end() {} }) as unknown as GPUComputePassEncoder,
-        // Mock render pass encoder: only binding/pipeline/draw/bundle/end methods used by tests are implemented.
-        // setBlendConstant/setStencilReference/setViewport/setScissorRect are deliberately absent from the mock render bundle encoder above, matching WebGPU (drawIndirect/drawIndexedIndirect are present there, also matching WebGPU).
-        beginRenderPass: () => ({ setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setStencilReference() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, drawIndirect() {}, drawIndexedIndirect() {}, end() {} }) as unknown as GPURenderPassEncoder,
+        // Mock render pass encoder: only binding/pipeline/draw/bundle/query/end methods used by tests are implemented.
+        // setBlendConstant/setStencilReference/setViewport/setScissorRect and beginOcclusionQuery/endOcclusionQuery are deliberately absent from the mock render bundle encoder above, matching WebGPU (drawIndirect/drawIndexedIndirect are present there, also matching WebGPU).
+        beginRenderPass: () => ({
+          setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setStencilReference() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, drawIndirect() {}, drawIndexedIndirect() {},
+          // Instrumented no-ops so occlusion scope shape (indices + begin/end pairing) is assertable.
+          beginOcclusionQuery(queryIndex: number) { instrumentation.occlusionQueryOps.push(["begin", queryIndex]); },
+          endOcclusionQuery() { instrumentation.occlusionQueryOps.push(["end"]); },
+          end() {},
+        }) as unknown as GPURenderPassEncoder,
         finish: () => ({}),
       // Mock command encoder: only copy/render/finish methods used by core/render are implemented.
       } as unknown as GPUCommandEncoder;
@@ -202,6 +212,7 @@ function createMockGPUDeviceInstrumentation(): MockGPUDeviceInstrumentation {
     createRenderPipelineAsyncDescriptors: [],
     createComputePipelineDescriptors: [],
     createQuerySetDescriptors: [],
+    occlusionQueryOps: [],
   };
 }
 

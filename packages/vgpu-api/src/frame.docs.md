@@ -11,7 +11,7 @@ import type { Frame, FramePass, FramePassOptions, FrameLoopHandle, FrameRunner }
 ## Signature
 
 ```ts
-import type { Bundle, ClearColor, Draw, DrawCallOptions, Effect, Target, TimerSpan } from "vgpu";
+import type { Bundle, ClearColor, Draw, DrawCallOptions, Effect, Target, TimerSpan, Visibility, VisibilityQuery } from "vgpu";
 
 interface FramePassOptions {
   readonly target: Target;
@@ -29,6 +29,7 @@ interface FramePassOptions {
   };
   readonly scissor?: readonly [number, number, number, number];
   readonly timer?: TimerSpan;
+  readonly visibility?: Visibility;
 }
 
 interface FrameLoopHandle { stop(): void; }
@@ -45,6 +46,7 @@ declare class Frame {
 declare class FramePass {
   readonly target: Target;
   draw(drawable: Draw | Effect, opts?: DrawCallOptions): void;
+  occlusion(query: VisibilityQuery, body: Draw | Effect | (() => void)): void;
   bundles(...bundles: readonly Bundle[]): void;
 }
 
@@ -69,16 +71,19 @@ declare class FrameRunner {
 | opts.viewport | `{ x?, y?, width, height, minDepth?, maxDepth? }` | ✖ | full target | Viewport for every draw in this pass, in pixels (floats; fractional values allowed). Defaults: `x`/`y` `0`, `minDepth` `0`, `maxDepth` `1`. Validated at pass open against device limits (see Notes). |
 | opts.scissor | `readonly [number, number, number, number]` | ✖ | full target | Scissor rectangle `[x, y, width, height]` for every draw in this pass. Non-negative integers; `x + width` and `y + height` must fit the target's **current** pixel size at pass open. Does not affect the clear. |
 | opts.timer | `TimerSpan` | ✖ | `undefined` | Times this pass on the GPU: pass `timer.span(name)` from a `gpu.timer()` (needs the `"timestamp-query"` device feature). The pass duration lands in `timer.onResults` under `name`, in milliseconds, typically 1–2 frames later. One span name per frame. |
+| opts.visibility | `Visibility` | ✖ | `undefined` | Enables occlusion queries in this pass: pass a `gpu.visibility()` instance (core WebGPU, no device feature), then wrap proxy draws in `pass.occlusion(handle, body)`. Requires a target with a depth attachment. |
 | frame.pass.body | `Effect \| Draw \| ((pass: FramePass) => void)` | ✔ | — | Pass a drawable directly for a single draw, or a callback to encode multiple draw and bundle commands. |
 | pass.draw.drawable | `Draw \| Effect` | ✔ | — | A main API (`vgpu`) draw or fullscreen effect. |
 | pass.draw.opts | `DrawCallOptions` | ✖ | `{}` | Per-call counts and dynamic offsets. Target is the frame pass target. |
+| pass.occlusion.query | `VisibilityQuery` | ✔ | — | Stable handle from `vis.query(label)` of the same visibility instance the pass was opened with. One use per handle per frame, across passes too. |
+| pass.occlusion.body | `Draw \| Effect \| (() => void)` | ✔ | — | Wrapped in `beginOcclusionQuery`/`endOcclusionQuery`. The body ALWAYS executes — it is the proxy the GPU measures; condition your real draws on `q.hidden` outside the scope. |
 | pass.bundles.bundles | `readonly Bundle[]` | ✔ | — | Bundles recorded by `gpu.bundle({ target }, cb)`. |
 | runner.loop.cb | `(frame: Frame) => void` | ✔ | — | Called on each scheduled frame; frame is submitted in `finally`. Surface auto-resize runs before this callback. |
 | runner.loop.opts.fps | `number` | ✖ | `0` (uncapped) | Positive values cap by minimum frame interval `1000 / fps`; omitted or non-positive uses every rAF/timer tick. |
 
-**Returns:** `gpu.frame()` / `FrameRunner.frame()` return `Frame`; `Frame.pass()` and `Frame.submit()` return `void`; `FramePass.draw()` and `.bundles()` return `void`; `loop()` returns `FrameLoopHandle` with `stop()`.
+**Returns:** `gpu.frame()` / `FrameRunner.frame()` return `Frame`; `Frame.pass()` and `Frame.submit()` return `void`; `FramePass.draw()`, `.occlusion()`, and `.bundles()` return `void`; `loop()` returns `FrameLoopHandle` with `stop()`.
 
-**Throws:** `VGPU-TARGET-REQUIRED` for runtime JS calls that omit a frame pass target; `VGPU-CLEAR-COLOR-INVALID` for invalid `gpu.clearColor` assignments or clear colors; `VGPU-PASS-PRESERVE-MSAA` when `clear: false` is used on an MSAA target; `VGPU-PASS-CLEARDEPTH-INVALID` when `clearDepth` is not a number in `[0, 1]`; `VGPU-PASS-PRESERVE-CLEARDEPTH` when `clearDepth` is combined with `clear: false`; `VGPU-PASS-CLEARSTENCIL-INVALID` when `clearStencil` is not an integer in `[0, 0xFFFFFFFF]` or the target's depth format has no stencil aspect (the option would have no effect); `VGPU-PASS-PRESERVE-CLEARSTENCIL` when `clearStencil` is combined with `clear: false`; `VGPU-PASS-DEPTH-READONLY` when `depthReadOnly` is not a boolean, is set on a target without depth, is combined with `clearDepth`/`clearStencil`, when a depth- or stencil-writing draw (or effect) is encoded into a read-only pass, or when bundles are replayed into one; `VGPU-PASS-VIEWPORT-INVALID` when `viewport` is malformed or outside device limits; `VGPU-PASS-SCISSOR-INVALID` when `scissor` is malformed or exceeds the target's current pixel size; `VGPU-TIMER-INVALID` when `timer` is not a `TimerSpan` from `timer.span(name)`, repeats a span name within one frame, uses a span from a different gpu's timer, or uses a disposed timer's span, and `VGPU-TIMER-CAPACITY` when one frame times more than 2048 spans (see `Timer`); `VGPU-FRAME-REENTRANT` when a frame is started from another frame or from a surface resize callback; `VGPU-R3-BUNDLE-STALE` or `VGPU-R3-BUNDLE-INVALID` when replaying invalid/stale bundles; draw/pass binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
+**Throws:** `VGPU-TARGET-REQUIRED` for runtime JS calls that omit a frame pass target; `VGPU-CLEAR-COLOR-INVALID` for invalid `gpu.clearColor` assignments or clear colors; `VGPU-PASS-PRESERVE-MSAA` when `clear: false` is used on an MSAA target; `VGPU-PASS-CLEARDEPTH-INVALID` when `clearDepth` is not a number in `[0, 1]`; `VGPU-PASS-PRESERVE-CLEARDEPTH` when `clearDepth` is combined with `clear: false`; `VGPU-PASS-CLEARSTENCIL-INVALID` when `clearStencil` is not an integer in `[0, 0xFFFFFFFF]` or the target's depth format has no stencil aspect (the option would have no effect); `VGPU-PASS-PRESERVE-CLEARSTENCIL` when `clearStencil` is combined with `clear: false`; `VGPU-PASS-DEPTH-READONLY` when `depthReadOnly` is not a boolean, is set on a target without depth, is combined with `clearDepth`/`clearStencil`, when a depth- or stencil-writing draw (or effect) is encoded into a read-only pass, or when bundles are replayed into one; `VGPU-PASS-VIEWPORT-INVALID` when `viewport` is malformed or outside device limits; `VGPU-PASS-SCISSOR-INVALID` when `scissor` is malformed or exceeds the target's current pixel size; `VGPU-TIMER-INVALID` when `timer` is not a `TimerSpan` from `timer.span(name)`, repeats a span name within one frame, uses a span from a different gpu's timer, or uses a disposed timer's span, and `VGPU-TIMER-CAPACITY` when one frame times more than 2048 spans (see `Timer`); `VGPU-VIS-INVALID` when `visibility` is not a `Visibility` from `gpu.visibility()`, comes from a different gpu, or `occlusion()` receives a non-`VisibilityQuery` value or a handle of a different visibility instance; `VGPU-VIS-NO-DEPTH` when `visibility` is set on a pass whose target has no depth attachment; `VGPU-VIS-DISPOSED` when the visibility instance or the handle is disposed; `VGPU-VIS-CAPACITY` at the `occlusion()` call that exceeds the declared capacity; `VGPU-QUERY-NO-VISIBILITY` for `occlusion()` in a pass opened without `visibility`; `VGPU-QUERY-NESTED` for `occlusion()` inside an active `occlusion()` body; `VGPU-QUERY-DUPLICATE` when a handle is used twice within one frame (see `Visibility`); `VGPU-FRAME-REENTRANT` when a frame is started from another frame or from a surface resize callback; `VGPU-R3-BUNDLE-STALE` or `VGPU-R3-BUNDLE-INVALID` when replaying invalid/stale bundles; draw/pass binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
 
 ## Examples
 
@@ -125,6 +130,7 @@ handle.stop();
 - Draws in a `depthReadOnly` pass must not write depth or stencil, mirroring WebGPU `setPipeline` ("If pipeline.[[writesDepth]]: this.[[depthReadOnly]] must be false", and the same for `[[writesStencil]]`). The default depth state **writes** (`write: true`), so give each draw `depth: { write: false }` (or `depth: false`); a draw writes stencil when any of its stencil ops on an unculled face is not `"keep"` and its stencil `writeMask` is nonzero. Violations throw `VGPU-PASS-DEPTH-READONLY` at encode. Effects always keep the default depth state, so they cannot be drawn into a `depthReadOnly` pass on a depth target.
 - Bundles cannot replay into a `depthReadOnly` pass: WebGPU only executes bundles recorded read-only there, and `gpu.bundle` always records with writable depth/stencil. `FramePass.bundles` throws `VGPU-PASS-DEPTH-READONLY` up front; encode those draws directly with `pass.draw(...)` instead.
 - `timer` marks the pass for GPU timing: the span's begin/end timestamp pair is written through the pass descriptor's `timestampWrites`, one `resolveQuerySet` of the frame's used range is appended to the frame encoder before submit, and results are read back without blocking. Durations arrive in `timer.onResults`, keyed by span name, in milliseconds. See `Timer` for feature gating, capacity, and result semantics.
+- `visibility` opens the pass with the instance's occlusion query set as `occlusionQuerySet`. Each `pass.occlusion(q, body)` wraps its body in `beginOcclusionQuery`/`endOcclusionQuery` on a per-frame slot; one `resolveQuerySet` of the frame's contiguous used range is appended before submit and read back without blocking. Draws replayed via `pass.bundles(...)` inside an occlusion scope also count toward the active query — render bundles themselves have no query methods, but their draws execute inside the scope. Results are zero vs non-zero only; see `Visibility` for the handle semantics (`hidden`, `state`, `age`, resets, capacity).
 - `viewport` and `scissor` are set once right after the pass opens and apply to every draw in the pass, including replayed bundles. Both are in physical pixels: surfaces size their textures by `devicePixelRatio`, so a CSS-pixel rectangle must be scaled by dpr.
 - `viewport` follows WebGPU `setViewport` rules: floats (fractional allowed), `width`/`height` in `[0, maxTextureDimension2D]`, `x`/`y` may be negative down to `-2 * maxTextureDimension2D` with `x + width`/`y + height` at most `2 * maxTextureDimension2D - 1`, `minDepth`/`maxDepth` in `[0, 1]` with `minDepth <= maxDepth`. It may extend past the target; it is not clamped to the attachment.
 - `scissor` follows WebGPU `setScissorRect` rules: non-negative integers with `x + width`/`y + height` within the target's size, validated at pass open against the **current** size (targets are resizable). It clips draws only — a clearing pass (`loadOp: "clear"`) still clears the full attachment; to clear a sub-rectangle, draw it with a scissored pass instead.
@@ -133,4 +139,4 @@ handle.stop();
 - **Hot loops:** options bags and pass callbacks are read synchronously, so you can hoist and reuse them. For zero-per-frame-JS-cost replay, record stable work with `gpu.bundle` and replay the bundle.
 - `frame.done` is resolve-only. Await it as a completion/timing signal for readbacks, benchmarks, deterministic tests, or teardown; use `gpu.onError` plus `await gpu.settled()` for asynchronous errors.
 - Do not `await frame.done` inside a RAF/frame loop. Schedule the next frame as soon as `gpu.frame()` returns, or you serialize CPU and GPU work.
-- **See also:** `Gpu.frame`, `Surface`, `Effect`, `Draw`, `Bundle`, `Target`, `Timer`.
+- **See also:** `Gpu.frame`, `Surface`, `Effect`, `Draw`, `Bundle`, `Target`, `Timer`, `Visibility`.

@@ -306,6 +306,87 @@ export function timerCapacityError(maxSpans: number, maxQueries: number): VGPUEr
   });
 }
 
+export function visibilityInvalidError(reason: string, fix: string, where = "gpu.visibility"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-VIS-INVALID",
+    message: `Invalid visibility use: ${reason}`,
+    fix,
+    where,
+  });
+}
+
+export function visibilityCapacityLimitError(value: unknown, maxQueries: number): VGPUError {
+  return new VGPUError({
+    code: "VGPU-VIS-CAPACITY-LIMIT",
+    message: `capacity received ${String(value)}; expected an integer in [1, ${maxQueries}] — a visibility instance holds one occlusion query set and WebGPU createQuerySet requires count <= ${maxQueries}.`,
+    fix: `Use gpu.visibility({ capacity }) with an integer capacity of at most ${maxQueries} (default 64), or create several visibility instances.`,
+    where: "gpu.visibility",
+  });
+}
+
+export function visibilityCapacityError(capacity: number): VGPUError {
+  return new VGPUError({
+    code: "VGPU-VIS-CAPACITY",
+    message: `frame uses more than the declared ${capacity} occlusion query slot(s); the query set is bound to this frame's pass descriptors and cannot grow mid-frame.`,
+    fix: `Raise gpu.visibility({ capacity }) (max 4096), or dispose() unused query handles so fewer slots are needed per frame.`,
+    where: "FramePass.occlusion",
+  });
+}
+
+export function visibilityLabelDuplicateError(label: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-VIS-LABEL-DUPLICATE",
+    message: `query label '${label}' is already live on this visibility instance.`,
+    fix: `Reuse the existing handle — vis.query(label) handles are stable, created once outside the loop — or dispose() the old handle first, or pick a distinct label.`,
+    where: "Visibility.query",
+  });
+}
+
+export function visibilityDisposedError(what: "visibility" | "query handle", where: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-VIS-DISPOSED",
+    message: `the ${what} is disposed.`,
+    fix: what === "visibility" ? "Create a new instance with gpu.visibility()." : "Create a new handle with vis.query(label).",
+    where,
+  });
+}
+
+export function visibilityNoDepthError(): VGPUError {
+  return new VGPUError({
+    code: "VGPU-VIS-NO-DEPTH",
+    message: "visibility is set, but the pass target has no depth attachment; without depth testing an occlusion query passes for anything rasterized, so it always reports \"visible\" and is useless for culling.",
+    fix: "Create the target with depth: true (or a depth format), or drop visibility from this pass.",
+    where: "Frame.pass",
+  });
+}
+
+export function queryNoVisibilityError(): VGPUError {
+  return new VGPUError({
+    code: "VGPU-QUERY-NO-VISIBILITY",
+    message: "occlusion() needs the pass to be opened with a visibility instance; the render pass has no occlusionQuerySet to write into.",
+    fix: "Open the pass with f.pass({ target, visibility: vis }, ...) using the gpu.visibility() instance that created the query handle.",
+    where: "FramePass.occlusion",
+  });
+}
+
+export function queryNestedError(): VGPUError {
+  return new VGPUError({
+    code: "VGPU-QUERY-NESTED",
+    message: "occlusion() cannot nest inside an active occlusion() body; WebGPU allows one active occlusion query per pass at a time.",
+    fix: "Encode each occlusion scope sequentially: p.occlusion(a, ...); p.occlusion(b, ...).",
+    where: "FramePass.occlusion",
+  });
+}
+
+export function queryDuplicateError(label: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-QUERY-DUPLICATE",
+    message: `query '${label}' was already used this frame; a slot holds one result per frame, so reuse would silently overwrite it.`,
+    fix: `Use one handle per measured object per frame, e.g. vis.query("${label}-2") for a second scope.`,
+    where: "FramePass.occlusion",
+  });
+}
+
 export function targetRequiredError(where = "Gpu.frame"): VGPUError {
   return new VGPUError({
     code: "VGPU-TARGET-REQUIRED",
