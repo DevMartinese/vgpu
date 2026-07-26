@@ -1,6 +1,6 @@
 import { createGpu, type InitOptions } from "./init.ts";
 
-export type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, DispatchOptions, Gpu, ClearColor, GpuErrorListener, InitOptions, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions, Surface, SurfaceOptions, SurfaceResizeEvent } from "./init.ts";
+export type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, DispatchOptions, Gpu, ClearColor, GpuErrorListener, InitOptions, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions, Surface, SurfaceOptions, SurfaceResizeEvent, Timer, TimerSpan } from "./init.ts";
 export type { BlendComponentOptions, BlendOptions, BlendPreset, DepthOptions, Draw, DrawOptions, DrawCallOptions, DrawLayoutOptions, MeshLike, StencilFaceOptions, StencilOptions } from "./draw.ts";
 export { Mesh } from "./scene/mesh-descriptor.ts";
 export type { MeshAttributeOverride, MeshAttributes, MeshBuffer, MeshBufferOptions, MeshData, MeshOptions, MeshSlice, MeshSliceOptions } from "./scene/mesh-descriptor.ts";

@@ -10,3 +10,11 @@ so tests can exercise capability inspection through `Device.limits` and
 `createMockGPUDevice({ features: [...] })` to create a device whose `features`
 set reflects the given names, mirroring a device requested with those
 `requiredFeatures`.
+
+Query paths are testable end-to-end: `createQuerySet` returns an instrumented mock
+query set (`type`, `count`, `label`, `destroy()`), render pass descriptors may carry
+`timestampWrites`, the command encoder's `resolveQuerySet` writes deterministic fake
+u64 values into the destination mock buffer's storage — query index `i` resolves to
+`i * i * 1e6`, so a timestamp pair `(2k, 2k + 1)` decodes to a positive, per-pair-distinct
+delta of `(4k + 1)` ms — and `copyBufferToBuffer` copies bytes between mock buffers so
+staged readbacks observe them.

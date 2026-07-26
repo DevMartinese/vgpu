@@ -5,9 +5,10 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { drawStencilWritingOps, drawWritesDepth, encodeDraw, type Draw, type DrawCallOptions, type InternalDraw } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError, timerInvalidError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
+import { isTimerSpan, type InternalTimer, type TimerSpan } from "./timer.ts";
 
 export interface FramePassOptions {
   readonly target: Target;
@@ -30,6 +31,8 @@ export interface FramePassOptions {
   };
   /** Scissor rectangle [x, y, width, height] for every draw in this pass. Integers. Note: does not affect the clear — loadOp "clear" always clears the full attachment. */
   readonly scissor?: readonly [number, number, number, number];
+  /** Times this pass on the GPU: pass `timer.span(name)` from a `gpu.timer()`. The pass duration lands in `timer.onResults` under `name`, in milliseconds. One span name per frame. */
+  readonly timer?: TimerSpan;
 }
 
 export interface FrameLoopHandle { stop(): void }
@@ -47,6 +50,7 @@ export class Frame {
   done: Promise<void> = Promise.resolve();
   readonly #encoder: GPUCommandEncoder;
   readonly #validations: ClaimedGroupValidationResult[] = [];
+  readonly #timers = new Set<InternalTimer>();
   #submitted = false;
   constructor(
     private readonly device: Device,
@@ -99,7 +103,10 @@ export class Frame {
     }
     const viewport = targetOnly ? undefined : validatedViewport(target.viewport, this.device.gpu.limits, resolvedTarget.size);
     const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
-    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly));
+    const timestampWrites = targetOnly ? undefined : this.#attachTimerSpan(target.timer);
+    // timestampWrites is target-independent pass state: decorate the descriptor after obtaining it from the target.
+    const descriptor = resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly);
+    const encoder = this.#encoder.beginRenderPass(timestampWrites ? { ...descriptor, timestampWrites } : descriptor);
     if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
     if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
     try { cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true)); }
@@ -116,6 +123,9 @@ export class Frame {
   submit(): void {
     if (this.#submitted) return;
     this.#submitted = true;
+    // Timed frames append one resolveQuerySet of each timer's contiguous used range (plus the
+    // staging copy) to the still-open frame encoder — zero extra submissions.
+    for (const timer of this.#timers) timer.finalizeFrame(this, this.#encoder);
     let commandBuffer: GPUCommandBuffer;
     const finishContext = this.#validations[0]?.context;
     if (finishContext) pushClaimedGroupValidationScope(this.device, finishContext);
@@ -149,7 +159,18 @@ export class Frame {
       const result = popLastClaimedGroupValidationScope(this.device);
       if (result) this.#validations[0] = this.#validations[0] ? preferClaimedGroupValidationResult(result, this.#validations[0]) : result;
     }
+    // The submit succeeded: start each timer's non-blocking readback of this frame's resolve.
+    for (const timer of this.#timers) timer.frameSubmitted(this);
     this.done = this.#trackDone(claimedGroupValidationDone(this.device, this.#validations, { errorSink: this.errorSink }));
+  }
+
+  #attachTimerSpan(span: TimerSpan | undefined): GPURenderPassTimestampWrites | undefined {
+    if (span === undefined) return undefined;
+    if (!isTimerSpan(span)) {
+      throw timerInvalidError(`FramePassOptions.timer received ${previewValue(span)}; expected a TimerSpan from timer.span(name).`, `Create const timer = gpu.timer() once, then pass timer.span("name") per pass.`, "Frame.pass");
+    }
+    this.#timers.add(span.owner);
+    return span.owner.attachSpan(span, this, this.device);
   }
 
   async #deliverValidationError(label: string, group: number, cause: unknown): Promise<void> {

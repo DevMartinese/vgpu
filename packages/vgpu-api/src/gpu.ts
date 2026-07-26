@@ -18,6 +18,7 @@ import { createPingPongStorage, createPingPongTargets } from "./ping-pong.ts";
 import { toWgsl } from "./shader-source.ts";
 import { createSharedUniforms } from "./uniforms.ts";
 import { CanvasSurface, type Surface, type SurfaceCanvas, type SurfaceOptions } from "./surface.ts";
+import { createTimer, type Timer } from "./timer.ts";
 import type { ClearColor } from "./target-utils.ts";
 import { createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type SettledSource, type ShaderModuleCache } from "./pipeline-store.ts";
 
@@ -73,6 +74,8 @@ export interface Gpu {
   dispose(): void;
   compute(source: string | ShaderSource, opts?: ComputeOptions): Compute;
   storage(bytes: number, access?: StorageAccess | StorageOptions): StorageBuffer;
+  /** GPU pass timing. Needs the "timestamp-query" device feature — request it at init: init({ requiredFeatures: ["timestamp-query"] }). */
+  timer(): Timer;
   pingPong(width: number, height: number, opts?: TargetTextureOptions): PingPongTargets;
   pingPongStorage(bytes: number): PingPongStorage;
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T>;
@@ -165,6 +168,7 @@ class RingGpu implements Gpu {
     const opts = typeof access === "string" ? { access } : access;
     return createStorageBuffer(this.device, bytes, opts.access ?? "read-write", undefined, opts.indirect ?? false);
   }
+  timer(): Timer { return createTimer(this.device, (promise) => this.#trackDelivery(promise)); }
   pingPong(width: number, height: number, opts: TargetTextureOptions = {}): PingPongTargets { return createPingPongTargets(this.device, width, height, opts); }
   pingPongStorage(bytes: number): PingPongStorage { return createPingPongStorage(this.device, bytes); }
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T> { return createSharedUniforms(this.device, values); }

@@ -14,7 +14,7 @@ import { init } from "vgpu/mock";
 ## Signature
 
 ```ts
-import type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, Draw, DrawOptions, Frame, FrameRunner, Effect, EffectOptions, GpuErrorListener, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions, Surface, SurfaceOptions, Target, TargetOptions, TargetTextureOptions } from "vgpu";
+import type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, Draw, DrawOptions, Frame, FrameRunner, Effect, EffectOptions, GpuErrorListener, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions, Surface, SurfaceOptions, Target, TargetOptions, TargetTextureOptions, Timer } from "vgpu";
 import type { Device } from "vgpu/core";
 import type { ShaderSource } from "vgpu";
 
@@ -34,6 +34,7 @@ interface Gpu {
   dispose(): void;
   compute(source: string | ShaderSource, opts?: ComputeOptions): Compute;
   storage(bytes: number, access?: StorageAccess | StorageOptions): StorageBuffer;
+  timer(): Timer;
   pingPong(width: number, height: number, opts?: TargetTextureOptions): PingPongTargets;
   pingPongStorage(bytes: number): PingPongStorage;
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T>;
@@ -62,6 +63,7 @@ interface Gpu {
 | compute.opts | `ComputeOptions` | ✖ | `{}` | `label` defaults to `"compute"`; `set` defaults to no initial bindings. |
 | storage.bytes | `number` | ✔ | — | Byte size for a main API (`vgpu`) storage buffer. |
 | storage.access | `StorageAccess \| StorageOptions` | ✖ | `"read-write"` | Access string, or a `StorageOptions` bag: `{ access?, indirect? }`. `indirect: true` appends the `"indirect"` buffer usage so the buffer can supply GPU-read draw/dispatch arguments. Reflection still controls shader compatibility; writable aliases are checked before compute dispatch. |
+| timer | — | — | — | No parameters. GPU pass timing; needs the `"timestamp-query"` device feature — request it at init: `init({ requiredFeatures: ["timestamp-query"] })` — and throws `VGPU-TIMER-INVALID` at creation without it. Pass `timer.span(name)` as `FramePassOptions.timer`; durations arrive in ms through `timer.onResults`. |
 | pingPong.width | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | pingPong.height | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | pingPong.opts | `TargetTextureOptions` | ✖ | `{}` | Texture/attachment options only; size comes from positional width/height. |
@@ -124,7 +126,7 @@ gpu.frame.loop((frame) => {
 - There is no implicit screen property and no implicit default target. Pass `target` explicitly to frame passes and one-shot draws.
 - Canvas-specific `size`, `dpr`, and `autoResize` live on `gpu.surface(canvas, opts)`, not on `init()`.
 - Time is explicit JS state. Pass `gpu.time`, `gpu.deltaTime`, or `gpu.frameCount` through `set()` or `SharedUniforms` when shaders need them.
-- **See also:** `init`, `Surface`, `Effect`, `Draw`, `Compute`, `Frame`, `Target`, `Bundle`, `SharedUniforms`.
+- **See also:** `init`, `Surface`, `Effect`, `Draw`, `Compute`, `Frame`, `Target`, `Bundle`, `SharedUniforms`, `Timer`.
 
 ## Sampled float texture layouts
 

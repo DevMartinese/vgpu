@@ -288,6 +288,24 @@ export function passDepthReadOnlyError(reason: string, fix: string, where: "Fram
 }
 
 
+export function timerInvalidError(reason: string, fix: string, where = "gpu.timer"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-TIMER-INVALID",
+    message: `Invalid timer use: ${reason}`,
+    fix,
+    where,
+  });
+}
+
+export function timerCapacityError(maxSpans: number, maxQueries: number): VGPUError {
+  return new VGPUError({
+    code: "VGPU-TIMER-CAPACITY",
+    message: `frame exceeds ${maxSpans} timed spans; a timer holds one timestamp query set and WebGPU createQuerySet requires count <= ${maxQueries} (2 queries per span).`,
+    fix: "Time fewer passes per frame, or spread timing across frames.",
+    where: "Frame.pass",
+  });
+}
+
 export function targetRequiredError(where = "Gpu.frame"): VGPUError {
   return new VGPUError({
     code: "VGPU-TARGET-REQUIRED",
