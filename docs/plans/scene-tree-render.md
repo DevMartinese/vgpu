@@ -34,8 +34,10 @@ user WGSL can plug into, and a renderer that maps the tree onto vgpu's existing 
 - **Nothing implicit — but batteries included.** No global scene, no default camera. The
   renderer may own *derived* resources (depth texture matched to the target, uniform pools),
   which is bookkeeping, not hidden semantics.
-- **wgpu-matrix for runtime math.** It is already a dependency (type-only today). The tree
-  adopts its `mat4`/`vec3`/`quat` runtime and unifies the three duplicate `Mat4`/`Vec3` aliases.
+- **Local runtime math.** `geometry-src/camera-math.ts` deliberately avoids loading the
+  `wgpu-matrix` runtime to protect the `vgpu/scene` bundle budget; the tree follows the same
+  policy with a minimal local mat4/quat module (`scene/tree/math.ts`). `wgpu-matrix` stays a
+  type-only dependency.
 
 ## Proposed API
 
