@@ -98,6 +98,24 @@ export function writeMaskInvalidError(label: string, preview: string): VGPUError
   });
 }
 
+export function cullInvalidError(label: string, value: unknown): VGPUError {
+  return new VGPUError({
+    code: "VGPU-CULL-INVALID",
+    message: `Invalid cull '${String(value)}' in '${label}'.`,
+    fix: `Use "none", "front", or "back"; omit it for no culling.`,
+    where: "gpu.draw",
+  });
+}
+
+export function frontFaceInvalidError(label: string, value: unknown): VGPUError {
+  return new VGPUError({
+    code: "VGPU-FRONTFACE-INVALID",
+    message: `Invalid frontFace '${String(value)}' in '${label}'.`,
+    fix: `Use "ccw" or "cw"; omit it for counter-clockwise.`,
+    where: "gpu.draw",
+  });
+}
+
 export function passPreserveMsaaError(): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-PRESERVE-MSAA",

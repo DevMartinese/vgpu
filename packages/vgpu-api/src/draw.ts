@@ -9,7 +9,7 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { isTarget } from "./target-utils.ts";
-import { blendInvalidError, claimedGroupNativeValidationError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendInvalidError, claimedGroupNativeValidationError, cullInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -44,6 +44,10 @@ export interface DrawOptions {
   readonly blend?: BlendPreset | BlendOptions;
   /** Channels written to color targets. Omit to write all (rgba). Empty array writes nothing. */
   readonly writeMask?: readonly ("r" | "g" | "b" | "a")[];
+  /** Face culling applied to this draw's pipelines. Defaults to "none". Immutable after construction. */
+  readonly cull?: "none" | "front" | "back";
+  /** Winding that counts as front-facing. Defaults to "ccw". Immutable after construction. */
+  readonly frontFace?: "ccw" | "cw";
 }
 
 export interface DrawCallOptions {
@@ -129,6 +133,8 @@ type DrawState = {
   readonly blendState?: GPUBlendState;
   readonly writeMask?: number;
   readonly fragmentKey?: string;
+  readonly cullMode?: GPUCullMode;
+  readonly frontFace?: GPUFrontFace;
 };
 
 const drawStates = new WeakMap<Draw, DrawState>();
@@ -179,6 +185,7 @@ export class InternalDraw implements Draw {
     const shaderModule = shaderModules.get(source, `${this.label}.shader`);
     const recordedIn = createBundleRegistry();
     const fragmentState = normalizeFragmentState(this.label, opts);
+    const primitiveOptions = normalizePrimitiveOptions(this.label, opts);
     const setCore = createSetCore({
       device,
       label: this.label,
@@ -188,7 +195,7 @@ export class InternalDraw implements Draw {
       cache,
       onIdentityChange: (change) => recordedIn.markStale({ kind: "binding-identity", drawLabel: this.label, ...change }),
     });
-    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState });
+    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...primitiveOptions });
     if (opts.set) this.set(opts.set);
     for (const target of opts.targets ?? []) this.compileSync(target);
   }
@@ -374,7 +381,7 @@ export class InternalDraw implements Draw {
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat });
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -393,7 +400,7 @@ export class InternalDraw implements Draw {
       layout: state.pipelineLayout,
       vertex: { module: state.shaderModule, entryPoint: state.vertexEntry, buffers: [...(state.vertexBufferLayouts ?? [])] },
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
-      primitive: primitiveState(state.opts.mesh),
+      primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
       depthStencil: signature.depth ? { format: signature.depth, depthWriteEnabled: true, depthCompare: "less" } : undefined,
       multisample: { count: signature.sampleCount ?? 1 },
     });
@@ -406,7 +413,7 @@ export class InternalDraw implements Draw {
       layout: state.pipelineLayout,
       vertex: { module: state.shaderModule, entryPoint: state.vertexEntry, buffers: [...(state.vertexBufferLayouts ?? [])] },
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
-      primitive: primitiveState(state.opts.mesh),
+      primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
       depthStencil: signature.depth ? { format: signature.depth, depthWriteEnabled: true, depthCompare: "less" } : undefined,
       multisample: { count: signature.sampleCount ?? 1 },
     });
@@ -482,10 +489,13 @@ function resolveDrawCounts(label: string, mesh: MeshLike | undefined, drawOpts: 
   };
 }
 
-function primitiveState(mesh: MeshLike | undefined): GPUPrimitiveState {
+function primitiveState(mesh: MeshLike | undefined, cullMode?: GPUCullMode, frontFace?: GPUFrontFace): GPUPrimitiveState {
   const topology = mesh?.topology ?? "triangle-list";
   const stripIndexFormat = mesh?.stripIndexFormat ?? (topology.endsWith("strip") ? mesh?.indexFormat : undefined);
-  return stripIndexFormat ? { topology, stripIndexFormat } : { topology };
+  const state: GPUPrimitiveState = stripIndexFormat ? { topology, stripIndexFormat } : { topology };
+  if (cullMode !== undefined) state.cullMode = cullMode;
+  if (frontFace !== undefined) state.frontFace = frontFace;
+  return state;
 }
 
 function validateDrawInterval(label: string, kind: "index" | "vertex", first: number, count: number, max: number | undefined): void {
@@ -544,6 +554,27 @@ function blendState(color: BlendComponentOptions, alpha: BlendComponentOptions):
 
 function blendComponent(component: BlendComponentOptions): GPUBlendComponent {
   return { srcFactor: component.src, dstFactor: component.dst, operation: component.op ?? "add" };
+}
+
+type NormalizedPrimitiveOptions = {
+  readonly cullMode?: GPUCullMode;
+  readonly frontFace?: GPUFrontFace;
+};
+
+function normalizePrimitiveOptions(label: string, opts: DrawOptions): NormalizedPrimitiveOptions {
+  const cullMode = opts.cull === undefined ? undefined : normalizeCull(label, opts.cull);
+  const frontFace = opts.frontFace === undefined ? undefined : normalizeFrontFace(label, opts.frontFace);
+  return { cullMode, frontFace };
+}
+
+function normalizeCull(label: string, value: "none" | "front" | "back"): GPUCullMode {
+  if (value === "none" || value === "front" || value === "back") return value;
+  throw cullInvalidError(label, value);
+}
+
+function normalizeFrontFace(label: string, value: "ccw" | "cw"): GPUFrontFace {
+  if (value === "ccw" || value === "cw") return value;
+  throw frontFaceInvalidError(label, value);
 }
 
 function normalizeWriteMask(label: string, value: readonly ("r" | "g" | "b" | "a")[]): number {

@@ -9,6 +9,14 @@ const WGSL = `
 @fragment fn fs_main() -> @location(0) vec4f { return vec4f(1.0); }
 `;
 
+const MESHLESS_WGSL = `
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+  var pos = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  return vec4f(pos[vi], 0.0, 1.0);
+}
+@fragment fn fs_main() -> @location(0) vec4f { return vec4f(1.0); }
+`;
+
 test("topology and stripIndexFormat participate in pipeline descriptors and keys while ranges do not", async () => {
   const gpu = await init();
   try {
@@ -29,6 +37,39 @@ test("topology and stripIndexFormat participate in pipeline descriptors and keys
     expect(pipelineKeyOf({ ...parts, topology: "line-strip" })).not.toBe(pipelineKeyOf(parts));
     const meshless = { module: {} as GPUShaderModule, pipelineLayout: {} as GPUPipelineLayout, signature: { colors: ["rgba8unorm"] as const } };
     expect(pipelineKeyOf({ ...meshless, topology: undefined, stripIndexFormat: undefined })).toBe(pipelineKeyOf(meshless));
+  } finally {
+    gpu.dispose();
+  }
+});
+
+test("cull and frontFace participate in pipeline descriptors and keys", async () => {
+  const gpu = await init();
+  try {
+    const target = gpu.target({ size: [2, 2] });
+    gpu.draw({ shader: MESHLESS_WGSL, label: "cull-back", cull: "back", frontFace: "cw" }).draw(target);
+    gpu.draw({ shader: MESHLESS_WGSL, label: "cull-front", cull: "front" }).draw(target);
+    gpu.draw({ shader: MESHLESS_WGSL, label: "cull-default" }).draw(target);
+
+    const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+    expect(mock.createRenderPipelineDescriptors.at(-3)?.primitive).toEqual({ topology: "triangle-list", cullMode: "back", frontFace: "cw" });
+    expect(mock.createRenderPipelineDescriptors.at(-2)?.primitive).toEqual({ topology: "triangle-list", cullMode: "front" });
+    expect(mock.createRenderPipelineDescriptors.at(-1)?.primitive).toEqual({ topology: "triangle-list" });
+    expect(mock.calls.createRenderPipeline).toBe(3);
+
+    const parts = { module: {} as GPUShaderModule, pipelineLayout: {} as GPUPipelineLayout, signature: { colors: ["rgba8unorm"] as const } };
+    expect(pipelineKeyOf({ ...parts, cullMode: "back" })).not.toBe(pipelineKeyOf(parts));
+    expect(pipelineKeyOf({ ...parts, cullMode: "back", frontFace: "cw" })).not.toBe(pipelineKeyOf({ ...parts, cullMode: "back" }));
+    expect(pipelineKeyOf({ ...parts, cullMode: undefined, frontFace: undefined })).toBe(pipelineKeyOf(parts));
+  } finally {
+    gpu.dispose();
+  }
+});
+
+test("invalid cull and frontFace options fail at draw construction", async () => {
+  const gpu = await init();
+  try {
+    expect(() => gpu.draw({ shader: MESHLESS_WGSL, label: "badCull", cull: "backwards" as never })).toThrowError(/VGPU-CULL-INVALID|Invalid cull/);
+    expect(() => gpu.draw({ shader: MESHLESS_WGSL, label: "badFace", frontFace: "clockwise" as never })).toThrowError(/VGPU-FRONTFACE-INVALID|Invalid frontFace/);
   } finally {
     gpu.dispose();
   }

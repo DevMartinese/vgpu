@@ -86,10 +86,13 @@ export function pipelineKeyOf(parts: {
   readonly fragmentKey?: string;
   readonly topology?: GPUPrimitiveTopology;
   readonly stripIndexFormat?: GPUIndexFormat;
+  readonly cullMode?: GPUCullMode;
+  readonly frontFace?: GPUFrontFace;
 }): string {
   const base = `${idFor(shaderModuleIds, parts.module, () => nextShaderModuleId++)}|${idFor(pipelineLayoutIds, parts.pipelineLayout, () => nextPipelineLayoutId++)}|${vertexLayoutHash(parts.vertexBufferLayouts ?? [])}|${signatureKeyOf(parts.signature)}`;
   const primitive = parts.topology || parts.stripIndexFormat ? `${base}|${parts.topology ?? "triangle-list"}|${parts.stripIndexFormat ?? "none"}` : base;
-  return parts.fragmentKey ? `${primitive}|${parts.fragmentKey}` : primitive;
+  const culled = parts.cullMode || parts.frontFace ? `${primitive}|${parts.cullMode ?? "none"}|${parts.frontFace ?? "ccw"}` : primitive;
+  return parts.fragmentKey ? `${culled}|${parts.fragmentKey}` : culled;
 }
 
 export function createShaderModuleCache(device: Device): ShaderModuleCache {

@@ -107,6 +107,25 @@ test("blend and writeMask participate in shared pipeline cache keys", async () =
   gpu.dispose();
 });
 
+test("cull and frontFace participate in shared pipeline cache keys", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2] });
+  const a = gpu.draw({ shader: WGSL, label: "cull-a", cull: "back" });
+  const b = gpu.draw({ shader: WGSL, label: "cull-b", cull: "front" });
+  const c = gpu.draw({ shader: WGSL, label: "cull-c", cull: "back" });
+  const face = gpu.draw({ shader: WGSL, label: "face", cull: "back", frontFace: "cw" });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+  face.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  expect(mock.calls.createRenderPipeline).toBe(3);
+  gpu.dispose();
+});
+
 test("pipelineKeyOf appends fragmentKey only when present", () => {
   const module = {} as GPUShaderModule;
   const pipelineLayout = {} as GPUPipelineLayout;
