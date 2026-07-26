@@ -126,6 +126,25 @@ test("cull and frontFace participate in shared pipeline cache keys", async () =>
   gpu.dispose();
 });
 
+test("depth participates in shared pipeline cache keys", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2], depth: true });
+  const a = gpu.draw({ shader: WGSL, label: "depth-a", depth: { compare: "greater" } });
+  const b = gpu.draw({ shader: WGSL, label: "depth-b", depth: false });
+  const c = gpu.draw({ shader: WGSL, label: "depth-c", depth: { compare: "greater" } });
+  const d = gpu.draw({ shader: WGSL, label: "depth-d", depth: { compare: "greater", write: false } });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+  d.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  expect(mock.calls.createRenderPipeline).toBe(3);
+  gpu.dispose();
+});
+
 test("pipelineKeyOf appends fragmentKey only when present", () => {
   const module = {} as GPUShaderModule;
   const pipelineLayout = {} as GPUPipelineLayout;

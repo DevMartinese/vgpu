@@ -5,7 +5,7 @@ Target-agnostic renderable shader unit created by `gpu.draw()`. It reflects WGSL
 ## Import
 
 ```ts
-import type { Draw, DrawOptions, DrawCallOptions, DrawLayoutOptions, MeshLike } from "vgpu";
+import type { DepthOptions, Draw, DrawOptions, DrawCallOptions, DrawLayoutOptions, MeshLike } from "vgpu";
 ```
 
 ## Signature
@@ -18,6 +18,14 @@ type SetBag = Record<string, unknown>;
 type BlendPreset = "alpha" | "additive" | "premultiplied";
 interface BlendComponentOptions { readonly src: GPUBlendFactor; readonly dst: GPUBlendFactor; readonly op?: GPUBlendOperation; }
 interface BlendOptions { readonly color: BlendComponentOptions; readonly alpha?: BlendComponentOptions; }
+
+interface DepthOptions {
+  readonly write?: boolean;
+  readonly compare?: GPUCompareFunction;
+  readonly bias?: number;
+  readonly biasSlopeScale?: number;
+  readonly biasClamp?: number;
+}
 
 interface DrawOptions {
   readonly shader: string | ShaderSource;
@@ -32,6 +40,7 @@ interface DrawOptions {
   readonly writeMask?: readonly ("r" | "g" | "b" | "a")[];
   readonly cull?: "none" | "front" | "back";
   readonly frontFace?: "ccw" | "cw";
+  readonly depth?: false | DepthOptions;
 }
 
 interface DrawCallOptions {
@@ -82,6 +91,7 @@ interface Draw {
 | opts.writeMask | `readonly ("r" \| "g" \| "b" \| "a")[]` | ✖ | all channels | Constructor-only color channel mask applied uniformly to every color target. Omit to write RGBA; `[]` writes no channels; `["r","g","b"]` skips alpha. |
 | opts.cull | `"none" \| "front" \| "back"` | ✖ | `"none"` | Constructor-only face culling applied to this draw's pipelines. Omit for no culling. |
 | opts.frontFace | `"ccw" \| "cw"` | ✖ | `"ccw"` | Constructor-only winding that counts as front-facing. Omit for counter-clockwise. |
+| opts.depth | `false \| DepthOptions` | ✖ | `{ write: true, compare: "less-equal" }` | Constructor-only depth state for targets with a depth attachment; ignored when the target has no depth. `false` disables depth testing (`write: false`, `compare: "always"`). `bias` must be an integer; the bias family must be `0`/omitted for point/line topologies. |
 | draw.set.values | `Record<string, unknown>` | ✔ | — | Values keyed by WGSL binding variable name. JS objects/numbers are packed; resources are bound by identity. |
 | draw.group.n | `number` | ✔ | — | Bind group index to claim for manual bind-group binding (`group(n, bindGroup)`). |
 | draw.group.bindGroup | `GPUBindGroup` | ✔ | — | Must be compatible with `draw.layout(n)` or `draw.layout(n, { dynamicOffsets: true })`. |
@@ -99,7 +109,7 @@ interface Draw {
 
 Bindings remain present in reflected layouts, but their `visibility` is the union of static use by the selected vertex and fragment entry points. Unused declarations have visibility `0`. Build claimed bind groups from `draw.layout(group)` rather than guessing a raw layout; a raw layout matching the old broad visibility is not group-equivalent.
 
-**Throws:** `VGPU-LIMIT-STORAGE-VERTEX` or `VGPU-LIMIT-STORAGE-FRAGMENT` before bind-group-layout creation when actual static use exceeds the granted stage limit (request the supported `requiredLimits` value or reduce/move the storage data); `VGPU-TARGET-REQUIRED` when `draw.draw()` is called without `target`; `VGPU-BLEND-INVALID` for an unknown blend preset or malformed blend object; `VGPU-WRITEMASK-INVALID` for a non-array or unknown write mask channel; `VGPU-CULL-INVALID` for an unknown cull mode; `VGPU-FRONTFACE-INVALID` for an unknown front-face winding; `VGPU-R1-DRAW-COUNT` when any count field is not an integer `>= 0`; `VGPU-R1-BINDING-NEVER-SET`, `VGPU-R1-OWNERSHIP-FLIP`, and `VGPU-R1-BINDING-INCOMPATIBLE-RESOURCE` from `set()`/draw preflight; `VGPU-SET-TEXTURE-FILTERABILITY` when a facade texture format cannot satisfy an ordinarily sampled `float` binding (detail identifies the format, texture and paired sampler; use a filterable format, request `float32-filterable`, or rewrite to `textureLoad`); `VGPU-R4-GROUP-CLAIMED`, `VGPU-R4-GROUP-INCOMPATIBLE`, or `VGPU-R4-GROUP-VALIDATION` for raw claimed bind groups; `VGPU-SHADER-SOURCE-INVALID` for malformed `ShaderSource`.
+**Throws:** `VGPU-LIMIT-STORAGE-VERTEX` or `VGPU-LIMIT-STORAGE-FRAGMENT` before bind-group-layout creation when actual static use exceeds the granted stage limit (request the supported `requiredLimits` value or reduce/move the storage data); `VGPU-TARGET-REQUIRED` when `draw.draw()` is called without `target`; `VGPU-BLEND-INVALID` for an unknown blend preset or malformed blend object; `VGPU-WRITEMASK-INVALID` for a non-array or unknown write mask channel; `VGPU-CULL-INVALID` for an unknown cull mode; `VGPU-FRONTFACE-INVALID` for an unknown front-face winding; `VGPU-DEPTH-INVALID` for a malformed depth option (non-boolean `write`, unknown `compare`, non-integer `bias`, non-finite bias values, or nonzero bias values with a point/line topology); `VGPU-R1-DRAW-COUNT` when any count field is not an integer `>= 0`; `VGPU-R1-BINDING-NEVER-SET`, `VGPU-R1-OWNERSHIP-FLIP`, and `VGPU-R1-BINDING-INCOMPATIBLE-RESOURCE` from `set()`/draw preflight; `VGPU-SET-TEXTURE-FILTERABILITY` when a facade texture format cannot satisfy an ordinarily sampled `float` binding (detail identifies the format, texture and paired sampler; use a filterable format, request `float32-filterable`, or rewrite to `textureLoad`); `VGPU-R4-GROUP-CLAIMED`, `VGPU-R4-GROUP-INCOMPATIBLE`, or `VGPU-R4-GROUP-VALIDATION` for raw claimed bind groups; `VGPU-SHADER-SOURCE-INVALID` for malformed `ShaderSource`.
 
 ## Examples
 
@@ -132,8 +142,9 @@ Each color/depth/sample-count variant is a different pipeline. A missed variant 
 ## Notes
 
 - Count precedence is per-call option, then draw option, then mesh/default. `instances: 0` and `vertices: 0` are valid no-op draws.
-- Blend, write masks, and face culling are immutable pipeline state, fixed at `gpu.draw()` construction. Blend and write masks apply to all color targets; per-target MRT blend can be added later without changing this shape.
+- Blend, write masks, face culling, and depth state are immutable pipeline state, fixed at `gpu.draw()` construction. Blend and write masks apply to all color targets; per-target MRT blend can be added later without changing this shape.
 - `cull` and `frontFace` map to `GPUPrimitiveState.cullMode`/`frontFace`. Draws that differ only in culling compile distinct pipelines; omitting both keeps the WebGPU defaults (`"none"`, `"ccw"`).
+- `depth` maps to `GPUDepthStencilState` on targets with a depth attachment (`write` → `depthWriteEnabled`, `compare` → `depthCompare`, `bias`/`biasSlopeScale`/`biasClamp` → the `depthBias` family). Omitted, it defaults to `{ write: true, compare: "less-equal" }`; `depth: false` compiles `{ depthWriteEnabled: false, depthCompare: "always" }` because WebGPU cannot omit depth state when the pass has a depth attachment. Draws that differ only in depth state compile distinct pipelines. Use `clearDepth: 0` on the pass plus `depth: { compare: "greater" }` for reversed-Z.
 - Blend presets: `"alpha"` uses source alpha over, `"premultiplied"` uses premultiplied source over, and `"additive"` uses one-plus-one additive blending for color and alpha. In explicit blends, `op` defaults to `"add"` and omitted `alpha` copies `color`.
 - One-shot `draw.draw()` has no implicit target and returns `void`; raw claimed-group validation errors are delivered through `gpu.onError`, and tests can `await gpu.settled()`.
 - Changing resource identity after a draw is recorded in a `Bundle` marks that bundle stale; changing JS values in-place does not.

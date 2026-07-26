@@ -34,7 +34,7 @@ export interface Target {
   resize(size: readonly [number, number]): void;
   read(): Promise<Uint8Array>;
   onDestroy(cb: ResourceDestroyCallback<Target>): UnsubscribeResourceDestroy;
-  renderPassDescriptor(clear?: ClearColor, preserve?: boolean): GPURenderPassDescriptor;
+  renderPassDescriptor(clear?: ClearColor, preserve?: boolean, clearDepth?: number): GPURenderPassDescriptor;
 }
 
 export { OffscreenTarget } from "./target-offscreen.ts";

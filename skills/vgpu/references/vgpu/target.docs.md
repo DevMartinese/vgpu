@@ -41,7 +41,7 @@ interface Target {
   resize(size: readonly [number, number]): void;
   read(): Promise<Uint8Array>;
   onDestroy(cb: ResourceDestroyCallback<Target>): UnsubscribeResourceDestroy;
-  renderPassDescriptor(clear?: ClearColor, preserve?: boolean): GPURenderPassDescriptor;
+  renderPassDescriptor(clear?: ClearColor, preserve?: boolean, clearDepth?: number): GPURenderPassDescriptor;
 }
 
 interface PingPongTargets { readonly read: Target; readonly write: Target; swap(): void; }
@@ -56,7 +56,7 @@ interface PingPongStorage { readonly read: import("vgpu").StorageBuffer; readonl
 | opts.size | `readonly [number, number]` | ✔ | — | Initial offscreen texture size in physical pixels. |
 | opts.format | `GPUTextureFormat` | ✖ | `"rgba8unorm"` | Used for single-color targets when `colors` is omitted. |
 | opts.colors | `readonly { format: GPUTextureFormat }[]` | ✖ | `[{ format: opts.format ?? "rgba8unorm" }]` | MRT color attachments. `target.color` is `colors[0]`. |
-| opts.depth | `boolean \| GPUTextureFormat` | ✖ | `undefined` | `true` means `"depth24plus"`; a string uses that depth format; omitted means no depth. |
+| opts.depth | `boolean \| GPUTextureFormat` | ✖ | `undefined` | `true` means `"depth24plus"`; a string uses that depth format; omitted means no depth. Combined depth-stencil formats such as `"depth24plus-stencil8"` are supported; stencil-only `"stencil8"` is rejected. |
 | opts.msaa | `boolean \| 4` | ✖ | `false` / sample count `1` | Only `true` or `4` enables MSAA, creating color/depth attachments with sample count `4` and resolving to sampleable `.color(s)`. |
 | opts.label | `string` | ✖ | `undefined` | Prefix for created texture labels. |
 | target.resize.size | `readonly [number, number]` | ✔ | — | Recreates offscreen textures unless size is unchanged. |
@@ -64,14 +64,15 @@ interface PingPongStorage { readonly read: import("vgpu").StorageBuffer; readonl
 | target.onDestroy.cb | `ResourceDestroyCallback<Target>` | ✔ | — | Subscribes to target destruction. |
 | target.renderPassDescriptor.clear | `ClearColor` | ✖ | `[0, 0, 0, 1]` | Clear color for all color attachments unless `preserve` is true. `Frame.pass` supplies `gpu.clearColor` for omitted/`true` clears and a per-pass color when provided. |
 | target.renderPassDescriptor.preserve | `boolean` | ✖ | `false` | Optional implementer hook used by `Frame.pass({ clear: false })`; when true, color and depth attachments should load existing contents and omit clear values. |
+| target.renderPassDescriptor.clearDepth | `number` | ✖ | `1` | Depth clear value used when the pass clears. `Frame.pass` supplies `FramePassOptions.clearDepth`; ignored while preserving and on targets without depth. |
 | gpu.pingPong.width | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | gpu.pingPong.height | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | gpu.pingPong.opts | `TargetTextureOptions` | ✖ | `{}` | Texture options for both targets. Size is intentionally not accepted; positional width/height win. |
 | gpu.pingPongStorage.bytes | `number` | ✔ | — | Creates two `"read-write"` storage buffers. |
 
-**Returns:** `gpu.target()` returns `Target`; `resize()` returns `void`; `read()` returns `Promise<Uint8Array>`; `renderPassDescriptor(clear?, preserve?)` returns a WebGPU render pass descriptor; `gpu.pingPong()` returns `PingPongTargets`; `gpu.pingPongStorage()` returns `PingPongStorage`.
+**Returns:** `gpu.target()` returns `Target`; `resize()` returns `void`; `read()` returns `Promise<Uint8Array>`; `renderPassDescriptor(clear?, preserve?, clearDepth?)` returns a WebGPU render pass descriptor; `gpu.pingPong()` returns `PingPongTargets`; `gpu.pingPongStorage()` returns `PingPongStorage`.
 
-**Throws:** `VGPU-TARGET-SIZE-REQUIRED` when runtime JS calls `gpu.target()` without `size`; `VGPU-TARGET-MSAA-INVALID` when runtime JS passes an unsupported `msaa` value (only `true` / `4` are accepted); `VGPU-RING1-UNSUPPORTED` when `msaa: true` / `4` with `rgba16float` is used on a Dawn compatibility-mode device; underlying core texture/readback operations can throw native WebGPU validation errors.
+**Throws:** `VGPU-TARGET-SIZE-REQUIRED` when runtime JS calls `gpu.target()` without `size`; `VGPU-TARGET-MSAA-INVALID` when runtime JS passes an unsupported `msaa` value (only `true` / `4` are accepted); `VGPU-TARGET-DEPTH-STENCIL-ONLY` when `depth` receives the stencil-only `"stencil8"` format (stencil-only depth targets are not supported yet); `VGPU-RING1-UNSUPPORTED` when `msaa: true` / `4` with `rgba16float` is used on a Dawn compatibility-mode device; underlying core texture/readback operations can throw native WebGPU validation errors.
 
 ## Examples
 
@@ -137,5 +138,6 @@ pingPong.swap();
 - `Surface.color` wraps the canvas current texture; offscreen target colors are stable until resize/destroy.
 - `target.read()` and `surface.read()` return RGBA bytes. BGRA canvas formats are read back with red/blue channels swizzled to RGBA.
 - Size-dependent targets derived from a surface should be created from the real initial `surface.size` and resized from `surface.onResize(...)`.
-- Custom `Target` implementers should honor the optional `renderPassDescriptor(clear?, preserve?)` second argument to participate in `Frame.pass({ clear: false })`; older one-argument implementations remain structurally assignable but will clear if they ignore `preserve`.
+- Custom `Target` implementers should honor the optional `renderPassDescriptor(clear?, preserve?, clearDepth?)` second and third arguments to participate in `Frame.pass({ clear: false })` and `FramePassOptions.clearDepth`; older shorter-arity implementations remain structurally assignable but will clear (with depth `1`) if they ignore them.
+- Depth formats with a stencil aspect (`"depth24plus-stencil8"`, `"depth32float-stencil8"`) emit `stencilLoadOp`/`stencilStoreOp` on the pass depth-stencil attachment, mirroring the depth load/store behavior with `stencilClearValue: 0`, as WebGPU requires when the stencil aspect is writable.
 - **See also:** `Surface`, `FramePassOptions`, `Effect`, `Draw`, `Bundle`, `Compute` storage ping-pong.

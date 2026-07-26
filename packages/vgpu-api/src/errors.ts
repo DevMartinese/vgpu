@@ -116,11 +116,38 @@ export function frontFaceInvalidError(label: string, value: unknown): VGPUError 
   });
 }
 
+export function depthInvalidError(label: string, reason: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-DEPTH-INVALID",
+    message: `Invalid depth in '${label}': ${reason}`,
+    fix: `Use false or { write?, compare?, bias?, biasSlopeScale?, biasClamp? }; omit it for { write: true, compare: "less-equal" }.`,
+    where: "gpu.draw",
+  });
+}
+
 export function passPreserveMsaaError(): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-PRESERVE-MSAA",
     message: "clear:false cannot preserve MSAA; use a non-MSAA target.",
     fix: "Use non-MSAA for accumulation.",
+    where: "Frame.pass",
+  });
+}
+
+export function passClearDepthInvalidError(value: unknown): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-CLEARDEPTH-INVALID",
+    message: `clearDepth received ${String(value)}; expected a number in [0, 1].`,
+    fix: `Use 1 (default), or 0 with depth: { compare: "greater" } for reversed-Z.`,
+    where: "Frame.pass",
+  });
+}
+
+export function passPreserveClearDepthError(): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-PRESERVE-CLEARDEPTH",
+    message: "clear:false preserves depth; clearDepth cannot apply.",
+    fix: "Remove clearDepth, or let the pass clear.",
     where: "Frame.pass",
   });
 }
@@ -203,6 +230,15 @@ export function compileSignatureInvalidError(where: string, reason: string): VGP
     message: `Invalid TargetSignature: ${reason}`,
     fix: "Pass { colors, depth?, sampleCount?:1|4 } or a Target.",
     where,
+  });
+}
+
+export function targetStencilOnlyDepthError(format: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-TARGET-DEPTH-STENCIL-ONLY",
+    message: `depth received '${format}'; stencil-only depth targets are not supported yet.`,
+    fix: `Use a format with a depth aspect such as "depth24plus" or "depth24plus-stencil8".`,
+    where: "gpu.target",
   });
 }
 

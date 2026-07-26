@@ -18,6 +18,7 @@ import type { Bundle, ClearColor, Draw, DrawCallOptions, Effect, Target } from "
 interface FramePassOptions {
   readonly target: Target;
   readonly clear?: boolean | ClearColor;
+  readonly clearDepth?: number;
 }
 
 interface FrameLoopHandle { stop(): void; }
@@ -52,6 +53,7 @@ declare class FrameRunner {
 | frame.pass.target | `Target \| FramePassOptions` | ✔ | — | Pass a bare target for the allocation-free common case, or an options bag when customizing clear/preserve behavior. |
 | opts.target | `Target` | ✔ | — | Required inside `FramePassOptions`. Use a `Surface` from `gpu.surface(canvas)` or an offscreen `Target` from `gpu.target({ size })`. |
 | opts.clear | `boolean \| ClearColor` | ✖ | `true` | Omitted or `true` clears with `gpu.clearColor`; `false` preserves existing color and depth with load ops; a color clears with that color. |
+| opts.clearDepth | `number` | ✖ | `1` | Depth clear value used when the pass clears, in `[0, 1]`. Use `0` with `depth: { compare: "greater" }` for reversed-Z. Invalid alongside `clear: false`, which preserves depth. |
 | frame.pass.body | `Effect \| Draw \| ((pass: FramePass) => void)` | ✔ | — | Pass a drawable directly for a single draw, or a callback to encode multiple draw and bundle commands. |
 | pass.draw.drawable | `Draw \| Effect` | ✔ | — | A main API (`vgpu`) draw or fullscreen effect. |
 | pass.draw.opts | `DrawCallOptions` | ✖ | `{}` | Per-call counts and dynamic offsets. Target is the frame pass target. |
@@ -61,7 +63,7 @@ declare class FrameRunner {
 
 **Returns:** `gpu.frame()` / `FrameRunner.frame()` return `Frame`; `Frame.pass()` and `Frame.submit()` return `void`; `FramePass.draw()` and `.bundles()` return `void`; `loop()` returns `FrameLoopHandle` with `stop()`.
 
-**Throws:** `VGPU-TARGET-REQUIRED` for runtime JS calls that omit a frame pass target; `VGPU-CLEAR-COLOR-INVALID` for invalid `gpu.clearColor` assignments or clear colors; `VGPU-PASS-PRESERVE-MSAA` when `clear: false` is used on an MSAA target; `VGPU-FRAME-REENTRANT` when a frame is started from another frame or from a surface resize callback; `VGPU-R3-BUNDLE-STALE` or `VGPU-R3-BUNDLE-INVALID` when replaying invalid/stale bundles; draw/pass binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
+**Throws:** `VGPU-TARGET-REQUIRED` for runtime JS calls that omit a frame pass target; `VGPU-CLEAR-COLOR-INVALID` for invalid `gpu.clearColor` assignments or clear colors; `VGPU-PASS-PRESERVE-MSAA` when `clear: false` is used on an MSAA target; `VGPU-PASS-CLEARDEPTH-INVALID` when `clearDepth` is not a number in `[0, 1]`; `VGPU-PASS-PRESERVE-CLEARDEPTH` when `clearDepth` is combined with `clear: false`; `VGPU-FRAME-REENTRANT` when a frame is started from another frame or from a surface resize callback; `VGPU-R3-BUNDLE-STALE` or `VGPU-R3-BUNDLE-INVALID` when replaying invalid/stale bundles; draw/pass binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
 
 ## Examples
 
@@ -102,6 +104,7 @@ handle.stop();
 - `Frame`, `FramePass`, and `FrameRunner` are type-only public exports. Create frames through `gpu.frame`, not `new Frame(...)`.
 - There is no default target and no implicit canvas target; every `frame.pass` names its target.
 - Omitted `clear` and `clear: true` clear with `gpu.clearColor`. Pass a color to clear one pass with that color without changing the default.
+- `clearDepth` sets the depth attachment's clear value for one pass (default `1`). It only applies when the pass clears; combining it with `clear: false` throws because preserved depth is never cleared.
 - `clear: false` preserves color and depth contents within the same target. On `Surface`, repeated passes in one frame layer onto the same current texture; the first preserved surface pass of a new browser frame reads the swapchain's fresh contents, not the previous frame's image.
 - MSAA targets cannot be preserved because their multisample attachments use `storeOp: "discard"`; render accumulation/preserve passes into a non-MSAA target instead.
 - **Hot loops:** options bags and pass callbacks are read synchronously, so you can hoist and reuse them. For zero-per-frame-JS-cost replay, record stable work with `gpu.bundle` and replay the bundle.

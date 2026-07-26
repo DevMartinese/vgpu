@@ -9,7 +9,7 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { isTarget } from "./target-utils.ts";
-import { blendInvalidError, claimedGroupNativeValidationError, cullInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendInvalidError, claimedGroupNativeValidationError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -26,6 +26,19 @@ export interface BlendOptions {
   readonly color: BlendComponentOptions;
   /** Defaults to the color component. */
   readonly alpha?: BlendComponentOptions;
+}
+
+export interface DepthOptions {
+  /** Whether fragments write depth. Defaults to true. */
+  readonly write?: boolean;
+  /** Depth comparison that passing fragments satisfy. Defaults to "less-equal". */
+  readonly compare?: GPUCompareFunction;
+  /** Constant depth bias. Must be an integer (WebGPU depthBias is i32). Defaults to 0. Triangle topologies only. */
+  readonly bias?: number;
+  /** Depth bias that scales with the fragment's slope. Defaults to 0. Triangle topologies only. */
+  readonly biasSlopeScale?: number;
+  /** Maximum depth bias of a fragment. Defaults to 0 (no clamp). Triangle topologies only. */
+  readonly biasClamp?: number;
 }
 
 export interface DrawOptions {
@@ -48,6 +61,8 @@ export interface DrawOptions {
   readonly cull?: "none" | "front" | "back";
   /** Winding that counts as front-facing. Defaults to "ccw". Immutable after construction. */
   readonly frontFace?: "ccw" | "cw";
+  /** Depth state for targets with a depth attachment. Pass false to disable depth testing entirely. Defaults to { write: true, compare: "less-equal" }. Immutable after construction. Ignored when the target has no depth. */
+  readonly depth?: false | DepthOptions;
 }
 
 export interface DrawCallOptions {
@@ -135,6 +150,8 @@ type DrawState = {
   readonly fragmentKey?: string;
   readonly cullMode?: GPUCullMode;
   readonly frontFace?: GPUFrontFace;
+  readonly depthState?: NormalizedDepthState;
+  readonly depthKey?: string;
 };
 
 const drawStates = new WeakMap<Draw, DrawState>();
@@ -186,6 +203,7 @@ export class InternalDraw implements Draw {
     const recordedIn = createBundleRegistry();
     const fragmentState = normalizeFragmentState(this.label, opts);
     const primitiveOptions = normalizePrimitiveOptions(this.label, opts);
+    const depthOptions = normalizeDepthOptions(device, this.label, opts);
     const setCore = createSetCore({
       device,
       label: this.label,
@@ -195,7 +213,7 @@ export class InternalDraw implements Draw {
       cache,
       onIdentityChange: (change) => recordedIn.markStale({ kind: "binding-identity", drawLabel: this.label, ...change }),
     });
-    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...primitiveOptions });
+    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...primitiveOptions, ...depthOptions });
     if (opts.set) this.set(opts.set);
     for (const target of opts.targets ?? []) this.compileSync(target);
   }
@@ -381,7 +399,7 @@ export class InternalDraw implements Draw {
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace });
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, depthKey: state.depthKey });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -401,7 +419,7 @@ export class InternalDraw implements Draw {
       vertex: { module: state.shaderModule, entryPoint: state.vertexEntry, buffers: [...(state.vertexBufferLayouts ?? [])] },
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
       primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
-      depthStencil: signature.depth ? { format: signature.depth, depthWriteEnabled: true, depthCompare: "less" } : undefined,
+      depthStencil: depthStencilState(signature, state),
       multisample: { count: signature.sampleCount ?? 1 },
     });
   }
@@ -414,7 +432,7 @@ export class InternalDraw implements Draw {
       vertex: { module: state.shaderModule, entryPoint: state.vertexEntry, buffers: [...(state.vertexBufferLayouts ?? [])] },
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
       primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
-      depthStencil: signature.depth ? { format: signature.depth, depthWriteEnabled: true, depthCompare: "less" } : undefined,
+      depthStencil: depthStencilState(signature, state),
       multisample: { count: signature.sampleCount ?? 1 },
     });
   }
@@ -575,6 +593,63 @@ function normalizeCull(label: string, value: "none" | "front" | "back"): GPUCull
 function normalizeFrontFace(label: string, value: "ccw" | "cw"): GPUFrontFace {
   if (value === "ccw" || value === "cw") return value;
   throw frontFaceInvalidError(label, value);
+}
+
+type NormalizedDepthState = {
+  readonly depthWriteEnabled: boolean;
+  readonly depthCompare: GPUCompareFunction;
+  readonly depthBias?: number;
+  readonly depthBiasSlopeScale?: number;
+  readonly depthBiasClamp?: number;
+};
+
+type NormalizedDepthOptions = {
+  readonly depthState?: NormalizedDepthState;
+  readonly depthKey?: string;
+};
+
+const DEFAULT_DEPTH_STATE: NormalizedDepthState = { depthWriteEnabled: true, depthCompare: "less-equal" };
+
+const DEPTH_COMPARE_FUNCTIONS: readonly GPUCompareFunction[] = ["never", "less", "equal", "less-equal", "greater", "not-equal", "greater-equal", "always"];
+
+function depthStencilState(signature: TargetSignature, state: DrawState): GPUDepthStencilState | undefined {
+  // A Draw may compile against targets with and without depth; opts.depth only applies when the signature has a depth attachment.
+  if (!signature.depth) return undefined;
+  return { format: signature.depth, ...(state.depthState ?? DEFAULT_DEPTH_STATE) };
+}
+
+function normalizeDepthOptions(device: Device, label: string, opts: DrawOptions): NormalizedDepthOptions {
+  if (opts.depth === undefined) return {};
+  const depthState = normalizeDepth(device, label, opts.depth, opts.mesh?.topology ?? "triangle-list");
+  return { depthState, depthKey: depthKeyFor(depthState) };
+}
+
+function normalizeDepth(device: Device, label: string, value: false | DepthOptions, topology: GPUPrimitiveTopology): NormalizedDepthState {
+  if (value === false) return { depthWriteEnabled: false, depthCompare: "always" };
+  if (typeof value !== "object" || value === null) throw depthInvalidError(label, `received ${preview(value)}.`);
+  if (value.write !== undefined && typeof value.write !== "boolean") throw depthInvalidError(label, `write must be a boolean; received ${preview(value.write)}.`);
+  if (value.compare !== undefined && !DEPTH_COMPARE_FUNCTIONS.includes(value.compare)) throw depthInvalidError(label, `compare must be a GPUCompareFunction; received ${preview(value.compare)}.`);
+  if (value.bias !== undefined && !Number.isInteger(value.bias)) throw depthInvalidError(label, `bias must be an integer (WebGPU depthBias is i32); received ${preview(value.bias)}.`);
+  if (value.biasSlopeScale !== undefined && !Number.isFinite(value.biasSlopeScale)) throw depthInvalidError(label, `biasSlopeScale must be a finite number; received ${preview(value.biasSlopeScale)}.`);
+  if (value.biasClamp !== undefined && !Number.isFinite(value.biasClamp)) throw depthInvalidError(label, `biasClamp must be a finite number; received ${preview(value.biasClamp)}.`);
+  const bias = value.bias ?? 0;
+  const biasSlopeScale = value.biasSlopeScale ?? 0;
+  const biasClamp = value.biasClamp ?? 0;
+  // WebGPU makes nonzero depth bias a validation error outside triangle topologies.
+  if ((bias !== 0 || biasSlopeScale !== 0 || biasClamp !== 0) && !topology.startsWith("triangle")) throw depthInvalidError(label, `bias, biasSlopeScale, and biasClamp must be 0 for "${topology}" topology.`);
+  // WebGPU compatibility mode requires depthBiasClamp to be 0.
+  if (biasClamp !== 0 && device.isCompatibilityMode) throw depthInvalidError(label, `biasClamp must be 0 on a compatibility-mode device; received ${preview(value.biasClamp)}.`);
+  return {
+    depthWriteEnabled: value.write ?? true,
+    depthCompare: value.compare ?? "less-equal",
+    ...(bias !== 0 ? { depthBias: bias } : {}),
+    ...(biasSlopeScale !== 0 ? { depthBiasSlopeScale: biasSlopeScale } : {}),
+    ...(biasClamp !== 0 ? { depthBiasClamp: biasClamp } : {}),
+  };
+}
+
+function depthKeyFor(state: NormalizedDepthState): string {
+  return `${state.depthWriteEnabled ? 1 : 0}~${state.depthCompare}~${state.depthBias ?? 0}~${state.depthBiasSlopeScale ?? 0}~${state.depthBiasClamp ?? 0}`;
 }
 
 function normalizeWriteMask(label: string, value: readonly ("r" | "g" | "b" | "a")[]): number {

@@ -5,7 +5,7 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { encodeDraw, type Draw, type DrawCallOptions } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passPreserveMsaaError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passPreserveClearDepthError, passPreserveMsaaError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { isTarget, type ClearColor } from "./target-utils.ts";
 
@@ -13,6 +13,8 @@ export interface FramePassOptions {
   readonly target: Target;
   /** Omit or pass true to clear with gpu.clearColor; pass false to preserve color/depth; pass a color to clear with it. */
   readonly clear?: boolean | ClearColor;
+  /** Depth clear value used when the pass clears. Defaults to 1. Use 0 with depth: { compare: "greater" } for reversed-Z. */
+  readonly clearDepth?: number;
 }
 
 export interface FrameLoopHandle { stop(): void }
@@ -52,7 +54,12 @@ export class Frame {
     const clear = targetOnly ? undefined : target.clear;
     const preserve = clear === false;
     if (preserve && resolvedTarget.sampleCount === 4) throw passPreserveMsaaError();
-    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve));
+    const clearDepth = targetOnly ? undefined : target.clearDepth;
+    if (clearDepth !== undefined) {
+      if (typeof clearDepth !== "number" || !(clearDepth >= 0 && clearDepth <= 1)) throw passClearDepthInvalidError(clearDepth);
+      if (preserve) throw passPreserveClearDepthError();
+    }
+    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth));
     try { cb(new FramePass(encoder, resolvedTarget, this.#validations)); }
     catch (error) {
       discardClaimedGroupValidationResults(this.#validations);
