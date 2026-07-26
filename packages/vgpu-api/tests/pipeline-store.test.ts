@@ -145,6 +145,28 @@ test("depth participates in shared pipeline cache keys", async () => {
   gpu.dispose();
 });
 
+test("multisample participates in shared pipeline cache keys", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2], msaa: true });
+  const a = gpu.draw({ shader: WGSL, label: "ms-a", multisample: { alphaToCoverage: true } });
+  const b = gpu.draw({ shader: WGSL, label: "ms-b", multisample: { mask: 0b0101 } });
+  const c = gpu.draw({ shader: WGSL, label: "ms-c", multisample: { alphaToCoverage: true } });
+  const plain = gpu.draw({ shader: WGSL, label: "ms-plain" });
+  const empty = gpu.draw({ shader: WGSL, label: "ms-empty", multisample: {} });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+  plain.draw(target);
+  empty.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  // a/c share, b is distinct, plain is distinct, and an all-defaults {} shares the plain key.
+  expect(mock.calls.createRenderPipeline).toBe(3);
+  gpu.dispose();
+});
+
 test("pipelineKeyOf appends fragmentKey only when present", () => {
   const module = {} as GPUShaderModule;
   const pipelineLayout = {} as GPUPipelineLayout;

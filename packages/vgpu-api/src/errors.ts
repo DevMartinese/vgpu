@@ -152,6 +152,15 @@ export function depthInvalidError(label: string, reason: string): VGPUError {
   });
 }
 
+export function multisampleInvalidError(label: string, reason: string, where = "gpu.draw"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-MULTISAMPLE-INVALID",
+    message: `Invalid multisample in '${label}': ${reason}`,
+    fix: `Use { alphaToCoverage?, mask? }: alphaToCoverage needs a target created with msaa: true, and mask must be an integer in [0, 0xFFFFFFFF] (bits above the target's sampleCount are ignored). Omit multisample for full-coverage defaults.`,
+    where,
+  });
+}
+
 export function passPreserveMsaaError(): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-PRESERVE-MSAA",

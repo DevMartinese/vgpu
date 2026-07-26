@@ -9,7 +9,7 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { isTarget } from "./target-utils.ts";
-import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, multisampleInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -70,6 +70,13 @@ export interface DrawOptions {
   readonly frontFace?: "ccw" | "cw";
   /** Depth state for targets with a depth attachment. Pass false to disable depth testing entirely. Defaults to { write: true, compare: "less-equal" }. Immutable after construction. Ignored when the target has no depth. */
   readonly depth?: false | DepthOptions;
+  /** Multisample state for MSAA targets. Immutable after construction. */
+  readonly multisample?: {
+    /** Converts fragment alpha into a coverage mask. Requires an MSAA target. Defaults to false. */
+    readonly alphaToCoverage?: boolean;
+    /** Sample bitmask; only the low sampleCount bits matter. Defaults to 0xFFFFFFFF. */
+    readonly mask?: number;
+  };
 }
 
 export interface DrawCallOptions {
@@ -161,6 +168,8 @@ type DrawState = {
   readonly frontFace?: GPUFrontFace;
   readonly depthState?: NormalizedDepthState;
   readonly depthKey?: string;
+  readonly multisampleState?: NormalizedMultisampleState;
+  readonly multisampleKey?: string;
 };
 
 const drawStates = new WeakMap<Draw, DrawState>();
@@ -214,6 +223,7 @@ export class InternalDraw implements Draw {
     const blendConstantOptions = normalizeBlendConstantOptions(this.label, opts, fragmentState.blendState);
     const primitiveOptions = normalizePrimitiveOptions(this.label, opts);
     const depthOptions = normalizeDepthOptions(device, this.label, opts);
+    const multisampleOptions = normalizeMultisampleOptions(this.label, opts);
     const setCore = createSetCore({
       device,
       label: this.label,
@@ -223,7 +233,7 @@ export class InternalDraw implements Draw {
       cache,
       onIdentityChange: (change) => recordedIn.markStale({ kind: "binding-identity", drawLabel: this.label, ...change }),
     });
-    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions });
+    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions, ...multisampleOptions });
     if (opts.set) this.set(opts.set);
     for (const target of opts.targets ?? []) this.compileSync(target);
   }
@@ -408,13 +418,20 @@ export class InternalDraw implements Draw {
     if (state.colorStates && state.colorStates.length !== signature.colors.length) {
       throw colorsInvalidError(this.label, `expected one entry per color attachment; colors has ${state.colorStates.length}, but the target signature has ${signature.colors.length}.`, where);
     }
+    // WebGPU: "If descriptor.alphaToCoverageEnabled is true: descriptor.count > 1." The companion createRenderPipeline
+    // rules — targets[0].format must be blendable with an alpha channel, and the fragment stage must not output the
+    // sample_mask builtin — depend on format capabilities and shader outputs that WGSL reflection does not expose
+    // (EntryPointInfo has no output info), so native validation covers them.
+    if (state.multisampleState?.alphaToCoverageEnabled && (signature.sampleCount ?? 1) <= 1) {
+      throw multisampleInvalidError(this.label, `alphaToCoverage requires a multisampled target, but the target signature has sampleCount ${signature.sampleCount ?? 1}; create the target with msaa: true.`, where);
+    }
     return signature;
   }
 
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, depthKey: state.depthKey });
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, depthKey: state.depthKey, multisampleKey: state.multisampleKey });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -435,7 +452,7 @@ export class InternalDraw implements Draw {
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
       primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
       depthStencil: depthStencilState(signature, state),
-      multisample: { count: signature.sampleCount ?? 1 },
+      multisample: multisampleStateFor(signature, state),
     });
   }
 
@@ -448,7 +465,7 @@ export class InternalDraw implements Draw {
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
       primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
       depthStencil: depthStencilState(signature, state),
-      multisample: { count: signature.sampleCount ?? 1 },
+      multisample: multisampleStateFor(signature, state),
     });
   }
 }
@@ -711,6 +728,43 @@ function normalizeDepth(device: Device, label: string, value: false | DepthOptio
 
 function depthKeyFor(state: NormalizedDepthState): string {
   return `${state.depthWriteEnabled ? 1 : 0}~${state.depthCompare}~${state.depthBias ?? 0}~${state.depthBiasSlopeScale ?? 0}~${state.depthBiasClamp ?? 0}`;
+}
+
+type NormalizedMultisampleState = {
+  readonly alphaToCoverageEnabled?: boolean;
+  readonly mask?: number;
+};
+
+type NormalizedMultisampleOptions = {
+  readonly multisampleState?: NormalizedMultisampleState;
+  readonly multisampleKey?: string;
+};
+
+function multisampleStateFor(signature: TargetSignature, state: DrawState): GPUMultisampleState {
+  // Fields stay omitted when unset so the descriptor is byte-identical to the plain { count } emitted without the option.
+  return { count: signature.sampleCount ?? 1, ...(state.multisampleState ?? {}) };
+}
+
+function normalizeMultisampleOptions(label: string, opts: DrawOptions): NormalizedMultisampleOptions {
+  if (opts.multisample === undefined) return {};
+  const value = opts.multisample;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw multisampleInvalidError(label, `received ${preview(value)}; expected { alphaToCoverage?, mask? }.`);
+  if (value.alphaToCoverage !== undefined && typeof value.alphaToCoverage !== "boolean") throw multisampleInvalidError(label, `alphaToCoverage must be a boolean; received ${preview(value.alphaToCoverage)}.`);
+  // WebGPU GPUSampleMask is [EnforceRange] unsigned long. Bits above the target's sampleCount are legal and ignored.
+  if (value.mask !== undefined && (typeof value.mask !== "number" || !Number.isInteger(value.mask) || value.mask < 0 || value.mask > 0xFFFFFFFF)) {
+    throw multisampleInvalidError(label, `mask must be an integer in [0, 0xFFFFFFFF] (WebGPU GPUSampleMask is u32); received ${preview(value.mask)}.`);
+  }
+  const multisampleState: NormalizedMultisampleState = {
+    ...(value.alphaToCoverage !== undefined ? { alphaToCoverageEnabled: value.alphaToCoverage } : {}),
+    ...(value.mask !== undefined ? { mask: value.mask } : {}),
+  };
+  // An all-defaults object behaves exactly like an absent option; keep the pipeline key byte-identical so they share.
+  if (multisampleState.alphaToCoverageEnabled === undefined && multisampleState.mask === undefined) return {};
+  return { multisampleState, multisampleKey: multisampleKeyFor(multisampleState) };
+}
+
+function multisampleKeyFor(state: NormalizedMultisampleState): string {
+  return `ms~${state.alphaToCoverageEnabled ? 1 : 0}~${state.mask ?? 0xFFFFFFFF}`;
 }
 
 function normalizeWriteMask(label: string, value: readonly ("r" | "g" | "b" | "a")[]): number {
