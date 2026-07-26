@@ -9,7 +9,7 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { isTarget } from "./target-utils.ts";
-import { blendInvalidError, claimedGroupNativeValidationError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -55,6 +55,8 @@ export interface DrawOptions {
   readonly firstInstance?: number;
   /** Blend state applied to every color target of this draw's pipelines. Preset or explicit components. Immutable after construction. */
   readonly blend?: BlendPreset | BlendOptions;
+  /** Blend constant used by "constant"/"one-minus-constant" blend factors. Emitted as encoder state before this draw; not part of the pipeline. Immutable after construction. */
+  readonly blendConstant?: readonly [number, number, number, number];
   /** Channels written to color targets. Omit to write all (rgba). Empty array writes nothing. */
   readonly writeMask?: readonly ("r" | "g" | "b" | "a")[];
   /** Face culling applied to this draw's pipelines. Defaults to "none". Immutable after construction. */
@@ -146,6 +148,7 @@ type DrawState = {
   readonly resolvedPipelineKeys: Set<string>;
   readonly recordedIn: BundleBackReferenceRegistry;
   readonly blendState?: GPUBlendState;
+  readonly blendConstant?: GPUColorDict;
   readonly writeMask?: number;
   readonly fragmentKey?: string;
   readonly cullMode?: GPUCullMode;
@@ -202,6 +205,7 @@ export class InternalDraw implements Draw {
     const shaderModule = shaderModules.get(source, `${this.label}.shader`);
     const recordedIn = createBundleRegistry();
     const fragmentState = normalizeFragmentState(this.label, opts);
+    const blendConstantOptions = normalizeBlendConstantOptions(this.label, opts, fragmentState.blendState);
     const primitiveOptions = normalizePrimitiveOptions(this.label, opts);
     const depthOptions = normalizeDepthOptions(device, this.label, opts);
     const setCore = createSetCore({
@@ -213,7 +217,7 @@ export class InternalDraw implements Draw {
       cache,
       onIdentityChange: (change) => recordedIn.markStale({ kind: "binding-identity", drawLabel: this.label, ...change }),
     });
-    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...primitiveOptions, ...depthOptions });
+    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions });
     if (opts.set) this.set(opts.set);
     for (const target of opts.targets ?? []) this.compileSync(target);
   }
@@ -330,7 +334,9 @@ export class InternalDraw implements Draw {
     const pipeline = this.pipelineFor(target, true);
     if (!pipeline) return;
     pass.setPipeline(pipeline);
-    for (const binding of drawState(this).setCore.bindGroups()) this.#setBindGroup(pass, binding, opts, claimValidation);
+    const state = drawState(this);
+    if (state.blendConstant) pass.setBlendConstant(state.blendConstant);
+    for (const binding of state.setCore.bindGroups()) this.#setBindGroup(pass, binding, opts, claimValidation);
     this.#encodeMesh(pass, opts);
   }
 
@@ -574,6 +580,28 @@ function blendComponent(component: BlendComponentOptions): GPUBlendComponent {
   return { srcFactor: component.src, dstFactor: component.dst, operation: component.op ?? "add" };
 }
 
+type NormalizedBlendConstantOptions = {
+  readonly blendConstant?: GPUColorDict;
+};
+
+function normalizeBlendConstantOptions(label: string, opts: DrawOptions, blendState: GPUBlendState | undefined): NormalizedBlendConstantOptions {
+  if (opts.blendConstant === undefined) return {};
+  const value = opts.blendConstant;
+  if (!Array.isArray(value) || value.length !== 4 || value.some((component) => typeof component !== "number" || !Number.isFinite(component))) {
+    throw blendConstantInvalidError(label, `received ${preview(value)}; expected [r, g, b, a] finite numbers.`);
+  }
+  // Constant factors without blendConstant stay legal (the pass default (0, 0, 0, 0) applies); the reverse is a dead option.
+  if (!blendState || !usesConstantBlendFactor(blendState)) {
+    throw blendConstantInvalidError(label, `blend uses no "constant"/"one-minus-constant" factor, so blendConstant would have no effect.`);
+  }
+  return { blendConstant: { r: value[0], g: value[1], b: value[2], a: value[3] } };
+}
+
+function usesConstantBlendFactor(blend: GPUBlendState): boolean {
+  return [blend.color.srcFactor, blend.color.dstFactor, blend.alpha.srcFactor, blend.alpha.dstFactor]
+    .some((factor) => factor === "constant" || factor === "one-minus-constant");
+}
+
 type NormalizedPrimitiveOptions = {
   readonly cullMode?: GPUCullMode;
   readonly frontFace?: GPUFrontFace;
@@ -683,6 +711,9 @@ export function drawReflection(draw: Draw): Reflection { return drawState(draw).
 export function drawBindingState(draw: Draw, name: string): BindingState | undefined { return drawState(draw).setCore.bindingState(name); }
 
 export function registerDrawBundle(draw: Draw, bundle: BundleBackReference): void { drawState(draw).recordedIn.add(bundle); }
+
+/** Render bundle encoders cannot set the pass blend constant; gpu.bundle uses this to reject such draws at recording. */
+export function drawUsesBlendConstant(draw: Draw): boolean { return drawState(draw).blendConstant !== undefined; }
 
 export function encodeDraw(draw: InternalDraw, pass: GPURenderPassEncoder, target: Target | TargetSignature, opts: DrawCallOptions = {}, claimValidation?: (result: ClaimedGroupValidationResult) => void): void {
   draw.encode(pass, target, opts, claimValidation);

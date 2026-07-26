@@ -42,7 +42,7 @@ interface Bundle {
 
 **Returns:** `gpu.bundle()` returns `Bundle` with `id` and native `gpu` render bundle; `BundleRecorder.draw()` returns `void`; `FramePass.bundles()` returns `void`.
 
-**Throws:** `VGPU-R3-BUNDLE-STALE` when replay target formats/depth/sample count differ from the recorded signature or when a recorded draw's bound resource identity / claimed group changed after recording; `VGPU-R3-BUNDLE-INVALID` when replay receives an object not created by `gpu.bundle`; `VGPU-SURFACE-DISPOSED` when replaying against a disposed surface; draw binding errors such as `VGPU-R1-BINDING-NEVER-SET` can throw during recording. Signature mismatch messages print both recorded and actual signature keys.
+**Throws:** `VGPU-R3-BUNDLE-STALE` when replay target formats/depth/sample count differ from the recorded signature or when a recorded draw's bound resource identity / claimed group changed after recording; `VGPU-R3-BUNDLE-INVALID` when replay receives an object not created by `gpu.bundle`; `VGPU-BUNDLE-BLEND-CONSTANT` when recording a draw with `blendConstant` (the blend constant is render-pass state that render bundle encoders cannot set; encode such draws in a frame pass instead); `VGPU-SURFACE-DISPOSED` when replaying against a disposed surface; draw binding errors such as `VGPU-R1-BINDING-NEVER-SET` can throw during recording. Signature mismatch messages print both recorded and actual signature keys.
 
 ## Examples
 
@@ -123,4 +123,5 @@ For future canvas surfaces, use `navigator.gpu.getPreferredCanvasFormat()` when 
 - Re-record when the bundle samples a resized target; vgpu detects the changed texture identity and reports `VGPU-R3-BUNDLE-STALE`.
 - `surface.onResize(...)` fires immediately, so the same re-recording callback can initialize and refresh bundles that sample resized resources.
 - Bundles freeze bind group identities, not buffer contents. Updating JS-owned packed values in-place is safe; rebinding a different texture/buffer/sampler stales the bundle.
+- Draws with `blendConstant` cannot be recorded: render bundle encoders have no way to set the pass blend constant. Recording throws `VGPU-BUNDLE-BLEND-CONSTANT`; use `FramePass.draw` for those draws.
 - **See also:** `FramePass.bundles`, `Draw`, `Effect`, `Surface`, `Target`, `createRenderBundle`.

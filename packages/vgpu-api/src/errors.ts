@@ -89,6 +89,24 @@ export function blendInvalidError(label: string, value: unknown): VGPUError {
   });
 }
 
+export function blendConstantInvalidError(label: string, reason: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-BLEND-CONSTANT-INVALID",
+    message: `Invalid blendConstant in '${label}': ${reason}`,
+    fix: `Use [r, g, b, a] finite numbers with a blend whose color or alpha uses "constant"/"one-minus-constant"; omit it to keep the pass default (0, 0, 0, 0).`,
+    where: "gpu.draw",
+  });
+}
+
+export function bundleBlendConstantError(bundleId: string, drawLabel: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-BUNDLE-BLEND-CONSTANT",
+    message: `bundle '${bundleId}' cannot record draw '${drawLabel}': blendConstant is render-pass state and render bundle encoders cannot set it.`,
+    fix: `Encode the draw with p.draw(...) in a frame pass, or drop blendConstant from the draw.`,
+    where: "gpu.bundle",
+  });
+}
+
 export function writeMaskInvalidError(label: string, preview: string): VGPUError {
   return new VGPUError({
     code: "VGPU-WRITEMASK-INVALID",
