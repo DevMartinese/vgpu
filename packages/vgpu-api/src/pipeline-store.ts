@@ -1,7 +1,8 @@
 import { bindGroupLayoutMetadata, type Device } from "@vgpu/core";
+import type { OverrideInfo } from "@vgpu/wgsl/reflect-source";
 import type { Target, CompileTarget, TargetSignature } from "./target.ts";
 import { isTarget } from "./target-utils.ts";
-import { compileDisposedError, compileFailedError, compileSignatureInvalidError, pipelineLayoutGapError, type VGPUError } from "./errors.ts";
+import { compileDisposedError, compileFailedError, compileSignatureInvalidError, constantsInvalidError, pipelineLayoutGapError, type VGPUError } from "./errors.ts";
 
 export interface ErrorCtx {
   readonly where: string;
@@ -92,6 +93,7 @@ export function pipelineKeyOf(parts: {
   readonly depthKey?: string;
   readonly stencilKey?: string;
   readonly multisampleKey?: string;
+  readonly constantsKey?: string;
 }): string {
   const base = `${idFor(shaderModuleIds, parts.module, () => nextShaderModuleId++)}|${idFor(pipelineLayoutIds, parts.pipelineLayout, () => nextPipelineLayoutId++)}|${vertexLayoutHash(parts.vertexBufferLayouts ?? [])}|${signatureKeyOf(parts.signature)}`;
   const primitive = parts.topology || parts.stripIndexFormat ? `${base}|${parts.topology ?? "triangle-list"}|${parts.stripIndexFormat ?? "none"}` : base;
@@ -100,7 +102,75 @@ export function pipelineKeyOf(parts: {
   const withDepth = parts.depthKey ? `${clipped}|${parts.depthKey}` : clipped;
   const withStencil = parts.stencilKey ? `${withDepth}|${parts.stencilKey}` : withDepth;
   const withMultisample = parts.multisampleKey ? `${withStencil}|${parts.multisampleKey}` : withStencil;
-  return parts.fragmentKey ? `${withMultisample}|${parts.fragmentKey}` : withMultisample;
+  const withConstants = parts.constantsKey ? `${withMultisample}|${parts.constantsKey}` : withMultisample;
+  return parts.fragmentKey ? `${withConstants}|${parts.fragmentKey}` : withConstants;
+}
+
+export type NormalizedConstantsOptions = {
+  readonly constants?: Readonly<Record<string, GPUPipelineConstantValue>>;
+  readonly constantsKey?: string;
+};
+
+/**
+ * Validates a `constants` option against the shader's reflected `override` declarations and normalizes it into
+ * the GPUProgrammableStage constants record (booleans become 1/0 — GPUPipelineConstantValue "is a `double`", and
+ * WebGPU converts it "to WGSL type of the pipeline-overridable constant (bool/i32/u32/f32/f16)") plus a
+ * deterministic pipeline-cache key fragment.
+ *
+ * WebGPU keys each override by its pipeline-overridable constant identifier string — "the pipeline constant ID of
+ * the constant if its declaration specifies one, and otherwise the constant's identifier name" — and key matching
+ * is module-level: "The pipeline-overridable constant is not required to be statically used by entryPoint." One
+ * record is therefore valid for every stage of the module and needs no per-stage filtering. The spec's
+ * must-provide rule is per constant "statically used by entryPoint"; reflection does not track override
+ * reachability per entry point, so the no-default check here is conservatively module-level — providing a value
+ * for an unused override is always legal, and requiring one for an unused no-default override never produces an
+ * invalid pipeline.
+ */
+export function normalizeConstantsOptions(label: string, value: Readonly<Record<string, number | boolean>> | undefined, overrides: readonly OverrideInfo[], where: string): NormalizedConstantsOptions {
+  if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    throw constantsInvalidError(label, `received ${previewConstant(value)}; expected { overrideNameOrId: number | boolean }.`, where);
+  }
+  const byIdentifier = new Map(overrides.map((override) => [overrideIdentifierOf(override), override] as const));
+  const constants: Record<string, GPUPipelineConstantValue> = {};
+  for (const [key, entry] of Object.entries(value ?? {})) {
+    if (!byIdentifier.has(key)) {
+      throw constantsInvalidError(label, `"${key}" matches no override in the shader; available overrides: ${availableOverrides(overrides)}.`, where);
+    }
+    if (typeof entry === "boolean") { constants[key] = entry ? 1 : 0; continue; }
+    if (typeof entry !== "number" || !Number.isFinite(entry)) {
+      throw constantsInvalidError(label, `"${key}" received ${previewConstant(entry)}; use a finite number or a boolean (WebGPU converts the value to the override's WGSL type, and NaN/Infinity fail that conversion).`, where);
+    }
+    constants[key] = entry;
+  }
+  // WebGPU: "If the pipeline-overridable constant identified by key does not have a default value,
+  // descriptor.constants must contain key." — checked module-level here; see the function comment.
+  for (const override of overrides) {
+    const identifier = overrideIdentifierOf(override);
+    if (override.defaultValue === undefined && !(identifier in constants)) {
+      throw constantsInvalidError(label, `override '${override.name}' has no default value and must be provided; add constants: { "${identifier}": value }.`, where);
+    }
+  }
+  // No overridden values behaves exactly like an absent option; descriptors and pipeline cache keys stay byte-identical.
+  if (Object.keys(constants).length === 0) return {};
+  return { constants, constantsKey: constantsKeyFor(constants) };
+}
+
+function overrideIdentifierOf(override: OverrideInfo): string {
+  return override.id !== undefined ? String(override.id) : override.name;
+}
+
+function availableOverrides(overrides: readonly OverrideInfo[]): string {
+  if (!overrides.length) return "none";
+  return overrides.map((override) => override.id !== undefined ? `"${override.id}" (@id of ${override.name})` : `"${override.name}"`).join(", ");
+}
+
+function constantsKeyFor(constants: Readonly<Record<string, GPUPipelineConstantValue>>): string {
+  return `cn~${Object.entries(constants).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, entry]) => `${key}=${entry}`).join("~")}`;
+}
+
+function previewConstant(value: unknown): string {
+  if (typeof value === "string") return `"${value}"`;
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
 }
 
 export function createShaderModuleCache(device: Device): ShaderModuleCache {

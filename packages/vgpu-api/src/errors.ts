@@ -188,6 +188,15 @@ export function multisampleInvalidError(label: string, reason: string, where = "
   });
 }
 
+export function constantsInvalidError(label: string, reason: string, where = "gpu.draw"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-CONSTANTS-INVALID",
+    message: `Invalid constants in '${label}': ${reason}`,
+    fix: `Key WGSL \`override\` constants by name, or by the decimal string of N when the declaration has @id(N); values are finite numbers or booleans, converted to the override's WGSL type (bool/i32/u32/f32/f16). Every override without a default value must be provided. Omit constants to keep the WGSL defaults.`,
+    where,
+  });
+}
+
 export function passPreserveMsaaError(): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-PRESERVE-MSAA",

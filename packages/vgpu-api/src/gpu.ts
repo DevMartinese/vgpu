@@ -29,7 +29,12 @@ export interface InitOptions {
   readonly label?: string;
 }
 
-export interface ComputeOptions { readonly label?: string; readonly set?: Record<string, unknown> }
+export interface ComputeOptions {
+  readonly label?: string;
+  readonly set?: Record<string, unknown>;
+  /** Values for WGSL `override` constants, keyed by name (or by numeric id as a string when the override has @id). Immutable after construction. */
+  readonly constants?: Readonly<Record<string, number | boolean>>;
+}
 export interface Compute { set(values: Record<string, unknown>): this; dispatch(x: number, y?: number, z?: number): void }
 export type StorageAccess = "read" | "read-write";
 export interface StorageBuffer { readonly size: number; readonly access: StorageAccess; read(): Promise<ArrayBuffer>; write(data: BufferSource): void }

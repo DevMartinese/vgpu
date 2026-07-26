@@ -211,6 +211,31 @@ test("unclippedDepth participates in shared pipeline cache keys", async () => {
   gpu.dispose();
 });
 
+test("constants participate in shared pipeline cache keys", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2] });
+  const OVERRIDE_WGSL = `
+override SCALE: f32 = 1.0;
+${WGSL}`;
+  const a = gpu.draw({ shader: OVERRIDE_WGSL, label: "cn-a", constants: { SCALE: 2 } });
+  const b = gpu.draw({ shader: OVERRIDE_WGSL, label: "cn-b", constants: { SCALE: 3 } });
+  const c = gpu.draw({ shader: OVERRIDE_WGSL, label: "cn-c", constants: { SCALE: 2 } });
+  const plain = gpu.draw({ shader: OVERRIDE_WGSL, label: "cn-plain" });
+  const empty = gpu.draw({ shader: OVERRIDE_WGSL, label: "cn-empty", constants: {} });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+  plain.draw(target);
+  empty.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  // a/c share, b is distinct, plain is distinct, and an empty {} shares the plain key.
+  expect(mock.calls.createRenderPipeline).toBe(3);
+  gpu.dispose();
+});
+
 test("pipelineKeyOf appends fragmentKey only when present", () => {
   const module = {} as GPUShaderModule;
   const pipelineLayout = {} as GPUPipelineLayout;
@@ -219,6 +244,7 @@ test("pipelineKeyOf appends fragmentKey only when present", () => {
 
   expect(pipelineKeyOf({ ...parts, fragmentKey: undefined })).toBe(base);
   expect(pipelineKeyOf({ ...parts, fragmentKey: "none;none;7" })).toBe(`${base}|none;none;7`);
+  expect(pipelineKeyOf({ ...parts, constantsKey: "cn~SCALE=2" })).toBe(`${base}|cn~SCALE=2`);
 });
 
 test("sync pipeline creation wins a pending async create and suppresses late native rejection", async () => {

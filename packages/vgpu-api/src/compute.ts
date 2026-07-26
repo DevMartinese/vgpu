@@ -4,6 +4,7 @@ import { createBindGroupCache, identityKey, type BindGroupCache, type BindGroupI
 import { createSetCore, bindGroupLayoutsForReflection, pipelineLayoutFor, type SetBag, type SetCore } from "./set-core.ts";
 import { visibilityForEntries } from "./set-layouts.ts";
 import type { Compute, ComputeOptions } from "./gpu.ts";
+import { normalizeConstantsOptions } from "./pipeline-store.ts";
 import { unsupportedError, writableStorageAliasingError } from "./errors.ts";
 
 let nextComputeId = 1;
@@ -35,13 +36,16 @@ export class ComputePipeline implements Compute {
     this.reflection = reflectSource(source, `${this.label}.wgsl`);
     const entry = computeEntryPoint(this.reflection, this.label);
     this.entryPoint = entry.name;
+    const { constants } = normalizeConstantsOptions(this.label, opts.constants, this.reflection.overrides, "gpu.compute");
     this.bindGroupLayouts = bindGroupLayoutsForReflection(device, this.label, this.reflection, visibilityForEntries(this.reflection.bindings, [entry]));
     this.pipelineLayout = pipelineLayoutFor(device, this.bindGroupLayouts);
     this.shaderModule = device.gpu.createShaderModule({ label: `${this.label}.shader`, code: source });
+    // Each Compute owns its pipeline (no shared store), so constants join the descriptor directly; the record is
+    // omitted when the option is absent to keep the descriptor byte-identical to before.
     this.pipeline = device.gpu.createComputePipeline({
       label: `${this.label}.pipeline`,
       layout: this.pipelineLayout,
-      compute: { module: this.shaderModule, entryPoint: this.entryPoint },
+      compute: { module: this.shaderModule, entryPoint: this.entryPoint, ...(constants ? { constants } : {}) },
     });
     this.setCore = createSetCore({ device, label: this.label, drawId: this.id, reflection: this.reflection, bindGroupLayouts: this.bindGroupLayouts, cache: this.cache });
     const active = new Set((entry.bindings ?? this.reflection.bindings).map((binding) => `${binding.group}:${binding.binding}`));
