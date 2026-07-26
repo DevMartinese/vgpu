@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { CodeBlock } from '@/components/code-block';
+import { HeroTabs } from '@/components/hero-tabs';
 
 const heroCode = `import { init } from "vgpu";
 
@@ -20,16 +21,17 @@ const features = [
 
 export default function HomePage() {
   return (
-    <div className="px-6 py-16 lg:px-12 lg:py-20">
-      <section className="max-w-4xl mx-auto text-center mb-24">
+    <div className="px-6 pb-16 lg:px-12 lg:pb-20">
+      <section className="min-h-[90svh] max-w-4xl mx-auto flex flex-col justify-center text-center mb-16">
         <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-gray-12 mb-6 tracking-tight">vgpu</h1>
         <p className="text-balance text-lg md:text-xl text-gray-10 mb-10 max-w-2xl mx-auto leading-relaxed">The low-level WebGPU library, designed for agents.</p>
-        <div className="flex flex-wrap justify-center gap-4 mb-16">
-          <Link href="/get-started" className="px-5 py-2.5 rounded-lg bg-gray-12 text-black font-medium text-sm hover:bg-gray-11 transition-colors">Get Started</Link>
-          <Link href="/reference" className="px-5 py-2.5 rounded-lg bg-gray-2 text-gray-12 font-medium text-sm border border-gray-4 hover:border-gray-5 hover:bg-gray-1 transition-colors">API Reference</Link>
+        <HeroTabs />
+        <div className="mt-5 flex justify-center gap-5">
+          <Link href="/get-started" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Get started →</Link>
+          <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Examples →</Link>
         </div>
-        <div className="text-left max-w-2xl mx-auto"><CodeBlock code={heroCode} language="typescript" /></div>
       </section>
+      <div className="text-left max-w-2xl mx-auto mb-24"><CodeBlock code={heroCode} language="typescript" /></div>
       <section className="max-w-4xl mx-auto mb-24">
         <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-4">Everything You Need</h2>
         <p className="text-gray-9 text-center mb-12 max-w-xl mx-auto">Start with the public `vgpu` API. Drop to native WebGPU only when you need explicit control.</p>

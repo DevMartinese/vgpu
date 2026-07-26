@@ -1,6 +1,7 @@
 import { Terminal } from "lucide-react";
 import { highlightCode, countLinesInHtml } from "@/lib/shiki";
 import { CopyButton } from "./copy-button";
+import { Card } from "./card";
 
 interface CodeBlockProps {
   code: string;
@@ -37,9 +38,9 @@ export async function CodeBlock({
   const lineCount = countLinesInHtml(highlightedHtml);
 
   return (
-    <div className="group relative rounded-lg border border-[#333] bg-[#0a0a0a] overflow-hidden my-4">
+    <Card className="group relative rounded-lg border border-[#333] bg-[#0a0a0a] overflow-hidden my-4">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-[#333] bg-[#111]">
+      <Card.Header className="border-[#333] bg-[#111]">
         <div className="flex items-center gap-2">
           {filename ? (
             <span className="text-sm text-[#a1a1a1]">{filename}</span>
@@ -53,10 +54,10 @@ export async function CodeBlock({
           )}
         </div>
         <CopyButton code={code} />
-      </div>
+      </Card.Header>
 
       {/* Code content */}
-      <div className="relative overflow-x-auto">
+      <Card.Body className="relative overflow-x-auto">
         {showLineNumbers ? (
           <div className="flex">
             {/* Line numbers */}
@@ -83,7 +84,7 @@ export async function CodeBlock({
             />
           </div>
         )}
-      </div>
-    </div>
+      </Card.Body>
+    </Card>
   );
 }
