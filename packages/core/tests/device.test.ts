@@ -34,6 +34,15 @@ test("mock GPU device exposes stable limits and setlike features", () => {
   expect(device.features.has("timestamp-query")).toBe(false);
 });
 
+test("mock GPU device reflects the features it was created with", () => {
+  const gpu = createMockGPUDevice({ features: ["depth-clip-control"] });
+  const device = new Device(gpu);
+
+  expect(device.features.has("depth-clip-control")).toBe(true);
+  expect(device.features.has("timestamp-query")).toBe(false);
+  expect(device.features.size).toBe(1);
+});
+
 test("Device.isCompatibilityMode defaults false and can be set by adapters", () => {
   const gpu = createMockGPUDevice();
 

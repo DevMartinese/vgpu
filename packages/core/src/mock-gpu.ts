@@ -27,12 +27,17 @@ const mockInstrumentationKey = "__vgpuMockInstrumentation";
 
 type InstrumentedGPUDevice = GPUDevice & { [mockInstrumentationKey]?: MockGPUDeviceInstrumentation };
 
-export function createMockGPUDevice(): GPUDevice {
+export interface MockGPUDeviceOptions {
+  /** Features the mock device reports through GPUDevice.features. Defaults to none, matching a device requested without requiredFeatures. */
+  readonly features?: readonly GPUFeatureName[];
+}
+
+export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevice {
   const instrumentation = createMockGPUDeviceInstrumentation();
   const device: InstrumentedGPUDevice = {
     [mockInstrumentationKey]: instrumentation,
     limits: createMockSupportedLimits(),
-    features: createMockSupportedFeatures(),
+    features: createMockSupportedFeatures(options.features),
     createBuffer(desc: GPUBufferDescriptor): MockGPUBuffer {
       instrumentation.calls.createBuffer += 1;
       instrumentation.createBufferDescriptors.push(desc);
@@ -205,8 +210,8 @@ function createMockSupportedLimits(): GPUSupportedLimits {
   } as unknown as GPUSupportedLimits;
 }
 
-function createMockSupportedFeatures(): GPUSupportedFeatures {
-  return new Set<GPUFeatureName>() as unknown as GPUSupportedFeatures;
+function createMockSupportedFeatures(features: readonly GPUFeatureName[] = []): GPUSupportedFeatures {
+  return new Set<GPUFeatureName>(features) as unknown as GPUSupportedFeatures;
 }
 
 function createMockBuffer(desc: GPUBufferDescriptor): MockGPUBuffer {

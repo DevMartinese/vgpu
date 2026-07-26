@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { getMockGPUDeviceInstrumentation } from "@vgpu/core";
-import { init } from "../src/mock.ts";
+import { createMockAdapter, init } from "../src/mock.ts";
 import { InternalDraw } from "../src/draw.ts";
 import { createPipelineStore, createShaderModuleCache, pipelineKeyOf, signatureKeyOf } from "../src/pipeline-store.ts";
 
@@ -188,6 +188,26 @@ test("multisample participates in shared pipeline cache keys", async () => {
   expect(mock.calls.createShaderModule).toBe(1);
   // a/c share, b is distinct, plain is distinct, and an all-defaults {} shares the plain key.
   expect(mock.calls.createRenderPipeline).toBe(3);
+  gpu.dispose();
+});
+
+test("unclippedDepth participates in shared pipeline cache keys", async () => {
+  const gpu = await init({ adapter: createMockAdapter({ features: ["depth-clip-control"] }), requiredFeatures: ["depth-clip-control"] });
+  const target = gpu.target({ size: [2, 2] });
+  const a = gpu.draw({ shader: WGSL, label: "unclipped-a", unclippedDepth: true });
+  const b = gpu.draw({ shader: WGSL, label: "unclipped-b" });
+  const c = gpu.draw({ shader: WGSL, label: "unclipped-c", unclippedDepth: true });
+  const explicitFalse = gpu.draw({ shader: WGSL, label: "unclipped-false", unclippedDepth: false });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+  explicitFalse.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  // a/c share, plain is distinct, and an explicit false shares the plain key.
+  expect(mock.calls.createRenderPipeline).toBe(2);
   gpu.dispose();
 });
 

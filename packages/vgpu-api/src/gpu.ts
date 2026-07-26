@@ -1,6 +1,6 @@
 import type { ShaderSource } from "@vgpu/wgsl";
 import type { RequiredDeviceLimits, VGPUAdapter } from "@vgpu/core";
-import { Device } from "@vgpu/core";
+import { Device, validateRequiredFeatures } from "@vgpu/core";
 import { createBindGroupCache } from "./bind-cache.ts";
 import { createBundle, type Bundle, type BundleOptions, type BundleRecorder } from "./bundle.ts";
 import { InternalDraw, type Draw, type DrawOptions } from "./draw.ts";
@@ -230,6 +230,7 @@ async function requestBrowserDevice(opts: InitOptions): Promise<Device> {
   const nav = globalThis.navigator as Navigator & { gpu?: GPU };
   const adapter = await nav.gpu?.requestAdapter({ powerPreference: opts.powerPreference });
   if (!adapter) throw unsupportedError("init", "navigator.gpu.requestAdapter() returned null.");
+  validateRequiredFeatures(adapter.features, opts.requiredFeatures);
   const gpuDevice = await adapter.requestDevice({ requiredFeatures: opts.requiredFeatures, requiredLimits: opts.requiredLimits });
   return new Device(gpuDevice, adapter.info ?? null);
 }

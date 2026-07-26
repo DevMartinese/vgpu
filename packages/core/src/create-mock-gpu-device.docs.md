@@ -6,4 +6,7 @@ other adapters while keeping mock storage logic local to core tests.
 
 The mock device exposes stable, plausible `limits` and a setlike `features` object
 so tests can exercise capability inspection through `Device.limits` and
-`Device.features`. Optional features are not enabled by default.
+`Device.features`. Optional features are not enabled by default; pass
+`createMockGPUDevice({ features: [...] })` to create a device whose `features`
+set reflects the given names, mirroring a device requested with those
+`requiredFeatures`.

@@ -143,6 +143,15 @@ export function frontFaceInvalidError(label: string, value: unknown): VGPUError 
   });
 }
 
+export function unclippedDepthInvalidError(label: string, reason: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-UNCLIPPED-DEPTH-INVALID",
+    message: `Invalid unclippedDepth in '${label}': ${reason}`,
+    fix: `Use a boolean. unclippedDepth: true needs the "depth-clip-control" device feature — request it with init({ requiredFeatures: ["depth-clip-control"] }) on an adapter that supports it. Omit the option to keep depth clipping.`,
+    where: "gpu.draw",
+  });
+}
+
 export function depthInvalidError(label: string, reason: string): VGPUError {
   return new VGPUError({
     code: "VGPU-DEPTH-INVALID",

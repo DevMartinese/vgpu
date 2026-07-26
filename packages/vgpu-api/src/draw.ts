@@ -9,7 +9,7 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { hasStencilAspect, isTarget } from "./target-utils.ts";
-import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, unclippedDepthInvalidError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -92,6 +92,8 @@ export interface DrawOptions {
   readonly cull?: "none" | "front" | "back";
   /** Winding that counts as front-facing. Defaults to "ccw". Immutable after construction. */
   readonly frontFace?: "ccw" | "cw";
+  /** Disables depth clipping so geometry outside [near, far] is not clipped. Requires the "depth-clip-control" device feature. Defaults to false. Immutable after construction. */
+  readonly unclippedDepth?: boolean;
   /** Depth state for targets with a depth attachment. Pass false to disable depth testing entirely. Defaults to { write: true, compare: "less-equal" }. Immutable after construction. Ignored when the target has no depth. */
   readonly depth?: false | DepthOptions;
   /** Stencil state for targets whose depth format has a stencil aspect. Immutable after construction. */
@@ -192,6 +194,7 @@ type DrawState = {
   readonly fragmentKey?: string;
   readonly cullMode?: GPUCullMode;
   readonly frontFace?: GPUFrontFace;
+  readonly unclippedDepth?: true;
   readonly depthState?: NormalizedDepthState;
   readonly depthKey?: string;
   readonly stencilState?: NormalizedStencilState;
@@ -250,7 +253,7 @@ export class InternalDraw implements Draw {
     const recordedIn = createBundleRegistry();
     const fragmentState = normalizeFragmentState(this.label, opts);
     const blendConstantOptions = normalizeBlendConstantOptions(this.label, opts, fragmentState.blendState);
-    const primitiveOptions = normalizePrimitiveOptions(this.label, opts);
+    const primitiveOptions = normalizePrimitiveOptions(device, this.label, opts);
     const depthOptions = normalizeDepthOptions(device, this.label, opts);
     const stencilOptions = normalizeStencilOptions(this.label, opts);
     const multisampleOptions = normalizeMultisampleOptions(this.label, opts);
@@ -468,7 +471,7 @@ export class InternalDraw implements Draw {
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey });
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, unclippedDepth: state.unclippedDepth, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -487,7 +490,7 @@ export class InternalDraw implements Draw {
       layout: state.pipelineLayout,
       vertex: { module: state.shaderModule, entryPoint: state.vertexEntry, buffers: [...(state.vertexBufferLayouts ?? [])] },
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
-      primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
+      primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace, state.unclippedDepth),
       depthStencil: depthStencilState(signature, state),
       multisample: multisampleStateFor(signature, state),
     });
@@ -500,7 +503,7 @@ export class InternalDraw implements Draw {
       layout: state.pipelineLayout,
       vertex: { module: state.shaderModule, entryPoint: state.vertexEntry, buffers: [...(state.vertexBufferLayouts ?? [])] },
       fragment: { module: state.shaderModule, entryPoint: state.fragmentEntry, targets: fragmentTargets(signature, state) },
-      primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace),
+      primitive: primitiveState(state.opts.mesh, state.cullMode, state.frontFace, state.unclippedDepth),
       depthStencil: depthStencilState(signature, state),
       multisample: multisampleStateFor(signature, state),
     });
@@ -579,12 +582,13 @@ function resolveDrawCounts(label: string, mesh: MeshLike | undefined, drawOpts: 
   };
 }
 
-function primitiveState(mesh: MeshLike | undefined, cullMode?: GPUCullMode, frontFace?: GPUFrontFace): GPUPrimitiveState {
+function primitiveState(mesh: MeshLike | undefined, cullMode?: GPUCullMode, frontFace?: GPUFrontFace, unclippedDepth?: true): GPUPrimitiveState {
   const topology = mesh?.topology ?? "triangle-list";
   const stripIndexFormat = mesh?.stripIndexFormat ?? (topology.endsWith("strip") ? mesh?.indexFormat : undefined);
   const state: GPUPrimitiveState = stripIndexFormat ? { topology, stripIndexFormat } : { topology };
   if (cullMode !== undefined) state.cullMode = cullMode;
   if (frontFace !== undefined) state.frontFace = frontFace;
+  if (unclippedDepth) state.unclippedDepth = true;
   return state;
 }
 
@@ -692,12 +696,25 @@ function usesConstantBlendFactor(blend: GPUBlendState): boolean {
 type NormalizedPrimitiveOptions = {
   readonly cullMode?: GPUCullMode;
   readonly frontFace?: GPUFrontFace;
+  readonly unclippedDepth?: true;
 };
 
-function normalizePrimitiveOptions(label: string, opts: DrawOptions): NormalizedPrimitiveOptions {
+function normalizePrimitiveOptions(device: Device, label: string, opts: DrawOptions): NormalizedPrimitiveOptions {
   const cullMode = opts.cull === undefined ? undefined : normalizeCull(label, opts.cull);
   const frontFace = opts.frontFace === undefined ? undefined : normalizeFrontFace(label, opts.frontFace);
-  return { cullMode, frontFace };
+  const unclippedDepth = opts.unclippedDepth === undefined ? undefined : normalizeUnclippedDepth(device, label, opts.unclippedDepth);
+  return { cullMode, frontFace, unclippedDepth };
+}
+
+function normalizeUnclippedDepth(device: Device, label: string, value: boolean): true | undefined {
+  if (typeof value !== "boolean") throw unclippedDepthInvalidError(label, `received ${preview(value)}; expected a boolean.`);
+  // An explicit false behaves exactly like an absent option; descriptors and pipeline cache keys stay byte-identical.
+  if (!value) return undefined;
+  // WebGPU: "If descriptor.unclippedDepth is true: 'depth-clip-control' must be enabled for device."
+  if (!device.features.has("depth-clip-control")) {
+    throw unclippedDepthInvalidError(label, `the device lacks the "depth-clip-control" feature; request it at init: init({ requiredFeatures: ["depth-clip-control"] }) on an adapter that supports it.`);
+  }
+  return true;
 }
 
 function normalizeCull(label: string, value: "none" | "front" | "back"): GPUCullMode {

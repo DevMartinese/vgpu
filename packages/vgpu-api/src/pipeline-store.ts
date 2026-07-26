@@ -88,6 +88,7 @@ export function pipelineKeyOf(parts: {
   readonly stripIndexFormat?: GPUIndexFormat;
   readonly cullMode?: GPUCullMode;
   readonly frontFace?: GPUFrontFace;
+  readonly unclippedDepth?: boolean;
   readonly depthKey?: string;
   readonly stencilKey?: string;
   readonly multisampleKey?: string;
@@ -95,7 +96,8 @@ export function pipelineKeyOf(parts: {
   const base = `${idFor(shaderModuleIds, parts.module, () => nextShaderModuleId++)}|${idFor(pipelineLayoutIds, parts.pipelineLayout, () => nextPipelineLayoutId++)}|${vertexLayoutHash(parts.vertexBufferLayouts ?? [])}|${signatureKeyOf(parts.signature)}`;
   const primitive = parts.topology || parts.stripIndexFormat ? `${base}|${parts.topology ?? "triangle-list"}|${parts.stripIndexFormat ?? "none"}` : base;
   const culled = parts.cullMode || parts.frontFace ? `${primitive}|${parts.cullMode ?? "none"}|${parts.frontFace ?? "ccw"}` : primitive;
-  const withDepth = parts.depthKey ? `${culled}|${parts.depthKey}` : culled;
+  const clipped = parts.unclippedDepth ? `${culled}|unclipped` : culled;
+  const withDepth = parts.depthKey ? `${clipped}|${parts.depthKey}` : clipped;
   const withStencil = parts.stencilKey ? `${withDepth}|${parts.stencilKey}` : withDepth;
   const withMultisample = parts.multisampleKey ? `${withStencil}|${parts.multisampleKey}` : withStencil;
   return parts.fragmentKey ? `${withMultisample}|${parts.fragmentKey}` : withMultisample;
