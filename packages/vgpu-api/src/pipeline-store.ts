@@ -1,8 +1,8 @@
 import { bindGroupLayoutMetadata, type Device } from "@vgpu/core";
-import type { OverrideInfo } from "@vgpu/wgsl/reflect-source";
+import type { EntryPointInfo, OverrideInfo } from "@vgpu/wgsl/reflect-source";
 import type { Target, CompileTarget, TargetSignature } from "./target.ts";
 import { isTarget } from "./target-utils.ts";
-import { compileDisposedError, compileFailedError, compileSignatureInvalidError, constantsInvalidError, pipelineLayoutGapError, type VGPUError } from "./errors.ts";
+import { compileDisposedError, compileFailedError, compileSignatureInvalidError, constantsInvalidError, entryInvalidError, pipelineLayoutGapError, type VGPUError } from "./errors.ts";
 
 export interface ErrorCtx {
   readonly where: string;
@@ -94,6 +94,7 @@ export function pipelineKeyOf(parts: {
   readonly stencilKey?: string;
   readonly multisampleKey?: string;
   readonly constantsKey?: string;
+  readonly entryKey?: string;
 }): string {
   const base = `${idFor(shaderModuleIds, parts.module, () => nextShaderModuleId++)}|${idFor(pipelineLayoutIds, parts.pipelineLayout, () => nextPipelineLayoutId++)}|${vertexLayoutHash(parts.vertexBufferLayouts ?? [])}|${signatureKeyOf(parts.signature)}`;
   const primitive = parts.topology || parts.stripIndexFormat ? `${base}|${parts.topology ?? "triangle-list"}|${parts.stripIndexFormat ?? "none"}` : base;
@@ -103,7 +104,36 @@ export function pipelineKeyOf(parts: {
   const withStencil = parts.stencilKey ? `${withDepth}|${parts.stencilKey}` : withDepth;
   const withMultisample = parts.multisampleKey ? `${withStencil}|${parts.multisampleKey}` : withStencil;
   const withConstants = parts.constantsKey ? `${withMultisample}|${parts.constantsKey}` : withMultisample;
-  return parts.fragmentKey ? `${withConstants}|${parts.fragmentKey}` : withConstants;
+  // The shader module is shared per byte-identical source, so entry point names must key variants themselves.
+  const withEntry = parts.entryKey ? `${withConstants}|${parts.entryKey}` : withConstants;
+  return parts.fragmentKey ? `${withEntry}|${parts.fragmentKey}` : withEntry;
+}
+
+/**
+ * Selects the entry point a pipeline stage compiles: the first entry point of the stage when no name is given
+ * (exactly today's behavior), or the named one — validated to exist and to have the requested stage. Callers must
+ * run this selection before deriving anything from the result (binding visibility, storage-stage limits, bind
+ * group layouts, vertex input layouts), so the whole pipeline reflects the chosen variant.
+ */
+export function selectEntryPoint(label: string, entryPoints: readonly EntryPointInfo[], stage: "vertex" | "fragment" | "compute", name: string | undefined, where: string): EntryPointInfo | undefined {
+  if (name === undefined) return entryPoints.find((entry) => entry.stage === stage);
+  if (typeof name !== "string") {
+    throw entryInvalidError(label, `${stage} received ${previewConstant(name)}; expected an entry point name string.`, where);
+  }
+  // WGSL forbids duplicate function names, so a name identifies at most one entry point across all stages.
+  const named = entryPoints.find((entry) => entry.name === name);
+  if (!named) {
+    throw entryInvalidError(label, `"${name}" matches no entry point in the shader; available entry points: ${availableEntryPoints(entryPoints)}.`, where);
+  }
+  if (named.stage !== stage) {
+    throw entryInvalidError(label, `"${name}" is a @${named.stage} entry point, not @${stage}; available entry points: ${availableEntryPoints(entryPoints)}.`, where);
+  }
+  return named;
+}
+
+function availableEntryPoints(entryPoints: readonly EntryPointInfo[]): string {
+  if (!entryPoints.length) return "none";
+  return entryPoints.map((entry) => `"${entry.name}" (@${entry.stage})`).join(", ");
 }
 
 export type NormalizedConstantsOptions = {

@@ -7,9 +7,9 @@ import { endRenderPassWithClaimValidation } from "./claim-validation-encode.ts";
 import { createSetCore, type BindingIdentityChange, type BindingState, type SetBag, type SetCore } from "./set-core.ts";
 import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBindGroupLayout, visibilityForEntries, type BindingVisibilityFn } from "./set-layouts.ts";
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
-import { normalizeConstantsOptions, normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
+import { normalizeConstantsOptions, normalizeSignature, pipelineKeyOf, selectEntryPoint, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { hasStencilAspect, isTarget } from "./target-utils.ts";
-import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, indirectInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, unclippedDepthInvalidError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, entryInvalidError, frontFaceInvalidError, indirectInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, unclippedDepthInvalidError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 import { resolveIndirect } from "./storage.ts";
@@ -109,6 +109,8 @@ export interface DrawOptions {
   };
   /** Values for WGSL `override` constants, keyed by name (or by numeric id as a string when the override has @id). Immutable after construction. */
   readonly constants?: Readonly<Record<string, number | boolean>>;
+  /** Entry points to use when the shader has several. Omitted fields use the first entry point of that stage. Immutable after construction. */
+  readonly entry?: { readonly vertex?: string; readonly fragment?: string };
 }
 
 export interface DrawCallOptions {
@@ -210,6 +212,7 @@ type DrawState = {
   readonly multisampleKey?: string;
   readonly constants?: Readonly<Record<string, GPUPipelineConstantValue>>;
   readonly constantsKey?: string;
+  readonly entryKey?: string;
 };
 
 const drawStates = new WeakMap<Draw, DrawState>();
@@ -247,8 +250,12 @@ export class InternalDraw implements Draw {
     this.label = opts.label ?? "draw";
     const id = nextDrawId++;
     const reflection = reflectSource(source, `${this.label}.wgsl`);
-    const vertexEntry = reflection.entryPoints.find((entry) => entry.stage === "vertex");
-    const fragmentEntry = reflection.entryPoints.find((entry) => entry.stage === "fragment");
+    // Entry selection runs before everything derived from the selected entries — binding visibility,
+    // storage-stage limits, bind group layouts, and vertex input layouts all reflect the chosen variant.
+    const entryNames = normalizeEntryOptions(this.label, opts.entry);
+    const vertexEntry = selectEntryPoint(this.label, reflection.entryPoints, "vertex", entryNames.vertex, "gpu.draw");
+    const fragmentEntry = selectEntryPoint(this.label, reflection.entryPoints, "fragment", entryNames.fragment, "gpu.draw");
+    const entryKey = entryKeyFor(reflection, vertexEntry, fragmentEntry);
     const selectedEntries = [vertexEntry, fragmentEntry].filter((entry): entry is EntryPointInfo => !!entry);
     const visibility = visibilityForEntries(reflection.bindings, selectedEntries);
     validateStorageStageLimits(device, this.label, reflection.bindings, selectedEntries, visibility);
@@ -275,7 +282,7 @@ export class InternalDraw implements Draw {
       cache,
       onIdentityChange: (change) => recordedIn.markStale({ kind: "binding-identity", drawLabel: this.label, ...change }),
     });
-    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions, ...stencilOptions, ...multisampleOptions, ...constantsOptions });
+    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", entryKey, setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions, ...stencilOptions, ...multisampleOptions, ...constantsOptions });
     if (opts.set) this.set(opts.set);
     for (const target of opts.targets ?? []) this.compileSync(target);
   }
@@ -480,7 +487,7 @@ export class InternalDraw implements Draw {
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, unclippedDepth: state.unclippedDepth, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey, constantsKey: state.constantsKey });
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, unclippedDepth: state.unclippedDepth, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey, constantsKey: state.constantsKey, entryKey: state.entryKey });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -721,6 +728,20 @@ function normalizeBlendConstantOptions(label: string, opts: DrawOptions, blendSt
 function usesConstantBlendFactor(blend: GPUBlendState): boolean {
   return [blend.color.srcFactor, blend.color.dstFactor, blend.alpha.srcFactor, blend.alpha.dstFactor]
     .some((factor) => factor === "constant" || factor === "one-minus-constant");
+}
+
+function normalizeEntryOptions(label: string, value: DrawOptions["entry"]): { readonly vertex?: string; readonly fragment?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw entryInvalidError(label, `received ${preview(value)}; expected { vertex?, fragment? } entry point names.`);
+  return value;
+}
+
+// Explicitly naming the first-of-stage entries behaves exactly like an absent option; pipeline cache keys stay byte-identical so they share pipelines.
+function entryKeyFor(reflection: Reflection, vertexEntry: EntryPointInfo | undefined, fragmentEntry: EntryPointInfo | undefined): string | undefined {
+  const firstVertex = reflection.entryPoints.find((entry) => entry.stage === "vertex");
+  const firstFragment = reflection.entryPoints.find((entry) => entry.stage === "fragment");
+  if (vertexEntry === firstVertex && fragmentEntry === firstFragment) return undefined;
+  return `en~${vertexEntry?.name ?? ""}~${fragmentEntry?.name ?? ""}`;
 }
 
 type NormalizedPrimitiveOptions = {

@@ -197,6 +197,15 @@ export function constantsInvalidError(label: string, reason: string, where = "gp
   });
 }
 
+export function entryInvalidError(label: string, reason: string, where = "gpu.draw"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-ENTRY-INVALID",
+    message: `Invalid entry in '${label}': ${reason}`,
+    fix: `Name an entry point declared in the shader with the matching stage — { vertex?, fragment? } strings for gpu.draw, one @compute name string for gpu.compute. Omit entry (or a field) to use the first entry point of that stage.`,
+    where,
+  });
+}
+
 export function indirectInvalidError(label: string, reason: string, where: string): VGPUError {
   return new VGPUError({
     code: "VGPU-INDIRECT-INVALID",

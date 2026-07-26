@@ -4,7 +4,7 @@ import { createBindGroupCache, identityKey, type BindGroupCache, type BindGroupI
 import { createSetCore, bindGroupLayoutsForReflection, pipelineLayoutFor, type SetBag, type SetCore } from "./set-core.ts";
 import { visibilityForEntries } from "./set-layouts.ts";
 import type { Compute, ComputeOptions, DispatchOptions } from "./gpu.ts";
-import { normalizeConstantsOptions } from "./pipeline-store.ts";
+import { normalizeConstantsOptions, selectEntryPoint } from "./pipeline-store.ts";
 import { indirectInvalidError, unsupportedError, writableStorageAliasingError } from "./errors.ts";
 import { resolveIndirect } from "./storage.ts";
 
@@ -35,7 +35,9 @@ export class ComputePipeline implements Compute {
   ) {
     this.label = opts.label ?? "compute";
     this.reflection = reflectSource(source, `${this.label}.wgsl`);
-    const entry = computeEntryPoint(this.reflection, this.label);
+    // Entry selection runs before everything derived from the selected entry — binding visibility, bind group
+    // layouts, and the active-binding set for storage aliasing all reflect the chosen variant.
+    const entry = computeEntryPoint(this.reflection, this.label, opts.entry);
     this.entryPoint = entry.name;
     const { constants } = normalizeConstantsOptions(this.label, opts.constants, this.reflection.overrides, "gpu.compute");
     this.bindGroupLayouts = bindGroupLayoutsForReflection(device, this.label, this.reflection, visibilityForEntries(this.reflection.bindings, [entry]));
@@ -99,8 +101,10 @@ export class ComputePipeline implements Compute {
   }
 }
 
-function computeEntryPoint(reflection: Reflection, label: string): EntryPointInfo {
-  const entry = reflection.entryPoints.find((item) => item.stage === "compute");
+function computeEntryPoint(reflection: Reflection, label: string, name?: string): EntryPointInfo {
+  // A named entry validates existence and stage inside selectEntryPoint (VGPU-ENTRY-INVALID); only the
+  // no-name case can come back undefined, keeping today's error for a shader without any @compute entry.
+  const entry = selectEntryPoint(label, reflection.entryPoints, "compute", name, "gpu.compute");
   if (!entry) throw unsupportedError(`${label}.compute`, "The compute shader requires a @compute entry point.");
   return entry;
 }

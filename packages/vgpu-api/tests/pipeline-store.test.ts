@@ -236,6 +236,28 @@ ${WGSL}`;
   gpu.dispose();
 });
 
+test("entry points participate in shared pipeline cache keys", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2] });
+  const TWO_FRAGMENT_WGSL = `${WGSL}
+@fragment fn fs_alt() -> @location(0) vec4f { return vec4f(0.5); }`;
+  const a = gpu.draw({ shader: TWO_FRAGMENT_WGSL, label: "en-a", entry: { fragment: "fs_alt" } });
+  const b = gpu.draw({ shader: TWO_FRAGMENT_WGSL, label: "en-b", entry: { fragment: "fs_alt" } });
+  const plain = gpu.draw({ shader: TWO_FRAGMENT_WGSL, label: "en-plain" });
+  const explicitDefaults = gpu.draw({ shader: TWO_FRAGMENT_WGSL, label: "en-defaults", entry: { vertex: "vs_main", fragment: "fs_main" } });
+
+  a.draw(target);
+  b.draw(target);
+  plain.draw(target);
+  explicitDefaults.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  // a/b share, plain is distinct, and explicitly naming the first-of-stage entries shares the plain key.
+  expect(mock.calls.createRenderPipeline).toBe(2);
+  gpu.dispose();
+});
+
 test("pipelineKeyOf appends fragmentKey only when present", () => {
   const module = {} as GPUShaderModule;
   const pipelineLayout = {} as GPUPipelineLayout;
@@ -245,6 +267,7 @@ test("pipelineKeyOf appends fragmentKey only when present", () => {
   expect(pipelineKeyOf({ ...parts, fragmentKey: undefined })).toBe(base);
   expect(pipelineKeyOf({ ...parts, fragmentKey: "none;none;7" })).toBe(`${base}|none;none;7`);
   expect(pipelineKeyOf({ ...parts, constantsKey: "cn~SCALE=2" })).toBe(`${base}|cn~SCALE=2`);
+  expect(pipelineKeyOf({ ...parts, entryKey: "en~vs_main~fs_alt" })).toBe(`${base}|en~vs_main~fs_alt`);
 });
 
 test("sync pipeline creation wins a pending async create and suppresses late native rejection", async () => {

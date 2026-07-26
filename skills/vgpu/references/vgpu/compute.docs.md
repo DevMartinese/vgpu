@@ -17,6 +17,7 @@ interface ComputeOptions {
   readonly label?: string;
   readonly set?: Record<string, unknown>;
   readonly constants?: Readonly<Record<string, number | boolean>>;
+  readonly entry?: string;
 }
 
 interface DispatchOptions {
@@ -53,6 +54,7 @@ interface StorageBuffer {
 | opts.label | `string` | ✖ | `"compute"` | Used in shader reflection, GPU labels, and error `where` fields. |
 | opts.set | `Record<string, unknown>` | ✖ | `undefined` | Initial `.set()` call. |
 | opts.constants | `Readonly<Record<string, number \| boolean>>` | ✖ | WGSL defaults | Constructor-only values for WGSL `override` constants, applied to the compute stage. Key by override name, or by the decimal string of `N` when the declaration has `@id(N)` (the name is not usable then). Values must be finite numbers or booleans (booleans become `1`/`0`); every override declared without a default must be provided. |
+| opts.entry | `string` | ✖ | first `@compute` entry point | Constructor-only entry point selection for shaders that declare several `@compute` functions. The name must exist in the shader with the `@compute` stage. Binding visibility, bind group layouts, and the storage-aliasing preflight follow the selected entry. |
 | compute.set.values | `Record<string, unknown>` | ✔ | — | Binding values by WGSL variable name. JS values are packed; buffers/resources are bound by identity. |
 | compute.dispatch.x | `number` | ✔ | — | Workgroup count X passed to `dispatchWorkgroups`. |
 | compute.dispatch.y | `number` | ✖ | `1` | Workgroup count Y. |
@@ -65,7 +67,7 @@ interface StorageBuffer {
 
 **Returns:** `gpu.compute()` returns `Compute`; `set()` returns the same `Compute`; `dispatch()` returns `void` after submitting; `gpu.storage()` returns a main API (`vgpu`) `StorageBuffer`; `StorageBuffer.read()` resolves an `ArrayBuffer` copy.
 
-**Throws:** `VGPU-RING1-UNSUPPORTED` when the shader has no `@compute` entry point; `VGPU-INDIRECT-INVALID` at dispatch time for a malformed `indirect` (neither a `StorageBuffer` nor `{ buffer, offset? }`), a buffer created without the indirect flag (use `gpu.storage(bytes, { indirect: true })`), an `offset` that is not a non-negative integer multiple of 4, counts that do not fit the buffer (`offset + 12 > size`), or `indirect` combined with explicit workgroup counts in the same call; `VGPU-CONSTANTS-INVALID` for a malformed `constants` option (non-object value, a key that matches no override in the shader — the message lists the available overrides — or a value that is neither a finite number nor a boolean), and for an override declared without a default that `constants` does not provide; `VGPU-R1-STORAGE-ALIASING` when the same storage buffer is bound more than once and at least one reflected binding is writable; `VGPU-R1-BINDING-NEVER-SET`, `VGPU-R1-OWNERSHIP-FLIP`, and `VGPU-R1-BINDING-INCOMPATIBLE-RESOURCE` for binding errors; `VGPU-SHADER-SOURCE-INVALID` for malformed `ShaderSource`; `TypeError` if `StorageBuffer.write()` receives a non-buffer source.
+**Throws:** `VGPU-RING1-UNSUPPORTED` when the shader has no `@compute` entry point; `VGPU-INDIRECT-INVALID` at dispatch time for a malformed `indirect` (neither a `StorageBuffer` nor `{ buffer, offset? }`), a buffer created without the indirect flag (use `gpu.storage(bytes, { indirect: true })`), an `offset` that is not a non-negative integer multiple of 4, counts that do not fit the buffer (`offset + 12 > size`), or `indirect` combined with explicit workgroup counts in the same call; `VGPU-CONSTANTS-INVALID` for a malformed `constants` option (non-object value, a key that matches no override in the shader — the message lists the available overrides — or a value that is neither a finite number nor a boolean), and for an override declared without a default that `constants` does not provide; `VGPU-ENTRY-INVALID` for a non-string `entry`, a name that matches no entry point in the shader, or a name whose entry point is not `@compute` — the message lists the shader's available entry points with their stages; `VGPU-R1-STORAGE-ALIASING` when the same storage buffer is bound more than once and at least one reflected binding is writable; `VGPU-R1-BINDING-NEVER-SET`, `VGPU-R1-OWNERSHIP-FLIP`, and `VGPU-R1-BINDING-INCOMPATIBLE-RESOURCE` for binding errors; `VGPU-SHADER-SOURCE-INVALID` for malformed `ShaderSource`; `TypeError` if `StorageBuffer.write()` receives a non-buffer source.
 
 ## Examples
 
@@ -126,6 +128,7 @@ sim.dispatch({ indirect: counts });
 - Use `gpu.pingPongStorage(bytes)` when a compute step reads previous state and writes next state; binding the same writable storage identity twice is rejected before dispatch.
 - Bindings use compute visibility only when statically reachable from the selected compute entry point; unused declarations stay in the layout with visibility `0`.
 - `constants` maps to `GPUProgrammableStage.constants` of the compute stage. An override with `@id(N)` is keyed by the decimal string of `N`; all others by name. Booleans convert to `1`/`0` (WebGPU converts the double to the override's WGSL type: bool/i32/u32/f32/f16). The option is constructor-only — the pipeline is created in `gpu.compute()` — and an absent option or an empty `{}` keeps the descriptor byte-identical to before.
+- `entry` selects which `@compute` function the pipeline compiles when the shader declares several; omitted, the first `@compute` entry point is used, exactly as before. The option is constructor-only — the pipeline is created in `gpu.compute()` — and selection happens before layouts, so binding visibility and bind group layouts reflect the chosen entry.
 - Dispatch counts are forwarded to WebGPU; validate domain-specific bounds in your app.
 - `dispatch({ indirect })` encodes `dispatchWorkgroupsIndirect`: the GPU reads `workgroupCountX, workgroupCountY, workgroupCountZ` as 3 tightly packed u32 values (12 bytes) from the buffer at the offset. Write them from another compute pass (bind the same buffer as storage) or from JS via `write()`; a buffer needs `gpu.storage(bytes, { indirect: true })` to be usable this way. The same option shape drives GPU-driven draws via `DrawCallOptions.indirect`.
 - `gpu.storage()` creates storage buffers with `copy_src` and `copy_dst`, so they can be read back and rewritten from JS; `{ indirect: true }` additionally appends the `"indirect"` usage.
