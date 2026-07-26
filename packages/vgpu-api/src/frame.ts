@@ -105,7 +105,7 @@ export class Frame {
     const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
     const timestampWrites = targetOnly ? undefined : this.#attachTimerSpan(target.timer);
     // timestampWrites is target-independent pass state: decorate the descriptor after obtaining it from the target.
-    const descriptor = resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly);
+    const descriptor = resolvedTarget.renderPassDescriptor({ clear: clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly });
     const encoder = this.#encoder.beginRenderPass(timestampWrites ? { ...descriptor, timestampWrites } : descriptor);
     if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
     if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
