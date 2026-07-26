@@ -9,7 +9,7 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { isTarget } from "./target-utils.ts";
-import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -59,6 +59,11 @@ export interface DrawOptions {
   readonly blendConstant?: readonly [number, number, number, number];
   /** Channels written to color targets. Omit to write all (rgba). Empty array writes nothing. */
   readonly writeMask?: readonly ("r" | "g" | "b" | "a")[];
+  /** Per-color-target blend/writeMask overrides, aligned by index with the target's color attachments. null or missing entries inherit the top-level blend/writeMask. Immutable after construction. */
+  readonly colors?: readonly ({
+    readonly blend?: BlendPreset | BlendOptions;
+    readonly writeMask?: readonly ("r" | "g" | "b" | "a")[];
+  } | null)[];
   /** Face culling applied to this draw's pipelines. Defaults to "none". Immutable after construction. */
   readonly cull?: "none" | "front" | "back";
   /** Winding that counts as front-facing. Defaults to "ccw". Immutable after construction. */
@@ -150,6 +155,7 @@ type DrawState = {
   readonly blendState?: GPUBlendState;
   readonly blendConstant?: GPUColorDict;
   readonly writeMask?: number;
+  readonly colorStates?: readonly (NormalizedColorTargetState | null)[];
   readonly fragmentKey?: string;
   readonly cullMode?: GPUCullMode;
   readonly frontFace?: GPUFrontFace;
@@ -399,6 +405,9 @@ export class InternalDraw implements Draw {
     if (!allowSurface) assertSurfaceTargetInFrame(resolvedTarget, where);
     const signature = normalizeSignature(resolvedTarget);
     validateTargetSignature(signature, where);
+    if (state.colorStates && state.colorStates.length !== signature.colors.length) {
+      throw colorsInvalidError(this.label, `expected one entry per color attachment; colors has ${state.colorStates.length}, but the target signature has ${signature.colors.length}.`, where);
+    }
     return signature;
   }
 
@@ -466,10 +475,13 @@ type DrawCounts = {
 };
 
 function fragmentTargets(signature: TargetSignature, state: DrawState): GPUColorTargetState[] {
-  return signature.colors.map((format) => {
+  return signature.colors.map((format, index) => {
+    const overrides = state.colorStates?.[index];
+    const blendState = overrides?.blendState ?? state.blendState;
+    const writeMask = overrides?.writeMask ?? state.writeMask;
     const target: GPUColorTargetState = { format };
-    if (state.blendState) target.blend = state.blendState;
-    if (state.writeMask !== undefined) target.writeMask = state.writeMask;
+    if (blendState) target.blend = blendState;
+    if (writeMask !== undefined) target.writeMask = writeMask;
     return target;
   });
 }
@@ -542,17 +554,38 @@ function validateOptionalDrawCount(label: string, field: string, value: number |
   });
 }
 
+type NormalizedColorTargetState = {
+  readonly blendState?: GPUBlendState;
+  readonly writeMask?: number;
+};
+
 type NormalizedFragmentState = {
   readonly blendState?: GPUBlendState;
   readonly writeMask?: number;
+  readonly colorStates?: readonly (NormalizedColorTargetState | null)[];
   readonly fragmentKey?: string;
 };
 
 function normalizeFragmentState(label: string, opts: DrawOptions): NormalizedFragmentState {
   const blendState = opts.blend === undefined ? undefined : normalizeBlend(label, opts.blend);
   const writeMask = opts.writeMask === undefined ? undefined : normalizeWriteMask(label, opts.writeMask);
-  const fragmentKey = blendState || writeMask !== undefined ? fragmentKeyFor(blendState, writeMask) : undefined;
-  return { blendState, writeMask, fragmentKey };
+  const colorStates = opts.colors === undefined ? undefined : normalizeColorStates(label, opts.colors);
+  const fragmentKey = colorStates
+    ? `${fragmentKeyFor(blendState, writeMask)}@${colorStates.map(colorStateKeyFor).join("@")}`
+    : blendState || writeMask !== undefined ? fragmentKeyFor(blendState, writeMask) : undefined;
+  return { blendState, writeMask, colorStates, fragmentKey };
+}
+
+function normalizeColorStates(label: string, value: NonNullable<DrawOptions["colors"]>): readonly (NormalizedColorTargetState | null)[] {
+  if (!Array.isArray(value)) throw colorsInvalidError(label, `colors must be an array; received ${preview(value)}.`);
+  return value.map((entry, index) => {
+    if (entry === null || entry === undefined) return null;
+    if (typeof entry !== "object" || Array.isArray(entry)) throw colorsInvalidError(label, `colors[${index}] must be null or { blend?, writeMask? }; received ${preview(entry)}.`);
+    const blendState = entry.blend === undefined ? undefined : normalizeBlend(`${label}.colors[${index}]`, entry.blend);
+    const writeMask = entry.writeMask === undefined ? undefined : normalizeWriteMask(`${label}.colors[${index}]`, entry.writeMask);
+    if (!blendState && writeMask === undefined) return null;
+    return { blendState, writeMask };
+  });
 }
 
 function normalizeBlend(label: string, value: BlendPreset | BlendOptions): GPUBlendState {
@@ -694,11 +727,20 @@ function normalizeWriteMask(label: string, value: readonly ("r" | "g" | "b" | "a
 }
 
 function fragmentKeyFor(blend: GPUBlendState | undefined, mask: number | undefined): string {
-  const writeMask = mask ?? 15;
-  if (!blend) return `none;none;${writeMask}`;
+  return `${blendKeyFor(blend)};${mask ?? 15}`;
+}
+
+function blendKeyFor(blend: GPUBlendState | undefined): string {
+  if (!blend) return "none;none";
   const c = blend.color;
   const a = blend.alpha;
-  return `${c.srcFactor},${c.dstFactor},${c.operation};${a.srcFactor},${a.dstFactor},${a.operation};${writeMask}`;
+  return `${c.srcFactor},${c.dstFactor},${c.operation};${a.srcFactor},${a.dstFactor},${a.operation}`;
+}
+
+// "inherit" markers keep per-entry keys distinct from explicit state so an entry inheriting the top-level fallback never collides with one that pins it.
+function colorStateKeyFor(state: NormalizedColorTargetState | null): string {
+  if (!state) return "inherit";
+  return `${state.blendState ? blendKeyFor(state.blendState) : "inherit"};${state.writeMask ?? "inherit"}`;
 }
 
 function preview(value: unknown): string {

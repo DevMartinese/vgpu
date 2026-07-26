@@ -116,6 +116,15 @@ export function writeMaskInvalidError(label: string, preview: string): VGPUError
   });
 }
 
+export function colorsInvalidError(label: string, reason: string, where = "gpu.draw"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-COLORS-INVALID",
+    message: `Invalid colors in '${label}': ${reason}`,
+    fix: `Use one { blend?, writeMask? } or null entry per color attachment of the target, aligned by index; omit colors to apply the top-level blend/writeMask to every attachment.`,
+    where,
+  });
+}
+
 export function cullInvalidError(label: string, value: unknown): VGPUError {
   return new VGPUError({
     code: "VGPU-CULL-INVALID",
