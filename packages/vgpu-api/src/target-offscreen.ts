@@ -41,10 +41,10 @@ export class OffscreenTarget implements Target {
   onTexturesRecreated(cb: () => void): () => void { this.#texturesRecreatedCallbacks.add(cb); return () => { this.#texturesRecreatedCallbacks.delete(cb); }; }
   destroy(): void { this.#destroySignal.emit(this); this.#texturesRecreatedCallbacks.clear(); this.#destroyTextures(); }
 
-  renderPassDescriptor(clear: ClearColor = [0, 0, 0, 1], preserve?: boolean, clearDepth?: number): GPURenderPassDescriptor {
+  renderPassDescriptor(clear: ClearColor = [0, 0, 0, 1], preserve?: boolean, clearDepth?: number, clearStencil?: number): GPURenderPassDescriptor {
     return {
       colorAttachments: this.#currentColors.map((resolved, index) => colorAttachment(resolved, this.#currentMsaaColors?.[index], clear, preserve)),
-      depthStencilAttachment: this.#currentDepth ? depthAttachment(this.#currentDepth, preserve, clearDepth) : undefined,
+      depthStencilAttachment: this.#currentDepth ? depthAttachment(this.#currentDepth, preserve, clearDepth, clearStencil) : undefined,
     };
   }
 

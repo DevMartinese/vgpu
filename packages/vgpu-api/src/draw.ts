@@ -8,8 +8,8 @@ import { createSetCore, type BindingIdentityChange, type BindingState, type SetB
 import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBindGroupLayout, visibilityForEntries, type BindingVisibilityFn } from "./set-layouts.ts";
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
-import { isTarget } from "./target-utils.ts";
-import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, multisampleInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { hasStencilAspect, isTarget } from "./target-utils.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
 
@@ -41,6 +41,30 @@ export interface DepthOptions {
   readonly biasClamp?: number;
 }
 
+export interface StencilFaceOptions {
+  /** Comparison against the masked stencil value that passing fragments satisfy. Defaults to "always". */
+  readonly compare?: GPUCompareFunction;
+  /** Operation when the stencil comparison fails. Defaults to "keep". */
+  readonly fail?: GPUStencilOperation;
+  /** Operation when the stencil comparison passes but the depth comparison fails. Defaults to "keep". */
+  readonly depthFail?: GPUStencilOperation;
+  /** Operation when both the stencil and depth comparisons pass. Defaults to "keep". */
+  readonly pass?: GPUStencilOperation;
+}
+
+export interface StencilOptions {
+  /** Stencil state for front-facing primitives. Defaults to WebGPU's { compare: "always", fail/depthFail/pass: "keep" }. */
+  readonly front?: StencilFaceOptions;
+  /** Stencil state for back-facing primitives. Defaults to mirroring the normalized front. */
+  readonly back?: StencilFaceOptions;
+  /** Bitmask applied to the stencil value before comparisons. Integer in [0, 0xFFFFFFFF]. Defaults to 0xFFFFFFFF. */
+  readonly readMask?: number;
+  /** Bitmask of stencil bits writable by stencil operations. Integer in [0, 0xFFFFFFFF]. Defaults to 0xFFFFFFFF. */
+  readonly writeMask?: number;
+  /** Stencil reference value used by "replace" and the compare. Emitted as encoder state (setStencilReference) before this draw; not part of the pipeline. Defaults to the pass default 0. */
+  readonly ref?: number;
+}
+
 export interface DrawOptions {
   readonly shader: string | ShaderSource;
   readonly mesh?: MeshLike;
@@ -70,6 +94,8 @@ export interface DrawOptions {
   readonly frontFace?: "ccw" | "cw";
   /** Depth state for targets with a depth attachment. Pass false to disable depth testing entirely. Defaults to { write: true, compare: "less-equal" }. Immutable after construction. Ignored when the target has no depth. */
   readonly depth?: false | DepthOptions;
+  /** Stencil state for targets whose depth format has a stencil aspect. Immutable after construction. */
+  readonly stencil?: StencilOptions;
   /** Multisample state for MSAA targets. Immutable after construction. */
   readonly multisample?: {
     /** Converts fragment alpha into a coverage mask. Requires an MSAA target. Defaults to false. */
@@ -168,6 +194,9 @@ type DrawState = {
   readonly frontFace?: GPUFrontFace;
   readonly depthState?: NormalizedDepthState;
   readonly depthKey?: string;
+  readonly stencilState?: NormalizedStencilState;
+  readonly stencilKey?: string;
+  readonly stencilRef?: number;
   readonly multisampleState?: NormalizedMultisampleState;
   readonly multisampleKey?: string;
 };
@@ -223,6 +252,7 @@ export class InternalDraw implements Draw {
     const blendConstantOptions = normalizeBlendConstantOptions(this.label, opts, fragmentState.blendState);
     const primitiveOptions = normalizePrimitiveOptions(this.label, opts);
     const depthOptions = normalizeDepthOptions(device, this.label, opts);
+    const stencilOptions = normalizeStencilOptions(this.label, opts);
     const multisampleOptions = normalizeMultisampleOptions(this.label, opts);
     const setCore = createSetCore({
       device,
@@ -233,7 +263,7 @@ export class InternalDraw implements Draw {
       cache,
       onIdentityChange: (change) => recordedIn.markStale({ kind: "binding-identity", drawLabel: this.label, ...change }),
     });
-    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions, ...multisampleOptions });
+    drawStates.set(this, { id, device, opts, vertexBufferLayouts, cache, defaultTarget, reflection, visibility, vertexEntry: vertexEntry?.name ?? "vs_main", fragmentEntry: fragmentEntry?.name ?? "fs_main", setCore, bindGroupLayouts, pipelineLayout, shaderModule, pipelineStore, pipelineLayouts, errorSink, trackSettled, resolvedPipelineKeys: new Set(), recordedIn, ...fragmentState, ...blendConstantOptions, ...primitiveOptions, ...depthOptions, ...stencilOptions, ...multisampleOptions });
     if (opts.set) this.set(opts.set);
     for (const target of opts.targets ?? []) this.compileSync(target);
   }
@@ -352,6 +382,8 @@ export class InternalDraw implements Draw {
     pass.setPipeline(pipeline);
     const state = drawState(this);
     if (state.blendConstant) pass.setBlendConstant(state.blendConstant);
+    // Explicit ref always emits — even 0, which restores the pass default after an earlier draw changed it.
+    if (state.stencilRef !== undefined) pass.setStencilReference(state.stencilRef);
     for (const binding of state.setCore.bindGroups()) this.#setBindGroup(pass, binding, opts, claimValidation);
     this.#encodeMesh(pass, opts);
   }
@@ -425,13 +457,18 @@ export class InternalDraw implements Draw {
     if (state.multisampleState?.alphaToCoverageEnabled && (signature.sampleCount ?? 1) <= 1) {
       throw multisampleInvalidError(this.label, `alphaToCoverage requires a multisampled target, but the target signature has sampleCount ${signature.sampleCount ?? 1}; create the target with msaa: true.`, where);
     }
+    // WebGPU: "If descriptor.stencilFront or descriptor.stencilBack are not the default values: descriptor.format must
+    // have a stencil component." The reference is likewise dead without a stencil aspect, so it fails the same check.
+    if ((state.stencilState || state.stencilRef !== undefined) && !hasStencilAspect(signature.depth)) {
+      throw stencilInvalidError(this.label, `stencil requires a depth format with a stencil aspect, but the target signature has ${signature.depth ? `"${signature.depth}"` : "no depth"}; create the target with depth: "depth24plus-stencil8".`, where);
+    }
     return signature;
   }
 
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, depthKey: state.depthKey, multisampleKey: state.multisampleKey });
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -693,7 +730,9 @@ const DEPTH_COMPARE_FUNCTIONS: readonly GPUCompareFunction[] = ["never", "less",
 function depthStencilState(signature: TargetSignature, state: DrawState): GPUDepthStencilState | undefined {
   // A Draw may compile against targets with and without depth; opts.depth only applies when the signature has a depth attachment.
   if (!signature.depth) return undefined;
-  return { format: signature.depth, ...(state.depthState ?? DEFAULT_DEPTH_STATE) };
+  // Stencil merges into the depth state (defaulted when the depth option is absent); unset stencil fields stay omitted
+  // so the descriptor is byte-identical to today's when the stencil option is absent.
+  return { format: signature.depth, ...(state.depthState ?? DEFAULT_DEPTH_STATE), ...(state.stencilState ?? {}) };
 }
 
 function normalizeDepthOptions(device: Device, label: string, opts: DrawOptions): NormalizedDepthOptions {
@@ -728,6 +767,73 @@ function normalizeDepth(device: Device, label: string, value: false | DepthOptio
 
 function depthKeyFor(state: NormalizedDepthState): string {
   return `${state.depthWriteEnabled ? 1 : 0}~${state.depthCompare}~${state.depthBias ?? 0}~${state.depthBiasSlopeScale ?? 0}~${state.depthBiasClamp ?? 0}`;
+}
+
+type NormalizedStencilState = {
+  readonly stencilFront?: GPUStencilFaceState;
+  readonly stencilBack?: GPUStencilFaceState;
+  readonly stencilReadMask?: number;
+  readonly stencilWriteMask?: number;
+};
+
+type NormalizedStencilOptions = {
+  readonly stencilState?: NormalizedStencilState;
+  readonly stencilKey?: string;
+  readonly stencilRef?: number;
+};
+
+const STENCIL_OPERATIONS: readonly GPUStencilOperation[] = ["keep", "zero", "replace", "invert", "increment-clamp", "decrement-clamp", "increment-wrap", "decrement-wrap"];
+
+function normalizeStencilOptions(label: string, opts: DrawOptions): NormalizedStencilOptions {
+  if (opts.stencil === undefined) return {};
+  const value = opts.stencil;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw stencilInvalidError(label, `received ${preview(value)}; expected { front?, back?, readMask?, writeMask?, ref? }.`);
+  const front = value.front === undefined ? undefined : normalizeStencilFace(label, "front", value.front);
+  const back = value.back === undefined ? undefined : normalizeStencilFace(label, "back", value.back);
+  validateStencilValue(label, "readMask", value.readMask);
+  validateStencilValue(label, "writeMask", value.writeMask);
+  validateStencilValue(label, "ref", value.ref);
+  const stencilState: NormalizedStencilState = {
+    ...(front ? { stencilFront: front } : {}),
+    // Omitted back mirrors the normalized front so both faces behave the same; with neither given, both keep the WebGPU defaults.
+    ...(back ?? front ? { stencilBack: back ?? { ...front! } } : {}),
+    ...(value.readMask !== undefined ? { stencilReadMask: value.readMask } : {}),
+    ...(value.writeMask !== undefined ? { stencilWriteMask: value.writeMask } : {}),
+  };
+  const hasPipelineState = stencilState.stencilFront !== undefined || stencilState.stencilBack !== undefined || stencilState.stencilReadMask !== undefined || stencilState.stencilWriteMask !== undefined;
+  // An all-defaults object behaves exactly like an absent option; keep the pipeline key byte-identical so they share.
+  if (!hasPipelineState && value.ref === undefined) return {};
+  return {
+    ...(hasPipelineState ? { stencilState, stencilKey: stencilKeyFor(stencilState) } : {}),
+    // The reference is encoder state (setStencilReference), not pipeline state; it stays out of the pipeline key.
+    ...(value.ref !== undefined ? { stencilRef: value.ref } : {}),
+  };
+}
+
+function normalizeStencilFace(label: string, field: "front" | "back", value: StencilFaceOptions): GPUStencilFaceState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw stencilInvalidError(label, `${field} must be a { compare?, fail?, depthFail?, pass? } object; received ${preview(value)}.`);
+  if (value.compare !== undefined && !DEPTH_COMPARE_FUNCTIONS.includes(value.compare)) throw stencilInvalidError(label, `${field}.compare must be a GPUCompareFunction; received ${preview(value.compare)}.`);
+  for (const [name, op] of [["fail", value.fail], ["depthFail", value.depthFail], ["pass", value.pass]] as const) {
+    if (op !== undefined && !STENCIL_OPERATIONS.includes(op)) throw stencilInvalidError(label, `${field}.${name} must be a GPUStencilOperation; received ${preview(op)}.`);
+  }
+  return { compare: value.compare ?? "always", failOp: value.fail ?? "keep", depthFailOp: value.depthFail ?? "keep", passOp: value.pass ?? "keep" };
+}
+
+// WebGPU GPUStencilValue is [EnforceRange] unsigned long; masks, the reference, and clear values share the u32 range.
+function validateStencilValue(label: string, field: "readMask" | "writeMask" | "ref", value: number | undefined): void {
+  if (value === undefined) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 0xFFFFFFFF) {
+    throw stencilInvalidError(label, `${field} must be an integer in [0, 0xFFFFFFFF] (WebGPU GPUStencilValue is u32); received ${preview(value)}.`);
+  }
+}
+
+function stencilKeyFor(state: NormalizedStencilState): string {
+  return `st~${stencilFaceKeyFor(state.stencilFront)}~${stencilFaceKeyFor(state.stencilBack)}~${state.stencilReadMask ?? 0xFFFFFFFF}~${state.stencilWriteMask ?? 0xFFFFFFFF}`;
+}
+
+function stencilFaceKeyFor(face: GPUStencilFaceState | undefined): string {
+  if (!face) return "default";
+  return `${face.compare},${face.failOp},${face.depthFailOp},${face.passOp}`;
 }
 
 type NormalizedMultisampleState = {
@@ -810,6 +916,9 @@ export function registerDrawBundle(draw: Draw, bundle: BundleBackReference): voi
 
 /** Render bundle encoders cannot set the pass blend constant; gpu.bundle uses this to reject such draws at recording. */
 export function drawUsesBlendConstant(draw: Draw): boolean { return drawState(draw).blendConstant !== undefined; }
+
+/** Render bundle encoders cannot set the pass stencil reference; gpu.bundle uses this to reject such draws at recording. */
+export function drawUsesStencilReference(draw: Draw): boolean { return drawState(draw).stencilRef !== undefined; }
 
 export function encodeDraw(draw: InternalDraw, pass: GPURenderPassEncoder, target: Target | TargetSignature, opts: DrawCallOptions = {}, claimValidation?: (result: ClaimedGroupValidationResult) => void): void {
   draw.encode(pass, target, opts, claimValidation);

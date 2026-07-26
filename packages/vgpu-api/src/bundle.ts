@@ -1,9 +1,9 @@
 import { createRenderBundle } from "./core/render-bundle.ts";
-import { InternalDraw, drawUsesBlendConstant, encodeDraw, registerDrawBundle, type BundleBackReference, type BundleStaleEvent, type Draw, type DrawCallOptions } from "./draw.ts";
+import { InternalDraw, drawUsesBlendConstant, drawUsesStencilReference, encodeDraw, registerDrawBundle, type BundleBackReference, type BundleStaleEvent, type Draw, type DrawCallOptions } from "./draw.ts";
 import { InternalEffect, effectDraw, type Effect } from "./effect.ts";
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeSignature, signatureKeyOf, validateTargetSignature } from "./pipeline-store.ts";
-import { bundleBlendConstantError, surfaceNotInFrameError, VGPUError } from "./errors.ts";
+import { bundleBlendConstantError, bundleStencilReferenceError, surfaceNotInFrameError, VGPUError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 
 export interface BundleOptions {
@@ -86,6 +86,8 @@ class ExplicitBundleRecorder implements BundleRecorder {
     const draw = drawable instanceof InternalEffect ? effectDraw(drawable) : drawable as InternalDraw;
     // The blend constant is render-pass state; GPURenderBundleEncoder has no setBlendConstant, so reject at recording.
     if (drawUsesBlendConstant(draw)) throw bundleBlendConstantError(this.bundle.id, draw.label);
+    // Likewise the stencil reference: GPURenderBundleEncoder has no setStencilReference. Stencil pipeline state without ref records fine.
+    if (drawUsesStencilReference(draw)) throw bundleStencilReferenceError(this.bundle.id, draw.label);
     this.bundle.remember(draw);
     encodeDraw(draw, this.encoder, this.bundle.signature, opts);
   }

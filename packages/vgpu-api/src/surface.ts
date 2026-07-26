@@ -131,8 +131,8 @@ export class CanvasSurface implements Surface {
   onDestroy(cb: ResourceDestroyCallback<Target>): UnsubscribeResourceDestroy { this.#assertLive(); return this.#destroySignal.onDestroy(this, cb); }
   onTexturesRecreated(cb: () => void): () => void { this.#assertLive(); this.#texturesRecreatedCallbacks.add(cb); return () => { this.#texturesRecreatedCallbacks.delete(cb); }; }
 
-  renderPassDescriptor(clear: ClearColor = [0, 0, 0, 1], preserve?: boolean, _clearDepth?: number): GPURenderPassDescriptor {
-    // Surfaces have no depth attachment; clearDepth cannot apply.
+  renderPassDescriptor(clear: ClearColor = [0, 0, 0, 1], preserve?: boolean, _clearDepth?: number, _clearStencil?: number): GPURenderPassDescriptor {
+    // Surfaces have no depth attachment; clearDepth and clearStencil cannot apply.
     this.#assertLive();
     const attachment: GPURenderPassColorAttachment = { view: this.context.getCurrentTexture().createView(), loadOp: preserve ? "load" : "clear", storeOp: "store" };
     if (!preserve) attachment.clearValue = colorValue(clear);

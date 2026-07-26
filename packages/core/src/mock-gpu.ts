@@ -113,8 +113,8 @@ export function createMockGPUDevice(): GPUDevice {
         copyTextureToBuffer() {},
         beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, end() {} }) as unknown as GPUComputePassEncoder,
         // Mock render pass encoder: only binding/pipeline/draw/bundle/end methods used by tests are implemented.
-        // setBlendConstant/setViewport/setScissorRect are deliberately absent from the mock render bundle encoder above, matching WebGPU.
-        beginRenderPass: () => ({ setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, end() {} }) as unknown as GPURenderPassEncoder,
+        // setBlendConstant/setStencilReference/setViewport/setScissorRect are deliberately absent from the mock render bundle encoder above, matching WebGPU.
+        beginRenderPass: () => ({ setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setStencilReference() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, end() {} }) as unknown as GPURenderPassEncoder,
         finish: () => ({}),
       // Mock command encoder: only copy/render/finish methods used by core/render are implemented.
       } as unknown as GPUCommandEncoder;

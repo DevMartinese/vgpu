@@ -152,6 +152,24 @@ export function depthInvalidError(label: string, reason: string): VGPUError {
   });
 }
 
+export function stencilInvalidError(label: string, reason: string, where = "gpu.draw"): VGPUError {
+  return new VGPUError({
+    code: "VGPU-STENCIL-INVALID",
+    message: `Invalid stencil in '${label}': ${reason}`,
+    fix: `Use { front?, back?, readMask?, writeMask?, ref? } with GPUCompareFunction/GPUStencilOperation faces and u32 masks, against a target whose depth format has a stencil aspect (depth: "depth24plus-stencil8"); omit it for WebGPU's pass-through defaults.`,
+    where,
+  });
+}
+
+export function bundleStencilReferenceError(bundleId: string, drawLabel: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-BUNDLE-STENCIL-REF",
+    message: `bundle '${bundleId}' cannot record draw '${drawLabel}': stencil.ref is render-pass state and render bundle encoders cannot set it.`,
+    fix: `Encode the draw with p.draw(...) in a frame pass, or drop ref from the draw's stencil.`,
+    where: "gpu.bundle",
+  });
+}
+
 export function multisampleInvalidError(label: string, reason: string, where = "gpu.draw"): VGPUError {
   return new VGPUError({
     code: "VGPU-MULTISAMPLE-INVALID",
@@ -202,6 +220,24 @@ export function passPreserveClearDepthError(): VGPUError {
     code: "VGPU-PASS-PRESERVE-CLEARDEPTH",
     message: "clear:false preserves depth; clearDepth cannot apply.",
     fix: "Remove clearDepth, or let the pass clear.",
+    where: "Frame.pass",
+  });
+}
+
+export function passClearStencilInvalidError(reason: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-CLEARSTENCIL-INVALID",
+    message: `clearStencil ${reason}`,
+    fix: `Use an integer in [0, 0xFFFFFFFF] on a target whose depth format has a stencil aspect, e.g. depth: "depth24plus-stencil8"; the value is masked to the stencil aspect's bit width.`,
+    where: "Frame.pass",
+  });
+}
+
+export function passPreserveClearStencilError(): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-PRESERVE-CLEARSTENCIL",
+    message: "clear:false preserves stencil; clearStencil cannot apply.",
+    fix: "Remove clearStencil, or let the pass clear.",
     where: "Frame.pass",
   });
 }

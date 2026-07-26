@@ -55,20 +55,20 @@ export function colorAttachment(resolved: { createView(): GPUTextureView }, msaa
   return attachment;
 }
 
-export function depthAttachment(depth: { createView(): GPUTextureView; readonly sampleCount?: number; readonly format?: GPUTextureFormat }, preserve?: boolean, clearDepth?: number): GPURenderPassDepthStencilAttachment {
+export function depthAttachment(depth: { createView(): GPUTextureView; readonly sampleCount?: number; readonly format?: GPUTextureFormat }, preserve?: boolean, clearDepth?: number, clearStencil?: number): GPURenderPassDepthStencilAttachment {
   const attachment: GPURenderPassDepthStencilAttachment = { view: depth.createView(), depthLoadOp: preserve ? "load" : "clear", depthStoreOp: depth.sampleCount! > 1 ? "discard" : "store" };
   if (!preserve) attachment.depthClearValue = clearDepth ?? 1;
   // WebGPU requires stencilLoadOp/stencilStoreOp whenever the format has a stencil aspect and stencilReadOnly is not set.
   if (depth.format && hasStencilAspect(depth.format)) {
     attachment.stencilLoadOp = preserve ? "load" : "clear";
     attachment.stencilStoreOp = depth.sampleCount! > 1 ? "discard" : "store";
-    if (!preserve) attachment.stencilClearValue = 0;
+    if (!preserve) attachment.stencilClearValue = clearStencil ?? 0;
   }
   return attachment;
 }
 
-function hasStencilAspect(format: GPUTextureFormat): boolean {
-  return format.includes("stencil");
+export function hasStencilAspect(format: GPUTextureFormat | undefined): boolean {
+  return !!format && format.includes("stencil");
 }
 
 export function colorValue(clear: ClearColor): GPUColor {

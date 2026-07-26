@@ -5,9 +5,9 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { encodeDraw, type Draw, type DrawCallOptions } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passPreserveClearDepthError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, surfaceNotInFrameError, targetRequiredError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
-import { isTarget, type ClearColor } from "./target-utils.ts";
+import { hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
 
 export interface FramePassOptions {
   readonly target: Target;
@@ -15,6 +15,8 @@ export interface FramePassOptions {
   readonly clear?: boolean | ClearColor;
   /** Depth clear value used when the pass clears. Defaults to 1. Use 0 with depth: { compare: "greater" } for reversed-Z. */
   readonly clearDepth?: number;
+  /** Stencil clear value used when the pass clears. Defaults to 0. Requires a depth format with a stencil aspect. */
+  readonly clearStencil?: number;
   /** Viewport for every draw in this pass. Defaults to the full target. */
   readonly viewport?: {
     readonly x?: number;
@@ -70,9 +72,20 @@ export class Frame {
       if (typeof clearDepth !== "number" || !(clearDepth >= 0 && clearDepth <= 1)) throw passClearDepthInvalidError(clearDepth);
       if (preserve) throw passPreserveClearDepthError();
     }
+    const clearStencil = targetOnly ? undefined : target.clearStencil;
+    if (clearStencil !== undefined) {
+      // WebGPU stencilClearValue is GPUStencilValue ([EnforceRange] u32); in-range values are masked to the stencil
+      // aspect's bit width by taking the LSBs, so values above 0xFF on stencil8 aspects are legal, not errors.
+      if (typeof clearStencil !== "number" || !Number.isInteger(clearStencil) || clearStencil < 0 || clearStencil > 0xFFFFFFFF) {
+        throw passClearStencilInvalidError(`received ${String(clearStencil)}; expected an integer in [0, 0xFFFFFFFF] (WebGPU GPUStencilValue).`);
+      }
+      if (preserve) throw passPreserveClearStencilError();
+      const depthFormat = resolvedTarget.depth?.format;
+      if (!hasStencilAspect(depthFormat)) throw passClearStencilInvalidError(`received ${String(clearStencil)}, but the target's depth format ${depthFormat ? `"${depthFormat}"` : "(none)"} has no stencil aspect, so clearStencil would have no effect.`);
+    }
     const viewport = targetOnly ? undefined : validatedViewport(target.viewport, this.device.gpu.limits, resolvedTarget.size);
     const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
-    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth));
+    const encoder = this.#encoder.beginRenderPass(resolvedTarget.renderPassDescriptor(clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil));
     if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
     if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
     try { cb(new FramePass(encoder, resolvedTarget, this.#validations)); }

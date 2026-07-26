@@ -145,6 +145,30 @@ test("depth participates in shared pipeline cache keys", async () => {
   gpu.dispose();
 });
 
+test("stencil participates in shared pipeline cache keys; ref stays out", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2], depth: "depth24plus-stencil8" });
+  const a = gpu.draw({ shader: WGSL, label: "st-a", stencil: { front: { compare: "equal", pass: "replace" } } });
+  const b = gpu.draw({ shader: WGSL, label: "st-b", stencil: { front: { compare: "equal", pass: "replace" }, writeMask: 0xFF } });
+  const c = gpu.draw({ shader: WGSL, label: "st-c", stencil: { front: { compare: "equal", pass: "replace" } } });
+  const refOnlyDiff = gpu.draw({ shader: WGSL, label: "st-ref", stencil: { front: { compare: "equal", pass: "replace" }, ref: 7 } });
+  const plain = gpu.draw({ shader: WGSL, label: "st-plain" });
+  const empty = gpu.draw({ shader: WGSL, label: "st-empty", stencil: {} });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+  refOnlyDiff.draw(target);
+  plain.draw(target);
+  empty.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  // a/c share, ref-only difference shares with them, b is distinct, plain is distinct, and an all-defaults {} shares the plain key.
+  expect(mock.calls.createRenderPipeline).toBe(3);
+  gpu.dispose();
+});
+
 test("multisample participates in shared pipeline cache keys", async () => {
   const gpu = await init();
   const target = gpu.target({ size: [2, 2], msaa: true });
