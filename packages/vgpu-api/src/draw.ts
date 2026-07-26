@@ -9,9 +9,11 @@ import { bindGroupLayoutEntriesForGroup, bindGroupLayoutsForReflection, cachedBi
 import type { CompileTarget, Target, TargetSignature } from "./target.ts";
 import { normalizeConstantsOptions, normalizeSignature, pipelineKeyOf, signatureKeyOf, validateTargetSignature, createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type ShaderModuleCache } from "./pipeline-store.ts";
 import { hasStencilAspect, isTarget } from "./target-utils.ts";
-import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, unclippedDepthInvalidError, VGPUError, writeMaskInvalidError } from "./errors.ts";
+import { blendConstantInvalidError, blendInvalidError, claimedGroupNativeValidationError, colorsInvalidError, cullInvalidError, depthInvalidError, frontFaceInvalidError, indirectInvalidError, meshRangeInvalidError, multisampleInvalidError, stencilInvalidError, storageStageLimitError, surfaceNotInFrameError, targetRequiredError, unclippedDepthInvalidError, VGPUError, writeMaskInvalidError } from "./errors.ts";
 import { isFrameActive, isSurface } from "./surface.ts";
 import { meshLayoutResolver, type MeshLayoutResolvable } from "./scene/mesh-descriptor.ts";
+import { resolveIndirect } from "./storage.ts";
+import type { StorageBuffer } from "./gpu.ts";
 
 export type BlendPreset = "alpha" | "additive" | "premultiplied";
 
@@ -126,6 +128,8 @@ export interface DrawCallOptions {
   readonly baseVertex?: number;
   /** First instance precedence: per-call > DrawOptions.firstInstance > 0. */
   readonly firstInstance?: number;
+  /** GPU-driven draw: read draw arguments from a buffer instead of CPU-side counts. */
+  readonly indirect?: StorageBuffer | { readonly buffer: StorageBuffer; readonly offset?: number };
 }
 
 export interface DrawLayoutOptions {
@@ -482,10 +486,27 @@ export class InternalDraw implements Draw {
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
     const mesh = drawState(this).opts.mesh;
     if (mesh?.vertexBuffers) mesh.vertexBuffers.forEach((buffer, index) => pass.setVertexBuffer(index, buffer));
+    if (callOpts.indirect !== undefined) return this.#encodeIndirect(pass, mesh, callOpts);
     const counts = resolveDrawCounts(this.label, mesh, drawState(this).opts, callOpts);
     if (!mesh?.indexBuffer) return pass.draw(counts.vertexCount, counts.instanceCount, counts.firstVertex, counts.firstInstance);
     pass.setIndexBuffer(mesh.indexBuffer, mesh.indexFormat ?? "uint32");
     pass.drawIndexed(counts.indexCount, counts.instanceCount, counts.firstIndex, counts.baseVertex, counts.firstInstance);
+  }
+
+  /**
+   * The GPU reads the draw arguments from the buffer, so per-call counts alongside indirect are dead options and throw.
+   * A non-zero firstInstance in the buffered arguments cannot be validated on the CPU; per WebGPU, it "must be 0,
+   * unless the 'indirect-first-instance' feature is enabled", otherwise the indirect call "will be treated as a no-op".
+   */
+  #encodeIndirect(pass: GPURenderPassEncoder, mesh: MeshLike | undefined, callOpts: DrawCallOptions): void {
+    const where = `${this.label}.draw`;
+    const conflict = INDIRECT_CONFLICT_FIELDS.find((field) => callOpts[field] !== undefined);
+    if (conflict !== undefined) throw indirectInvalidError(this.label, `indirect cannot be combined with ${conflict} in the same call; the GPU reads the draw arguments from the buffer, so the CPU-side value would be ignored.`, where);
+    const indexed = !!mesh?.indexBuffer;
+    const { buffer, offset } = resolveIndirect(this.label, where, callOpts.indirect!, indexed ? "drawIndexedIndirect" : "drawIndirect");
+    if (!indexed) return pass.drawIndirect(buffer, offset);
+    pass.setIndexBuffer(mesh!.indexBuffer!, mesh!.indexFormat ?? "uint32");
+    pass.drawIndexedIndirect(buffer, offset);
   }
 
   #createPipeline(signature: TargetSignature): GPURenderPipeline {
@@ -527,6 +548,8 @@ function validateStorageStageLimits(device: Device, label: string, bindings: rea
     if (limit !== undefined && used.length > limit) throw storageStageLimitError(label, stage, entry.name, used.length, limit, used);
   }
 }
+
+const INDIRECT_CONFLICT_FIELDS = ["vertices", "indices", "instances", "firstVertex", "firstIndex", "baseVertex", "firstInstance"] as const;
 
 type DrawCounts = {
   readonly instanceCount: number;

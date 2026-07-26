@@ -3,9 +3,10 @@ import { reflectSource, type BindingInfo, type EntryPointInfo, type Reflection }
 import { createBindGroupCache, identityKey, type BindGroupCache, type BindGroupIdentityPart } from "./bind-cache.ts";
 import { createSetCore, bindGroupLayoutsForReflection, pipelineLayoutFor, type SetBag, type SetCore } from "./set-core.ts";
 import { visibilityForEntries } from "./set-layouts.ts";
-import type { Compute, ComputeOptions } from "./gpu.ts";
+import type { Compute, ComputeOptions, DispatchOptions } from "./gpu.ts";
 import { normalizeConstantsOptions } from "./pipeline-store.ts";
-import { unsupportedError, writableStorageAliasingError } from "./errors.ts";
+import { indirectInvalidError, unsupportedError, writableStorageAliasingError } from "./errors.ts";
+import { resolveIndirect } from "./storage.ts";
 
 let nextComputeId = 1;
 
@@ -58,15 +59,26 @@ export class ComputePipeline implements Compute {
     return this;
   }
 
-  dispatch(x: number, y = 1, z = 1): void {
+  dispatch(x: number, y?: number, z?: number): void;
+  dispatch(opts: DispatchOptions): void;
+  dispatch(x: number | DispatchOptions, y?: number, z?: number): void {
+    const indirect = typeof x === "object" && x !== null ? this.#resolveIndirectDispatch(x, y, z) : undefined;
     this.#preflightAliasing();
     const encoder = this.device.gpu.createCommandEncoder({ label: `${this.label}.encoder` });
     const pass = encoder.beginComputePass({ label: `${this.label}.pass` });
     pass.setPipeline(this.pipeline);
     for (const binding of this.setCore.bindGroups()) pass.setBindGroup(binding.group, binding.bindGroup, binding.offsets);
-    pass.dispatchWorkgroups(x, y, z);
+    if (indirect) pass.dispatchWorkgroupsIndirect(indirect.buffer, indirect.offset);
+    else pass.dispatchWorkgroups(x as number, y ?? 1, z ?? 1);
     pass.end();
     this.device.gpu.queue.submit([encoder.finish()]);
+  }
+
+  /** The GPU reads the workgroup counts from the buffer, so explicit counts alongside indirect are dead options and throw. */
+  #resolveIndirectDispatch(opts: DispatchOptions, y?: number, z?: number): { readonly buffer: GPUBuffer; readonly offset: number } {
+    const where = `${this.label}.dispatch`;
+    if (y !== undefined || z !== undefined) throw indirectInvalidError(this.label, `indirect cannot be combined with explicit workgroup counts in the same call; the GPU reads the counts from the buffer, so the CPU-side values would be ignored.`, where);
+    return resolveIndirect(this.label, where, opts.indirect, "dispatchWorkgroupsIndirect");
   }
 
   #preflightAliasing(): void {

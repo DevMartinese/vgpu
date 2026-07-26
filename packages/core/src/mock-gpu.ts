@@ -106,6 +106,8 @@ export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevi
         setIndexBuffer() {},
         draw() {},
         drawIndexed() {},
+        drawIndirect() {},
+        drawIndexedIndirect() {},
         finish: () => ({} as GPURenderBundle),
       // Mock render bundle encoder: only state/draw/finish methods used by render tests are implemented.
       } as unknown as GPURenderBundleEncoder;
@@ -116,10 +118,10 @@ export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevi
       return {
         copyBufferToBuffer() {},
         copyTextureToBuffer() {},
-        beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, end() {} }) as unknown as GPUComputePassEncoder,
+        beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, dispatchWorkgroupsIndirect() {}, end() {} }) as unknown as GPUComputePassEncoder,
         // Mock render pass encoder: only binding/pipeline/draw/bundle/end methods used by tests are implemented.
-        // setBlendConstant/setStencilReference/setViewport/setScissorRect are deliberately absent from the mock render bundle encoder above, matching WebGPU.
-        beginRenderPass: () => ({ setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setStencilReference() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, end() {} }) as unknown as GPURenderPassEncoder,
+        // setBlendConstant/setStencilReference/setViewport/setScissorRect are deliberately absent from the mock render bundle encoder above, matching WebGPU (drawIndirect/drawIndexedIndirect are present there, also matching WebGPU).
+        beginRenderPass: () => ({ setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setStencilReference() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, drawIndirect() {}, drawIndexedIndirect() {}, end() {} }) as unknown as GPURenderPassEncoder,
         finish: () => ({}),
       // Mock command encoder: only copy/render/finish methods used by core/render are implemented.
       } as unknown as GPUCommandEncoder;

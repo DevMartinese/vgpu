@@ -197,6 +197,15 @@ export function constantsInvalidError(label: string, reason: string, where = "gp
   });
 }
 
+export function indirectInvalidError(label: string, reason: string, where: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-INDIRECT-INVALID",
+    message: `Invalid indirect in '${label}': ${reason}`,
+    fix: `Pass a storage buffer created with gpu.storage(bytes, { indirect: true }) — bare, or as { buffer, offset? } with a 4-aligned byte offset — sized so the GPU-read arguments fit: 16 bytes for drawIndirect, 20 for drawIndexedIndirect, 12 for dispatchWorkgroupsIndirect. Omit indirect to use CPU-side counts.`,
+    where,
+  });
+}
+
 export function passPreserveMsaaError(): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-PRESERVE-MSAA",

@@ -35,8 +35,18 @@ export interface ComputeOptions {
   /** Values for WGSL `override` constants, keyed by name (or by numeric id as a string when the override has @id). Immutable after construction. */
   readonly constants?: Readonly<Record<string, number | boolean>>;
 }
-export interface Compute { set(values: Record<string, unknown>): this; dispatch(x: number, y?: number, z?: number): void }
+export interface DispatchOptions {
+  /** GPU-driven dispatch: read the workgroup counts from a buffer instead of CPU-side counts. */
+  readonly indirect: StorageBuffer | { readonly buffer: StorageBuffer; readonly offset?: number };
+}
+export interface Compute { set(values: Record<string, unknown>): this; dispatch(x: number, y?: number, z?: number): void; dispatch(opts: DispatchOptions): void }
 export type StorageAccess = "read" | "read-write";
+export interface StorageOptions {
+  /** Binding access for shader reflection. Defaults to "read-write". */
+  readonly access?: StorageAccess;
+  /** Adds the "indirect" buffer usage so the buffer can supply GPU-read draw/dispatch arguments. Defaults to false. */
+  readonly indirect?: boolean;
+}
 export interface StorageBuffer { readonly size: number; readonly access: StorageAccess; read(): Promise<ArrayBuffer>; write(data: BufferSource): void }
 export interface PingPongTargets { readonly read: Target; readonly write: Target; swap(): void }
 export interface PingPongStorage { readonly read: StorageBuffer; readonly write: StorageBuffer; swap(): void }
@@ -60,7 +70,7 @@ export interface Gpu {
   mesh(options: MeshOptions): Mesh;
   dispose(): void;
   compute(source: string | ShaderSource, opts?: ComputeOptions): Compute;
-  storage(bytes: number, access?: StorageAccess): StorageBuffer;
+  storage(bytes: number, access?: StorageAccess | StorageOptions): StorageBuffer;
   pingPong(width: number, height: number, opts?: TargetTextureOptions): PingPongTargets;
   pingPongStorage(bytes: number): PingPongStorage;
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T>;
@@ -149,7 +159,10 @@ class RingGpu implements Gpu {
     this.device.dispose();
   }
   compute(source: string | ShaderSource, opts: ComputeOptions = {}): Compute { return new ComputePipeline(this.device, toWgsl(source), opts, this.#cache); }
-  storage(bytes: number, access: StorageAccess = "read-write"): StorageBuffer { return createStorageBuffer(this.device, bytes, access); }
+  storage(bytes: number, access: StorageAccess | StorageOptions = "read-write"): StorageBuffer {
+    const opts = typeof access === "string" ? { access } : access;
+    return createStorageBuffer(this.device, bytes, opts.access ?? "read-write", undefined, opts.indirect ?? false);
+  }
   pingPong(width: number, height: number, opts: TargetTextureOptions = {}): PingPongTargets { return createPingPongTargets(this.device, width, height, opts); }
   pingPongStorage(bytes: number): PingPongStorage { return createPingPongStorage(this.device, bytes); }
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T> { return createSharedUniforms(this.device, values); }

@@ -12,7 +12,7 @@ import { init } from "vgpu/mock";
 ## Signature
 
 ```ts
-import type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, Draw, DrawOptions, Frame, FrameRunner, Effect, EffectOptions, GpuErrorListener, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, Surface, SurfaceOptions, Target, TargetOptions, TargetTextureOptions } from "vgpu";
+import type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, Draw, DrawOptions, Frame, FrameRunner, Effect, EffectOptions, GpuErrorListener, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions, Surface, SurfaceOptions, Target, TargetOptions, TargetTextureOptions } from "vgpu";
 import type { Device } from "vgpu/core";
 import type { ShaderSource } from "vgpu";
 
@@ -31,7 +31,7 @@ interface Gpu {
   mesh(geometry: unknown): import("vgpu").MeshLike;
   dispose(): void;
   compute(source: string | ShaderSource, opts?: ComputeOptions): Compute;
-  storage(bytes: number, access?: StorageAccess): StorageBuffer;
+  storage(bytes: number, access?: StorageAccess | StorageOptions): StorageBuffer;
   pingPong(width: number, height: number, opts?: TargetTextureOptions): PingPongTargets;
   pingPongStorage(bytes: number): PingPongStorage;
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T>;
@@ -59,7 +59,7 @@ interface Gpu {
 | compute.source | `string \| ShaderSource` | ✔ | — | WGSL string or `ShaderSource`. Must contain a `@compute` entry point. |
 | compute.opts | `ComputeOptions` | ✖ | `{}` | `label` defaults to `"compute"`; `set` defaults to no initial bindings. |
 | storage.bytes | `number` | ✔ | — | Byte size for a main API (`vgpu`) storage buffer. |
-| storage.access | `StorageAccess` | ✖ | `"read-write"` | Reflection still controls shader compatibility; writable aliases are checked before compute dispatch. |
+| storage.access | `StorageAccess \| StorageOptions` | ✖ | `"read-write"` | Access string, or a `StorageOptions` bag: `{ access?, indirect? }`. `indirect: true` appends the `"indirect"` buffer usage so the buffer can supply GPU-read draw/dispatch arguments. Reflection still controls shader compatibility; writable aliases are checked before compute dispatch. |
 | pingPong.width | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | pingPong.height | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | pingPong.opts | `TargetTextureOptions` | ✖ | `{}` | Texture/attachment options only; size comes from positional width/height. |
