@@ -150,6 +150,7 @@ export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevi
           }
         },
         copyTextureToBuffer() {},
+        copyTextureToTexture() {},
         beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, dispatchWorkgroupsIndirect() {}, end() {} }) as unknown as GPUComputePassEncoder,
         // Mock render pass encoder: only binding/pipeline/draw/bundle/query/end methods used by tests are implemented.
         // setBlendConstant/setStencilReference/setViewport/setScissorRect and beginOcclusionQuery/endOcclusionQuery are deliberately absent from the mock render bundle encoder above, matching WebGPU (drawIndirect/drawIndexedIndirect are present there, also matching WebGPU).
