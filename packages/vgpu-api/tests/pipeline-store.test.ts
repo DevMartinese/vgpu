@@ -107,6 +107,40 @@ test("blend and writeMask participate in shared pipeline cache keys", async () =
   gpu.dispose();
 });
 
+test("strip meshes that derive stripIndexFormat from indexFormat do not collide in the cache", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2] });
+  // Neither mesh spells stripIndexFormat out: the descriptor derives it from indexFormat, so the key must too.
+  const a = gpu.draw({ shader: WGSL, label: "strip-uint16", mesh: { topology: "triangle-strip", indexFormat: "uint16" } });
+  const b = gpu.draw({ shader: WGSL, label: "strip-uint32", mesh: { topology: "triangle-strip", indexFormat: "uint32" } });
+  const c = gpu.draw({ shader: WGSL, label: "strip-uint16-again", mesh: { topology: "triangle-strip", indexFormat: "uint16" } });
+
+  a.draw(target);
+  b.draw(target);
+  c.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createShaderModule).toBe(1);
+  expect(mock.calls.createRenderPipeline).toBe(2);
+  expect(mock.createRenderPipelineDescriptors.at(-2)?.primitive).toMatchObject({ topology: "triangle-strip", stripIndexFormat: "uint16" });
+  expect(mock.createRenderPipelineDescriptors.at(-1)?.primitive).toMatchObject({ topology: "triangle-strip", stripIndexFormat: "uint32" });
+  gpu.dispose();
+});
+
+test("an explicit stripIndexFormat and the derived one share a pipeline", async () => {
+  const gpu = await init();
+  const target = gpu.target({ size: [2, 2] });
+  const derived = gpu.draw({ shader: WGSL, label: "derived", mesh: { topology: "line-strip", indexFormat: "uint16" } });
+  const explicitFormat = gpu.draw({ shader: WGSL, label: "explicit", mesh: { topology: "line-strip", stripIndexFormat: "uint16", indexFormat: "uint16" } });
+
+  derived.draw(target);
+  explicitFormat.draw(target);
+
+  const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+  expect(mock.calls.createRenderPipeline).toBe(1);
+  gpu.dispose();
+});
+
 test("cull and frontFace participate in shared pipeline cache keys", async () => {
   const gpu = await init();
   const target = gpu.target({ size: [2, 2] });

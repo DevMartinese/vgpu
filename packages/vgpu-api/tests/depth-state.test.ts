@@ -78,6 +78,20 @@ test("invalid depth options fail at draw construction", async () => {
   gpu.dispose();
 });
 
+test("depth bias outside the i32 range fails at draw construction", async () => {
+  const gpu = await init();
+  const expectInvalid = (label: string, bias: number): void => {
+    expect(() => gpu.draw({ shader: DRAW_SHADER, label, depth: { bias } })).toThrowError(/VGPU-DEPTH-INVALID|Invalid depth/);
+  };
+  expectInvalid("bias-over-i32", 2147483648);
+  expectInvalid("bias-under-i32", -2147483649);
+  expectInvalid("bias-huge", 1e12);
+  // The i32 bounds themselves stay legal.
+  expect(() => gpu.draw({ shader: DRAW_SHADER, label: "bias-i32-max", depth: { bias: 2147483647 } })).not.toThrow();
+  expect(() => gpu.draw({ shader: DRAW_SHADER, label: "bias-i32-min", depth: { bias: -2147483648 } })).not.toThrow();
+  gpu.dispose();
+});
+
 test("nonzero depth bias is rejected for non-triangle topologies", async () => {
   const gpu = await init();
   const expectInvalid = (label: string, topology: GPUPrimitiveTopology, depth: unknown): void => {

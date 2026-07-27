@@ -81,6 +81,37 @@ test("blendConstant without a constant blend factor fails at draw construction",
   gpu.dispose();
 });
 
+test("a constant factor reached only through colors[i].blend keeps blendConstant live", async () => {
+  const gpu = await init();
+  const ops = spyRenderPassOps(gpu.device.gpu);
+  const target = gpu.target({ size: [2, 2] });
+
+  // No top-level blend at all: the only blend state in play is the per-target override.
+  gpu.draw({ shader: DRAW_SHADER, label: "bc-per-target", colors: [{ blend: CONSTANT_BLEND }], blendConstant: [0.5, 0, 0, 1] }).draw(target);
+
+  expect(ops).toEqual([["setPipeline"], ["setBlendConstant", { r: 0.5, g: 0, b: 0, a: 1 }], ["draw"]]);
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("blendConstant validates against the effective blend state of each color target", async () => {
+  const gpu = await init();
+  const expectDead = (label: string, opts: object): void => {
+    expect(() => gpu.draw({ shader: DRAW_SHADER, label, blendConstant: [0, 0, 0, 1], ...opts })).toThrowError(/VGPU-BLEND-CONSTANT-INVALID|no effect/);
+  };
+  // A top-level constant factor overridden on every target is dead: no target ever sees it.
+  expectDead("bc-overridden", { blend: CONSTANT_BLEND, colors: [{ blend: "alpha" }] });
+  expectDead("bc-overridden-mrt", { blend: CONSTANT_BLEND, colors: [{ blend: "alpha" }, { blend: { color: { src: "one", dst: "zero" } } }] });
+  // Zero color targets means zero effective blend states.
+  expectDead("bc-no-targets", { blend: CONSTANT_BLEND, colors: [] });
+  // One surviving target is enough: null entries and blend-less entries inherit the top-level constant blend.
+  expect(() => gpu.draw({ shader: DRAW_SHADER, label: "bc-one-inherits", blend: CONSTANT_BLEND, colors: [{ blend: "alpha" }, null], blendConstant: [0, 0, 0, 1] })).not.toThrow();
+  expect(() => gpu.draw({ shader: DRAW_SHADER, label: "bc-writemask-only", blend: CONSTANT_BLEND, colors: [{ writeMask: ["r"] }], blendConstant: [0, 0, 0, 1] })).not.toThrow();
+  // A per-target constant factor is live even when the top-level blend has none.
+  expect(() => gpu.draw({ shader: DRAW_SHADER, label: "bc-per-target-mrt", blend: "alpha", colors: [null, { blend: CONSTANT_BLEND }], blendConstant: [0, 0, 0, 1] })).not.toThrow();
+  gpu.dispose();
+});
+
 test("bundles reject recording draws with blendConstant", async () => {
   const gpu = await init();
   const target = gpu.target({ size: [2, 2] });

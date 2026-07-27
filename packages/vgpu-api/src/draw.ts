@@ -267,7 +267,7 @@ export class InternalDraw implements Draw {
     const shaderModule = shaderModules.get(source, `${this.label}.shader`);
     const recordedIn = createBundleRegistry();
     const fragmentState = normalizeFragmentState(this.label, opts);
-    const blendConstantOptions = normalizeBlendConstantOptions(this.label, opts, fragmentState.blendState);
+    const blendConstantOptions = normalizeBlendConstantOptions(this.label, opts, fragmentState);
     const primitiveOptions = normalizePrimitiveOptions(device, this.label, opts);
     const depthOptions = normalizeDepthOptions(device, this.label, opts);
     const stencilOptions = normalizeStencilOptions(this.label, opts);
@@ -487,7 +487,9 @@ export class InternalDraw implements Draw {
   #pipelineKey(signature: TargetSignature): string {
     const state = drawState(this);
     const mesh = state.opts.mesh;
-    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: mesh?.stripIndexFormat, cullMode: state.cullMode, frontFace: state.frontFace, unclippedDepth: state.unclippedDepth, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey, constantsKey: state.constantsKey, entryKey: state.entryKey });
+    // The key must use the same stripIndexFormat the descriptor derives (primitiveState), or strip meshes that only
+    // differ in indexFormat collide on one pipeline.
+    return pipelineKeyOf({ module: state.shaderModule, pipelineLayout: state.pipelineLayout, vertexBufferLayouts: state.vertexBufferLayouts, signature, fragmentKey: state.fragmentKey, topology: mesh?.topology, stripIndexFormat: stripIndexFormatFor(mesh), cullMode: state.cullMode, frontFace: state.frontFace, unclippedDepth: state.unclippedDepth, depthKey: state.depthKey, stencilKey: state.stencilKey, multisampleKey: state.multisampleKey, constantsKey: state.constantsKey, entryKey: state.entryKey });
   }
 
   #encodeMesh(pass: GPURenderPassEncoder, callOpts: DrawCallOptions = {}): void {
@@ -619,9 +621,15 @@ function resolveDrawCounts(label: string, mesh: MeshLike | undefined, drawOpts: 
   };
 }
 
+/** Single source of truth for the descriptor's stripIndexFormat, shared with the pipeline cache key. */
+function stripIndexFormatFor(mesh: MeshLike | undefined): GPUIndexFormat | undefined {
+  const topology = mesh?.topology ?? "triangle-list";
+  return mesh?.stripIndexFormat ?? (topology.endsWith("strip") ? mesh?.indexFormat : undefined);
+}
+
 function primitiveState(mesh: MeshLike | undefined, cullMode?: GPUCullMode, frontFace?: GPUFrontFace, unclippedDepth?: true): GPUPrimitiveState {
   const topology = mesh?.topology ?? "triangle-list";
-  const stripIndexFormat = mesh?.stripIndexFormat ?? (topology.endsWith("strip") ? mesh?.indexFormat : undefined);
+  const stripIndexFormat = stripIndexFormatFor(mesh);
   const state: GPUPrimitiveState = stripIndexFormat ? { topology, stripIndexFormat } : { topology };
   if (cullMode !== undefined) state.cullMode = cullMode;
   if (frontFace !== undefined) state.frontFace = frontFace;
@@ -712,17 +720,25 @@ type NormalizedBlendConstantOptions = {
   readonly blendConstant?: GPUColorDict;
 };
 
-function normalizeBlendConstantOptions(label: string, opts: DrawOptions, blendState: GPUBlendState | undefined): NormalizedBlendConstantOptions {
+function normalizeBlendConstantOptions(label: string, opts: DrawOptions, fragmentState: NormalizedFragmentState): NormalizedBlendConstantOptions {
   if (opts.blendConstant === undefined) return {};
   const value = opts.blendConstant;
   if (!Array.isArray(value) || value.length !== 4 || value.some((component) => typeof component !== "number" || !Number.isFinite(component))) {
     throw blendConstantInvalidError(label, `received ${preview(value)}; expected [r, g, b, a] finite numbers.`);
   }
-  // Constant factors without blendConstant stay legal (the pass default (0, 0, 0, 0) applies); the reverse is a dead option.
-  if (!blendState || !usesConstantBlendFactor(blendState)) {
-    throw blendConstantInvalidError(label, `blend uses no "constant"/"one-minus-constant" factor, so blendConstant would have no effect.`);
+  // Constant factors without blendConstant stay legal (the value the pass holds applies); the reverse is a dead option.
+  // The check runs against the EFFECTIVE blend state of every color target — the same resolution fragmentTargets() uses,
+  // so a constant factor reached only through colors[i].blend counts, and a top-level one overridden on every target does not.
+  if (!effectiveBlendStates(fragmentState).some((blend) => blend && usesConstantBlendFactor(blend))) {
+    throw blendConstantInvalidError(label, `no color target's effective blend uses a "constant"/"one-minus-constant" factor (colors[i].blend replaces the top-level blend for that target), so blendConstant would have no effect.`);
   }
   return { blendConstant: { r: value[0], g: value[1], b: value[2], a: value[3] } };
+}
+
+/** Blend state each color target ends up with: the per-target override when it carries one, else the top-level blend (mirrors fragmentTargets). */
+function effectiveBlendStates(fragmentState: NormalizedFragmentState): readonly (GPUBlendState | undefined)[] {
+  if (!fragmentState.colorStates) return [fragmentState.blendState];
+  return fragmentState.colorStates.map((entry) => entry?.blendState ?? fragmentState.blendState);
 }
 
 function usesConstantBlendFactor(blend: GPUBlendState): boolean {
@@ -795,6 +811,9 @@ const DEFAULT_DEPTH_STATE: NormalizedDepthState = { depthWriteEnabled: true, dep
 
 const DEPTH_COMPARE_FUNCTIONS: readonly GPUCompareFunction[] = ["never", "less", "equal", "less-equal", "greater", "not-equal", "greater-equal", "always"];
 
+const I32_MIN = -2147483648;
+const I32_MAX = 2147483647;
+
 function depthStencilState(signature: TargetSignature, state: DrawState): GPUDepthStencilState | undefined {
   // A Draw may compile against targets with and without depth; opts.depth only applies when the signature has a depth attachment.
   if (!signature.depth) return undefined;
@@ -815,6 +834,8 @@ function normalizeDepth(device: Device, label: string, value: false | DepthOptio
   if (value.write !== undefined && typeof value.write !== "boolean") throw depthInvalidError(label, `write must be a boolean; received ${preview(value.write)}.`);
   if (value.compare !== undefined && !DEPTH_COMPARE_FUNCTIONS.includes(value.compare)) throw depthInvalidError(label, `compare must be a GPUCompareFunction; received ${preview(value.compare)}.`);
   if (value.bias !== undefined && !Number.isInteger(value.bias)) throw depthInvalidError(label, `bias must be an integer (WebGPU depthBias is i32); received ${preview(value.bias)}.`);
+  // WebGPU depthBias is a GPUDepthBias (i32); out-of-range integers wrap or fail in the native layer instead of biasing.
+  if (value.bias !== undefined && (value.bias < I32_MIN || value.bias > I32_MAX)) throw depthInvalidError(label, `bias must fit in the i32 range [${I32_MIN}, ${I32_MAX}] (WebGPU depthBias is i32); received ${preview(value.bias)}.`);
   if (value.biasSlopeScale !== undefined && !Number.isFinite(value.biasSlopeScale)) throw depthInvalidError(label, `biasSlopeScale must be a finite number; received ${preview(value.biasSlopeScale)}.`);
   if (value.biasClamp !== undefined && !Number.isFinite(value.biasClamp)) throw depthInvalidError(label, `biasClamp must be a finite number; received ${preview(value.biasClamp)}.`);
   const bias = value.bias ?? 0;
