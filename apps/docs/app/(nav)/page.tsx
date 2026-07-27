@@ -1,49 +1,87 @@
 import Link from 'next/link';
-import { CodeBlock } from '@/components/code-block';
+import { Card } from '@/components/card';
+import { ExampleCard } from '@/components/example-card';
 import { HeroTabs } from '@/components/hero-tabs';
+import { exampleMetadataBySlug } from '@/lib/examples-metadata';
 
-const heroCode = `import { init } from "vgpu";
+const featuredExamples = [
+  exampleMetadataBySlug['black-hole'],
+  exampleMetadataBySlug['raymarched-fractal'],
+  exampleMetadataBySlug['fft-ocean'],
+  exampleMetadataBySlug['triangle-led-front'],
+];
 
-const gpu = await init();
-const surface = gpu.surface(canvas, { dpr: [1, 2] });
-const wave = gpu.effect(WAVE_WGSL, { set: { speed: 2 } });
-
-gpu.frame.loop(() => {
-  wave.set({ time: gpu.time });
-  wave.draw();
-});`;
-
-const features = [
-  ['Browser and Node', 'Render shaders on a website, write tests or render on the server. vgpu just works.'],
-  ['WGSL modules', 'import/export wgsl code just like typescript modules.'],
-  ['Perf by default', 'Bundles, pre-warmed pipelines, dynamic offsets, shared uniforms, and bake patterns.'],
+const pillars = [
+  {
+    title: 'WGSL modules',
+    description: 'Import and export WGSL like TypeScript. Compose shaders from modules, not string templates.',
+    code: 'import { noise } from "./noise.wgsl"',
+  },
+  {
+    title: 'Ready for agents',
+    description: 'Docs, CLI and skill built for coding agents. Your agent gets the full API in one command.',
+    code: 'npx vgpu docs',
+  },
+  {
+    title: 'Runs on web and Node.js',
+    description: 'One API everywhere. Render to canvas in the browser, test and screenshot headlessly in Node.',
+    code: 'import { init } from "vgpu/node"',
+  },
 ];
 
 export default function HomePage() {
   return (
     <div className="px-6 pb-16 lg:px-12 lg:pb-20">
-      <section className="min-h-[90svh] max-w-4xl mx-auto flex flex-col justify-center text-center mb-16">
-        <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-gray-12 mb-6 tracking-tight">vgpu</h1>
-        <p className="text-balance text-lg md:text-xl text-gray-10 mb-10 max-w-2xl mx-auto leading-relaxed">The low-level WebGPU library, designed for agents.</p>
-        <HeroTabs />
-        <div className="mt-5 flex justify-center gap-5">
-          <Link href="/get-started" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Get started →</Link>
-          <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Examples →</Link>
+      <section className="min-h-[90svh] max-w-6xl mx-auto flex flex-col justify-center mb-16">
+        <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+          <div className="text-left">
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-gray-12 mb-6 tracking-tight">vgpu</h1>
+            <p className="text-balance text-lg md:text-xl text-gray-10 mb-4 max-w-2xl leading-relaxed">The low-level WebGPU library, designed for agents.</p>
+            <div className="mb-8 flex flex-wrap gap-2 text-sm text-gray-9">
+              {['WGSL modules', 'Agent-ready', 'Web + Node.js'].map((pillar) => (
+                <span key={pillar} className="rounded-full border border-gray-4 px-3 py-1">{pillar}</span>
+              ))}
+            </div>
+            <div className="flex gap-5">
+              <Link href="/get-started" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Get started →</Link>
+              <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Examples →</Link>
+            </div>
+          </div>
+          <HeroTabs />
         </div>
       </section>
-      <div className="text-left max-w-2xl mx-auto mb-24"><CodeBlock code={heroCode} language="typescript" /></div>
-      <section className="max-w-4xl mx-auto mb-24">
-        <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-4">Everything You Need</h2>
-        <p className="text-gray-9 text-center mb-12 max-w-xl mx-auto">Start with the public `vgpu` API. Drop to native WebGPU only when you need explicit control.</p>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {features.map(([title, description]) => (
-            <div key={title} className="p-5 rounded-lg bg-gray-1 border border-gray-4 hover:border-gray-5 transition-colors group">
-              <h3 className="text-sm font-semibold text-gray-12 mb-2">{title}</h3>
-              <p className="text-sm text-gray-9 leading-relaxed">{description}</p>
-            </div>
+
+      <section className="max-w-6xl mx-auto mb-24">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <h2 className="text-2xl font-semibold text-gray-12">Examples</h2>
+          <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">View all →</Link>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {featuredExamples.map((example) => (
+            <ExampleCard key={example.slug} example={example} />
           ))}
         </div>
       </section>
+
+      <section className="max-w-4xl mx-auto mb-24">
+        <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-10">Why vgpu</h2>
+        <div className="grid md:grid-cols-3 gap-4">
+          {pillars.map((pillar) => (
+            <Card key={pillar.title} className="rounded-lg bg-gray-1 border border-gray-4 overflow-hidden">
+              <Card.Header className="border-gray-4 bg-gray-2">
+                <h3 className="text-sm font-semibold text-gray-12">{pillar.title}</h3>
+              </Card.Header>
+              <Card.Body className="p-5">
+                <p className="text-sm text-gray-9 leading-relaxed">{pillar.description}</p>
+                <div className="mt-5 break-words rounded-md border border-gray-4 bg-black px-3 py-2 font-mono text-sm text-gray-10 whitespace-normal">
+                  {pillar.code}
+                </div>
+              </Card.Body>
+            </Card>
+          ))}
+        </div>
+      </section>
+
       <section className="max-w-4xl mx-auto">
         <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-12">Explore the Docs</h2>
         <div className="grid md:grid-cols-2 gap-4">
