@@ -1,6 +1,6 @@
 import type { Device } from "@vgpu/core";
 import { timerCapacityError, timerInvalidError } from "./errors.ts";
-import { createQueryRing, type QueryRing } from "./query-ring.ts";
+import { createQueryRing, type QueryHostOptions, type QueryRing } from "./query-ring.ts";
 
 /**
  * Marks one frame pass for GPU timing. Create with `timer.span(name)` and pass it
@@ -27,7 +27,6 @@ const INITIAL_SPAN_CAPACITY = 32;
 const MAX_QUERIES = 4096;
 const MAX_SPANS_PER_FRAME = MAX_QUERIES / 2;
 const MS_PER_NS = 1 / 1_000_000;
-
 class InternalTimerSpan implements TimerSpan {
   constructor(readonly name: string, readonly owner: InternalTimer) {}
 }
@@ -38,8 +37,8 @@ export function isTimerSpan(value: unknown): value is InternalTimerSpan {
 }
 
 /** @internal */
-export function createTimer(device: Device, trackSettled?: (promise: Promise<unknown>) => void): Timer {
-  return new InternalTimer(device, trackSettled);
+export function createTimer(device: Device, host: QueryHostOptions = {}): Timer {
+  return new InternalTimer(device, host);
 }
 
 interface FrameSpan {
@@ -56,7 +55,7 @@ interface FrameSpan {
  */
 export class InternalTimer {
   readonly #device: Device;
-  readonly #trackSettled?: (promise: Promise<unknown>) => void;
+  readonly #host: QueryHostOptions;
   readonly #spans = new Map<string, InternalTimerSpan>();
   readonly #listeners = new Set<(spans: Readonly<Record<string, number>>) => void>();
   #ring: QueryRing;
@@ -70,9 +69,18 @@ export class InternalTimer {
   #encodedSpans?: readonly FrameSpan[];
   #resultSeq = 0;
   #appliedSeq = -1;
+  /**
+   * One retain per open frame whose pass descriptors reference a ring's query set, keyed by frame
+   * identity and remembering *which* ring it pinned (capacity growth swaps the ring mid-life).
+   * Released only when that frame reports back — submitted, failed or abandoned — because nothing
+   * else proves the frame's encoder is done with the query set: age does not (a Frame held for many
+   * frames can still be submitted), so a Frame the caller drops without submit() keeps its retain
+   * until gpu.dispose() or device loss, exactly like a native GPUCommandEncoder that never finishes.
+   */
+  readonly #frameRetains = new Map<unknown, QueryRing>();
   #disposed = false;
 
-  constructor(device: Device, trackSettled?: (promise: Promise<unknown>) => void) {
+  constructor(device: Device, host: QueryHostOptions = {}) {
     // Mirrors WebGPU "Validate timestampWrites": '"timestamp-query" must be enabled for device' — and
     // createQuerySet would throw a TypeError for a timestamp set without it. Fail at creation instead.
     if (!device.features.has("timestamp-query")) {
@@ -82,7 +90,7 @@ export class InternalTimer {
       );
     }
     this.#device = device;
-    this.#trackSettled = trackSettled;
+    this.#host = host;
     this.#ring = this.#createRing();
   }
 
@@ -113,7 +121,10 @@ export class InternalTimer {
     this.#frameNames.clear();
     this.#frameSpans = [];
     this.#encodedSpans = undefined;
+    // The ring defers its destruction while the current frame still references the query set from a
+    // pass descriptor (released at frameSubmitted or at the next frame boundary).
     this.#ring.dispose();
+    this.#host.onDispose?.();
   }
 
   /**
@@ -141,6 +152,11 @@ export class InternalTimer {
     if (begin + 2 > this.#ring.capacity) return undefined;
     this.#usedQueries = begin + 2;
     this.#frameSpans.push({ name: span.name, begin });
+    // The descriptor now references the ring's query set for the rest of the frame: keep the ring alive
+    // even if dispose() lands mid-frame (destroying a referenced set would invalidate the pass).
+    // The retain is per frame, so a second frame opened while this one is still unsubmitted cannot
+    // release it — both keep the set alive until each of them is submitted or abandoned.
+    this.#retainRing(frame);
     // "Of the write index members ... at least one must be provided ... no two may be equal": begin/end pairs are distinct by construction.
     return { querySet: this.#ring.querySet, beginningOfPassWriteIndex: begin, endOfPassWriteIndex: begin + 1 };
   }
@@ -154,7 +170,14 @@ export class InternalTimer {
 
   /** @internal Frame.submit hook, after queue.submit succeeds: starts the non-blocking readback. */
   frameSubmitted(frame: unknown): void {
-    if (this.#disposed || frame !== this.#frame) return;
+    // Release *this* frame's retain first, whichever ring it pinned: the command buffer is submitted
+    // (or the frame was abandoned), so nothing it encoded references that query set anymore, and a
+    // dispose() that landed mid-frame can now destroy the ring. Runs before the identity check so a
+    // frame that is no longer the current one — another frame was opened meanwhile — still releases.
+    this.#releaseRing(frame);
+    // Results stay identity-scoped: only the current frame's encoded resolve is read back.
+    if (frame !== this.#frame) return;
+    if (this.#disposed) return;
     const spans = this.#encodedSpans;
     this.#encodedSpans = undefined;
     if (!spans || spans.length === 0) return;
@@ -199,8 +222,21 @@ export class InternalTimer {
     }
   }
 
+  #retainRing(frame: unknown): void {
+    if (this.#frameRetains.has(frame)) return;
+    this.#frameRetains.set(frame, this.#ring);
+    this.#ring.retain();
+  }
+
+  #releaseRing(frame: unknown): void {
+    const ring = this.#frameRetains.get(frame);
+    if (!ring) return;
+    this.#frameRetains.delete(frame);
+    ring.release();
+  }
+
   #createRing(): QueryRing {
-    return createQueryRing(this.#device, { type: "timestamp", capacity: this.#capacity, label: "vgpu.timer", trackSettled: this.#trackSettled });
+    return createQueryRing(this.#device, { type: "timestamp", capacity: this.#capacity, label: "vgpu.timer", trackSettled: this.#host.trackSettled, errorSink: this.#host.errorSink });
   }
 
   #assertUsable(where: string): void {

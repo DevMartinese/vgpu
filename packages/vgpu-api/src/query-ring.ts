@@ -1,4 +1,6 @@
 import type { Buffer, Device } from "@vgpu/core";
+import { VGPUError } from "./errors.ts";
+import type { ErrorSink } from "./pipeline-store.ts";
 
 /**
  * Bytes each resolved query occupies: WebGPU resolveQuerySet writes each result
@@ -27,6 +29,26 @@ export interface QueryRingOptions {
   readonly depth?: number;
   /** Registers each pending readback so gpu.settled() covers in-flight maps. */
   readonly trackSettled?: (promise: Promise<unknown>) => void;
+  /**
+   * Reports a failed readback (device loss, a rejected mapAsync, an unmap that throws) through the
+   * package's error channel — gpu.onError. The ring itself stays non-throwing: a failed readback is
+   * dropped, never surfaced as a rejected frame. Defaults to console.error.
+   */
+  readonly errorSink?: ErrorSink;
+}
+
+/**
+ * Host hooks shared by the query-based features built on the ring (gpu.timer(), gpu.visibility()).
+ *
+ * @internal
+ */
+export interface QueryHostOptions {
+  /** Registers each pending readback so gpu.settled() covers in-flight maps. */
+  readonly trackSettled?: (promise: Promise<unknown>) => void;
+  /** Error channel for dropped readbacks (gpu.onError). */
+  readonly errorSink?: ErrorSink;
+  /** Called from the feature's dispose() so the owning gpu can drop its tracking reference. */
+  readonly onDispose?: () => void;
 }
 
 /**
@@ -57,9 +79,18 @@ export interface QueryRing {
    */
   onSubmitted(apply: (values: BigUint64Array) => void): void;
   /**
+   * Pins the GPU resources while a frame in flight references `querySet` from a pass descriptor:
+   * `dispose()` then defers destruction until the matching `release()`. Consumers retain once per
+   * frame that binds the set and release when that frame is submitted (or abandoned), so a
+   * mid-frame `dispose()` can never destroy a query set the current frame still points at.
+   */
+  retain(): void;
+  /** Balances one retain(); performs a deferred destruction when the ring is disposed and idle. */
+  release(): void;
+  /**
    * Stops new encodes/readbacks. In-flight readbacks still decode and apply (so results are
    * not lost when a consumer retires a ring to grow capacity); GPU resources are destroyed
-   * once the last in-flight map settles.
+   * once the last in-flight map settles and the last frame retain is released.
    */
   dispose(): void;
 }
@@ -72,6 +103,12 @@ export function createQueryRing(device: Device, options: QueryRingOptions): Quer
 interface StagingSlot {
   readonly buffer: Buffer;
   mapPending: boolean;
+  /**
+   * Set when the buffer may still be mapped after a failed readback (getMappedRange threw and the
+   * best-effort unmap failed too). A copyBufferToBuffer into a mapped buffer is a validation error
+   * — "the destination buffer must be unmapped" — so the slot is rotated past, permanently.
+   */
+  retired: boolean;
 }
 
 interface PendingEncode {
@@ -83,19 +120,25 @@ interface PendingEncode {
 class InternalQueryRing implements QueryRing {
   readonly querySet: GPUQuerySet;
   readonly capacity: number;
+  readonly #label: string;
   readonly #resolve: Buffer;
   readonly #stagings: readonly StagingSlot[];
   readonly #trackSettled?: (promise: Promise<unknown>) => void;
+  readonly #errorSink?: ErrorSink;
   #cursor = 0;
   #nextSeq = 0;
   #appliedSeq = -1;
   #pendingEncode?: PendingEncode;
   #inFlight = 0;
+  /** Frames that bound querySet into a pass descriptor and have not been submitted/abandoned yet. */
+  #retained = 0;
   #disposed = false;
+  #destroyed = false;
 
   constructor(device: Device, options: QueryRingOptions) {
     this.capacity = options.capacity;
     const label = options.label ?? "vgpu.query-ring";
+    this.#label = label;
     const byteSize = options.capacity * QUERY_RESULT_BYTES;
     this.querySet = device.gpu.createQuerySet({ type: options.type, count: options.capacity, label });
     // Mirrors WebGPU resolveQuerySet requirements: "destination.usage contains QUERY_RESOLVE" and
@@ -104,16 +147,18 @@ class InternalQueryRing implements QueryRing {
     this.#stagings = Array.from({ length: options.depth ?? 3 }, (_, index) => ({
       buffer: device.createBuffer({ size: byteSize, usage: ["map_read", "copy_dst"], label: `${label}.staging${index}` }),
       mapPending: false,
+      retired: false,
     }));
     this.#trackSettled = options.trackSettled;
+    this.#errorSink = options.errorSink;
   }
 
   encodeResolve(encoder: GPUCommandEncoder, usedCount: number): boolean {
     this.#pendingEncode = undefined;
     if (this.#disposed || usedCount <= 0) return false;
-    const staging = this.#stagings[this.#cursor % this.#stagings.length]!;
+    const staging = this.#claimStaging();
     // Drop, never block: when readbacks lag frames-in-flight past the ring depth, skip this frame's resolve entirely.
-    if (staging.mapPending) return false;
+    if (!staging) return false;
     const count = Math.min(usedCount, this.capacity);
     encoder.resolveQuerySet(this.querySet, 0, count, this.#resolve.gpu, 0);
     encoder.copyBufferToBuffer(this.#resolve.gpu, 0, staging.buffer.gpu, 0, count * QUERY_RESULT_BYTES);
@@ -131,32 +176,108 @@ class InternalQueryRing implements QueryRing {
     this.#inFlight += 1;
     const readback = pending.staging.buffer.gpu.mapAsync(MAP_READ)
       .then(() => {
-        const values = new BigUint64Array(pending.staging.buffer.gpu.getMappedRange().slice(0, pending.usedCount * QUERY_RESULT_BYTES));
-        pending.staging.buffer.gpu.unmap();
+        // The buffer is mapped from here on: it must be unmapped before the slot rotates back into
+        // use, even if decoding throws — resolving into a mapped buffer is a validation error.
+        const values = this.#decodeMapped(pending);
         // Ordered application: a stale readback that lands after a newer one already applied is discarded.
         if (pending.seq <= this.#appliedSeq) return;
         this.#appliedSeq = pending.seq;
         apply(values);
       })
-      .catch(() => undefined)
+      // Non-throwing by contract, but never silent: a dropped readback is reported on gpu.onError.
+      .catch((cause: unknown) => { this.#reportDroppedReadback(cause); })
       .finally(() => {
         pending.staging.mapPending = false;
         this.#inFlight -= 1;
-        if (this.#disposed && this.#inFlight === 0) this.#destroy();
+        this.#destroyWhenIdle();
       });
     this.#trackSettled?.(readback);
+  }
+
+  /**
+   * Next staging buffer in rotation, skipping retired slots. Undefined means "drop this resolve":
+   * the slot is still map-pending (readbacks lag the ring depth) or every slot is retired.
+   */
+  #claimStaging(): StagingSlot | undefined {
+    for (let checked = 0; checked < this.#stagings.length; checked += 1) {
+      const slot = this.#stagings[this.#cursor % this.#stagings.length]!;
+      if (!slot.retired) return slot.mapPending ? undefined : slot;
+      // Permanently unusable: rotate past it so the remaining buffers keep serving readbacks.
+      this.#cursor += 1;
+    }
+    return undefined;
+  }
+
+  /**
+   * Copies the mapped range out and unmaps, keeping the slot reusable. A failure here (a lost device
+   * mid-map) still unmaps best-effort; if that fails too the buffer may stay mapped forever, so the
+   * slot is retired instead of being handed back to encodeResolve. Throws so the readback is dropped
+   * and reported like any other failure.
+   */
+  #decodeMapped(pending: PendingEncode): BigUint64Array {
+    let values: BigUint64Array;
+    try { values = new BigUint64Array(pending.staging.buffer.gpu.getMappedRange().slice(0, pending.usedCount * QUERY_RESULT_BYTES)); }
+    catch (error) {
+      this.#unmapOrRetire(pending.staging);
+      throw error;
+    }
+    try { pending.staging.buffer.gpu.unmap(); }
+    catch (error) {
+      pending.staging.retired = true;
+      throw error;
+    }
+    return values;
+  }
+
+  #unmapOrRetire(staging: StagingSlot): void {
+    try { staging.buffer.gpu.unmap(); }
+    catch { staging.retired = true; }
+  }
+
+  retain(): void {
+    this.#retained += 1;
+  }
+
+  release(): void {
+    if (this.#retained > 0) this.#retained -= 1;
+    this.#destroyWhenIdle();
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#pendingEncode = undefined;
-    if (this.#inFlight === 0) this.#destroy();
+    this.#destroyWhenIdle();
   }
 
-  #destroy(): void {
+  /** Destroys once disposed and idle: no in-flight map and no frame still referencing the query set. */
+  #destroyWhenIdle(): void {
+    if (!this.#disposed || this.#destroyed || this.#inFlight > 0 || this.#retained > 0) return;
+    this.#destroyed = true;
     this.querySet.destroy();
     this.#resolve.dispose();
     for (const staging of this.#stagings) staging.buffer.dispose();
   }
+
+  #reportDroppedReadback(cause: unknown): void {
+    const error = new VGPUError({
+      code: "VGPU-QUERY-READBACK",
+      message: `${this.#label} dropped a query readback: ${describeCause(cause)}`,
+      fix: "Usually a lost or destroyed device: recreate the gpu (and the timer/visibility instance) before reading queries again. Results resume on the next successful readback; the frame itself is unaffected.",
+      where: "QueryRing.onSubmitted",
+      cause,
+    });
+    const sink = this.#errorSink;
+    if (!sink) {
+      console.error(error);
+      return;
+    }
+    try { void Promise.resolve(sink(error)).catch((sinkError: unknown) => { console.error(sinkError); }); }
+    catch (sinkError) { console.error(sinkError); }
+  }
+}
+
+function describeCause(cause: unknown): string {
+  if (cause instanceof Error) return `${cause.name}: ${cause.message}`;
+  return String(cause);
 }

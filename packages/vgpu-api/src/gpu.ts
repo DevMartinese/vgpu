@@ -108,6 +108,9 @@ class RingGpu implements Gpu {
   readonly #surfaces = new Map<SurfaceCanvas, CanvasSurface>();
   readonly #errorListeners = new Set<GpuErrorListener>();
   readonly #pendingDeliveries = new Set<Promise<void>>();
+  /** Query-based features created by this gpu, disposed with it (each drops itself on its own dispose()). */
+  readonly #timers = new Set<Timer>();
+  readonly #visibilities = new Set<Visibility>();
   readonly #settledSources = new Set<SettledSource>();
   #disposed = false;
   #advancing = false;
@@ -159,6 +162,11 @@ class RingGpu implements Gpu {
     if (this.#disposed) return;
     this.#disposed = true;
     for (const surface of [...this.#surfaces.values()]) surface.dispose();
+    // Query features own a query set plus resolve/staging buffers: release them with the gpu that made them.
+    for (const timer of [...this.#timers]) timer.dispose();
+    for (const visibility of [...this.#visibilities]) visibility.dispose();
+    this.#timers.clear();
+    this.#visibilities.clear();
     this.#pipelineStore.dispose();
     this.#shaderModules.dispose();
     this.#pipelineLayouts.dispose();
@@ -171,8 +179,24 @@ class RingGpu implements Gpu {
     const opts = typeof access === "string" ? { access } : access;
     return createStorageBuffer(this.device, bytes, opts.access ?? "read-write", undefined, opts.indirect ?? false);
   }
-  timer(): Timer { return createTimer(this.device, (promise) => this.#trackDelivery(promise)); }
-  visibility(options: VisibilityOptions = {}): Visibility { return createVisibility(this.device, options, () => this.frameCount, (promise) => this.#trackDelivery(promise)); }
+  timer(): Timer {
+    const timer: Timer = createTimer(this.device, {
+      trackSettled: (promise) => this.#trackDelivery(promise),
+      errorSink: (error) => this.#reportError(error),
+      onDispose: () => { this.#timers.delete(timer); },
+    });
+    this.#timers.add(timer);
+    return timer;
+  }
+  visibility(options: VisibilityOptions = {}): Visibility {
+    const visibility: Visibility = createVisibility(this.device, options, () => this.frameCount, {
+      trackSettled: (promise) => this.#trackDelivery(promise),
+      errorSink: (error) => this.#reportError(error),
+      onDispose: () => { this.#visibilities.delete(visibility); },
+    });
+    this.#visibilities.add(visibility);
+    return visibility;
+  }
   pingPong(width: number, height: number, opts: TargetTextureOptions = {}): PingPongTargets { return createPingPongTargets(this.device, width, height, opts); }
   pingPongStorage(bytes: number): PingPongStorage { return createPingPongStorage(this.device, bytes); }
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T> { return createSharedUniforms(this.device, values); }

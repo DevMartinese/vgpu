@@ -253,6 +253,248 @@ test("span() memoizes per name and usage shape matches the docs example", async 
   gpu.dispose();
 });
 
+test("dispose() mid-frame keeps the query set alive until the frame is submitted", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+
+  gpu.frame((frame) => {
+    frame.pass({ target, timer: timer.span("main") }, () => undefined);
+    // The pass descriptor already references the query set: destroying it here would invalidate the
+    // in-flight frame, so destruction is deferred to the frame boundary.
+    timer.dispose();
+    expect(destroyed).toEqual([]);
+  });
+
+  // Submit happened: the query set is released now.
+  expect(destroyed).toEqual([0]);
+  await gpu.settled();
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("dispose() inside a frame whose callback throws still releases the query set with that frame's submit", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+
+  expect(() => gpu.frame((frame) => {
+    frame.pass({ target, timer: timer.span("main") }, () => undefined);
+    timer.dispose();
+    throw new Error("frame callback blew up");
+  })).toThrowError(/frame callback blew up/);
+
+  // gpu.frame() submits in a finally, so the deferred destroy happens as soon as the frame ends.
+  expect(destroyed).toEqual([0]);
+  gpu.dispose();
+  expect(destroyed).toEqual([0]);
+  vi.restoreAllMocks();
+});
+
+test("a frame left open keeps its retain no matter how many frames run after it", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+
+  // Manual frame that is still open: it references the query set from a pass descriptor, so its
+  // retain is only released when it reports back (submit, failure or abandon) — never by age.
+  const open = gpu.frame();
+  open.pass({ target, timer: timer.span("open") }, () => undefined);
+  for (let index = 0; index < 12; index++) {
+    gpu.frame((frame) => frame.pass({ target, timer: timer.span(`main${index}`) }, () => undefined));
+  }
+  await gpu.settled();
+
+  timer.dispose();
+  // Destruction stays deferred: guessing "abandoned" from age would free a set this frame can still use.
+  expect(destroyed).toEqual([]);
+  // And the long-open frame can still be submitted safely, long after dispose().
+  expect(() => open.submit()).not.toThrow();
+  expect(destroyed).toEqual([0]);
+  await gpu.settled();
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("a stale frame submitted after many later frames reports nothing and destroys the set only on close", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+  const results: Array<Readonly<Record<string, number>>> = [];
+  timer.onResults((spans) => { results.push(spans); });
+
+  const stale = gpu.frame();
+  stale.pass({ target, timer: timer.span("stale") }, () => undefined);
+  for (let index = 0; index < 10; index++) {
+    gpu.frame((frame) => frame.pass({ target, timer: timer.span("main") }, () => undefined));
+  }
+  await gpu.settled();
+  // Only the frames whose staging slot was free report back (the ring drops rather than blocks), but
+  // every result belongs to a live frame: nothing is attributed to the stale one.
+  const beforeStale = results.length;
+  expect(beforeStale).toBeGreaterThan(0);
+  expect(results.every((spans) => Object.keys(spans).join() === "main")).toBe(true);
+
+  // The stale frame lost the timer's identity long ago: it encodes no resolve, so no phantom "stale"
+  // result appears, and no query set was destroyed early while its encoder still referenced one.
+  stale.submit();
+  await gpu.settled();
+  expect(results).toHaveLength(beforeStale);
+  expect(destroyed).toEqual([]);
+
+  // Its retain is released on submit, so a dispose() afterwards destroys immediately.
+  timer.dispose();
+  expect(destroyed).toEqual([0]);
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("gpu.dispose() with a frame still open does not throw and leaves the query set to the dropped frame", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+
+  const leaked = gpu.frame();
+  leaked.pass({ target, timer: timer.span("leaked") }, () => undefined);
+  await gpu.settled();
+
+  // gpu.dispose() disposes the timer it created; the ring is marked disposed but its destroy stays
+  // deferred behind the open frame's retain. Since that frame is never submitted the deferred destroy
+  // never runs — the caller leaked it, exactly like a native encoder that never calls finish().
+  expect(() => gpu.dispose()).not.toThrow();
+  expect(destroyed).toEqual([]);
+  // The disposed timer is unusable, and nothing crashes on the way out.
+  expect(() => timer.span("after")).toThrowError(/disposed/i);
+  expect(() => timer.dispose()).not.toThrow();
+  expect(destroyed).toEqual([]);
+  vi.restoreAllMocks();
+});
+
+test("two frames open at once each hold their own retain: the query set outlives dispose() until the last one closes", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();          // query set 0
+  const vis = gpu.visibility();       // query set 1
+  const statue = vis.query("statue");
+  const target = gpu.target({ size: [4, 4], depth: true });
+  const spans: Array<Readonly<Record<string, number>>> = [];
+  timer.onResults((results) => { spans.push(results); });
+
+  // Two manual frames open simultaneously, sharing the same timer and the same visibility instance.
+  const first = gpu.frame();
+  first.pass({ target, timer: timer.span("first"), visibility: vis }, (pass) => pass.occlusion(statue, () => undefined));
+  const second = gpu.frame();
+  second.pass({ target, timer: timer.span("second"), visibility: vis }, (pass) => pass.occlusion(statue, () => undefined));
+
+  timer.dispose();
+  vis.dispose();
+  // Both frames still point at both query sets from their pass descriptors.
+  expect(destroyed).toEqual([]);
+  second.submit();
+  // The newer frame is submitted, but the older one is still open and references the same sets.
+  expect(destroyed).toEqual([]);
+  first.submit();
+  // Only now is nothing referencing them: timer set first (created first), then the visibility set.
+  expect(destroyed).toEqual([0, 1]);
+
+  await gpu.settled();
+  // No phantom results: both frames were disposed mid-flight, and the older frame lost its identity
+  // to the newer one, so nothing is read back and no handle silently latches "hidden".
+  expect(spans).toEqual([]);
+  expect(statue.state).toBe("unknown");
+  expect(statue.hidden).toBe(false);
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("the abandon path releases the retain of its own frame, not of the other open frame", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+
+  // The older frame's pass fails, so its telemetry is rolled back: it will end through the abandon
+  // path (finalizeFrame(ABANDONED) + frameSubmitted) instead of a real readback.
+  const first = gpu.frame();
+  expect(() => first.pass({ target, timer: timer.span("first") }, () => { throw new Error("pass body blew up"); })).toThrowError(/pass body blew up/);
+  const second = gpu.frame();
+  second.pass({ target, timer: timer.span("second") }, () => undefined);
+  timer.dispose();
+  expect(destroyed).toEqual([]);
+
+  // Abandoning the older frame releases only its own retain: the second frame is still encoding
+  // against the same query set.
+  first.submit();
+  expect(destroyed).toEqual([]);
+  second.submit();
+  expect(destroyed).toEqual([0]);
+  await gpu.settled();
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("a readback that fails is reported on gpu.onError as VGPU-QUERY-READBACK", async () => {
+  const gpu = await initWithTimestampQuery();
+  failStagingMaps(gpu.device.gpu);
+  const errors: Array<{ code: string; message: string }> = [];
+  gpu.onError((error) => { errors.push(error); });
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+  const results: unknown[] = [];
+  timer.onResults((spans) => { results.push(spans); });
+
+  gpu.frame((frame) => frame.pass({ target, timer: timer.span("main") }, () => undefined));
+  await gpu.settled();
+
+  expect(results).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toMatchObject({ code: "VGPU-QUERY-READBACK", message: expect.stringContaining("vgpu.timer") });
+  timer.dispose();
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("gpu.dispose() releases timers created by that gpu", async () => {
+  const gpu = await initWithTimestampQuery();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const timer = gpu.timer();
+  const target = gpu.target({ size: [4, 4] });
+  gpu.frame((frame) => frame.pass({ target, timer: timer.span("main") }, () => undefined));
+  await gpu.settled();
+
+  gpu.dispose();
+  expect(destroyed).toEqual([0]);
+  // The timer is disposed too, so its use throws and re-disposing is a no-op.
+  expect(() => timer.span("main")).toThrowError(/VGPU-TIMER-INVALID|disposed/);
+  expect(() => timer.dispose()).not.toThrow();
+  vi.restoreAllMocks();
+});
+
+/** Makes every query-ring staging mapAsync reject, as a lost device would. */
+function failStagingMaps(device: GPUDevice): void {
+  const originalCreateBuffer = device.createBuffer.bind(device);
+  vi.spyOn(device, "createBuffer").mockImplementation((descriptor: GPUBufferDescriptor) => {
+    const buffer = originalCreateBuffer(descriptor);
+    if (descriptor.label?.includes("staging")) {
+      (buffer as { mapAsync: GPUBuffer["mapAsync"] }).mapAsync = () => Promise.reject(new Error("device lost"));
+    }
+    return buffer;
+  });
+}
+
 type EncodeOp = readonly [name: string, ...args: unknown[]];
 
 interface FrameEncoderOps {

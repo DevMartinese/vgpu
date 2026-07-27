@@ -1,6 +1,6 @@
 import type { Device } from "@vgpu/core";
 import { queryDuplicateError, visibilityCapacityError, visibilityCapacityLimitError, visibilityDisposedError, visibilityInvalidError, visibilityLabelDuplicateError } from "./errors.ts";
-import { createQueryRing, type QueryRing } from "./query-ring.ts";
+import { createQueryRing, type QueryHostOptions, type QueryRing } from "./query-ring.ts";
 
 export interface VisibilityOptions {
   /** Query slots. Max 4096 (WebGPU fixed limit). Default 64. */
@@ -38,10 +38,9 @@ export interface VisibilityQuery {
 /** WebGPU createQuerySet: "descriptor.count must be ≤ 4096" — a fixed constant, not a device limit. */
 const MAX_QUERIES = 4096;
 const DEFAULT_CAPACITY = 64;
-
 /** @internal */
-export function createVisibility(device: Device, options: VisibilityOptions = {}, frameCounter: () => number = () => 0, trackSettled?: (promise: Promise<unknown>) => void): Visibility {
-  return new InternalVisibility(device, options, frameCounter, trackSettled);
+export function createVisibility(device: Device, options: VisibilityOptions = {}, frameCounter: () => number = () => 0, host: QueryHostOptions = {}): Visibility {
+  return new InternalVisibility(device, options, frameCounter, host);
 }
 
 /** @internal Frame.pass guard: FramePassOptions.visibility must come from gpu.visibility(). */
@@ -111,6 +110,7 @@ interface FrameEntry {
 export class InternalVisibility {
   readonly #device: Device;
   readonly #frameCounter: () => number;
+  readonly #host: QueryHostOptions;
   readonly #ring: QueryRing;
   readonly capacity: number;
   /** Live (not disposed) handles by label. */
@@ -119,17 +119,26 @@ export class InternalVisibility {
   #frameEntries: FrameEntry[] = [];
   readonly #frameUsed = new Set<InternalVisibilityQuery>();
   #encodedEntries?: readonly FrameEntry[];
+  /**
+   * One retain per open frame whose pass descriptors reference the ring's query set, keyed by frame
+   * identity. Released only when that frame reports back — submitted, failed or abandoned — because
+   * nothing else proves the frame's encoder is done with the query set: age does not (a Frame held
+   * for many frames can still be submitted), so a Frame the caller drops without submit() keeps its
+   * retain until gpu.dispose() or device loss, like a native encoder that never finishes.
+   */
+  readonly #frameRetains = new Map<unknown, QueryRing>();
   #disposed = false;
 
-  constructor(device: Device, options: VisibilityOptions, frameCounter: () => number, trackSettled?: (promise: Promise<unknown>) => void) {
+  constructor(device: Device, options: VisibilityOptions, frameCounter: () => number, host: QueryHostOptions = {}) {
     const capacity = options.capacity ?? DEFAULT_CAPACITY;
     if (typeof capacity !== "number" || !Number.isInteger(capacity) || capacity < 1 || capacity > MAX_QUERIES) {
       throw visibilityCapacityLimitError(capacity, MAX_QUERIES);
     }
     this.#device = device;
     this.#frameCounter = frameCounter;
+    this.#host = host;
     this.capacity = capacity;
-    this.#ring = createQueryRing(device, { type: "occlusion", capacity, label: "vgpu.visibility", trackSettled });
+    this.#ring = createQueryRing(device, { type: "occlusion", capacity, label: "vgpu.visibility", trackSettled: host.trackSettled, errorSink: host.errorSink });
   }
 
   query(label: string): VisibilityQuery {
@@ -155,7 +164,10 @@ export class InternalVisibility {
     this.#frameEntries = [];
     this.#frameUsed.clear();
     this.#encodedEntries = undefined;
+    // The ring defers its destruction while the current frame still references the query set from a
+    // pass descriptor (released at frameSubmitted or at the next frame boundary).
     this.#ring.dispose();
+    this.#host.onDispose?.();
   }
 
   /** @internal */
@@ -183,6 +195,11 @@ export class InternalVisibility {
       throw visibilityInvalidError("the visibility instance belongs to a different gpu; occlusion queries cannot cross devices.", "Create one gpu.visibility() per gpu and use it only with that gpu's frames.", "Frame.pass");
     }
     if (frame !== this.#frame) this.#beginFrame(frame);
+    // The pass descriptor's occlusionQuerySet references the ring's query set for the rest of the frame:
+    // keep the ring alive even if dispose() lands mid-frame. The retain is per frame, so a second
+    // frame opened while this one is still unsubmitted cannot release it — both keep the set alive
+    // until each of them is submitted or abandoned.
+    this.#retainRing(frame);
   }
 
   /** @internal FramePass.occlusion hook: validates the handle and allocates this frame's next contiguous slot. */
@@ -217,7 +234,14 @@ export class InternalVisibility {
 
   /** @internal Frame.submit hook, after queue.submit succeeds: starts the non-blocking readback. */
   frameSubmitted(frame: unknown): void {
-    if (this.#disposed || frame !== this.#frame) return;
+    // Release *this* frame's retain first: the command buffer is submitted (or the frame was
+    // abandoned), so nothing it encoded references the query set anymore, and a dispose() that
+    // landed mid-frame can now destroy the ring. Runs before the identity check so a frame that is
+    // no longer the current one — another frame was opened meanwhile — still releases.
+    this.#releaseRing(frame);
+    // Results stay identity-scoped: only the current frame's encoded resolve is read back.
+    if (frame !== this.#frame) return;
+    if (this.#disposed) return;
     const entries = this.#encodedEntries;
     this.#encodedEntries = undefined;
     if (!entries || entries.length === 0) return;
@@ -239,6 +263,19 @@ export class InternalVisibility {
     this.#frame = frame;
     this.#frameEntries = [];
     this.#frameUsed.clear();
+  }
+
+  #retainRing(frame: unknown): void {
+    if (this.#frameRetains.has(frame)) return;
+    this.#frameRetains.set(frame, this.#ring);
+    this.#ring.retain();
+  }
+
+  #releaseRing(frame: unknown): void {
+    const ring = this.#frameRetains.get(frame);
+    if (!ring) return;
+    this.#frameRetains.delete(frame);
+    ring.release();
   }
 
   #assertUsable(where: string): void {

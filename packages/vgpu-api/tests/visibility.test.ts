@@ -524,6 +524,102 @@ test("canonical usage: stable handles created once, proxies always drawn, real d
   gpu.dispose();
 });
 
+test("dispose() mid-frame keeps the occlusion query set alive until the frame is submitted", async () => {
+  const gpu = await init();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const vis = gpu.visibility({ capacity: 4 });
+  const q = vis.query("statue");
+  const scene = gpu.target({ size: [4, 4], depth: true });
+
+  gpu.frame((frame) => {
+    frame.pass({ target: scene, visibility: vis }, (p) => p.occlusion(q, () => undefined));
+    // The pass descriptor's occlusionQuerySet already points at this set: destroying it mid-frame
+    // would invalidate the frame being encoded, so destruction is deferred.
+    vis.dispose();
+    expect(destroyed).toEqual([]);
+  });
+
+  expect(destroyed).toEqual([0]);
+  await gpu.settled();
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("a readback that fails is reported on gpu.onError and leaves handles untouched", async () => {
+  const gpu = await init();
+  const originalCreateBuffer = gpu.device.gpu.createBuffer.bind(gpu.device.gpu);
+  vi.spyOn(gpu.device.gpu, "createBuffer").mockImplementation((descriptor: GPUBufferDescriptor) => {
+    const buffer = originalCreateBuffer(descriptor);
+    if (descriptor.label?.includes("staging")) {
+      (buffer as { mapAsync: GPUBuffer["mapAsync"] }).mapAsync = () => Promise.reject(new Error("device lost"));
+    }
+    return buffer;
+  });
+  const errors: Array<{ code: string; message: string }> = [];
+  gpu.onError((error) => { errors.push(error); });
+  const vis = gpu.visibility();
+  const q = vis.query("statue");
+  const scene = gpu.target({ size: [4, 4], depth: true });
+
+  gpu.frame((frame) => frame.pass({ target: scene, visibility: vis }, (p) => p.occlusion(q, () => undefined)));
+  await gpu.settled();
+
+  // Dropped readback: no state change (never a silent "hidden"), but not swallowed either.
+  expect(q.state).toBe("unknown");
+  expect(q.hidden).toBe(false);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toMatchObject({ code: "VGPU-QUERY-READBACK", message: expect.stringContaining("vgpu.visibility") });
+  vis.dispose();
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
+test("gpu.dispose() releases visibility instances created by that gpu", async () => {
+  const gpu = await init();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const vis = gpu.visibility();
+  const q = vis.query("statue");
+  const scene = gpu.target({ size: [4, 4], depth: true });
+  gpu.frame((frame) => frame.pass({ target: scene, visibility: vis }, (p) => p.occlusion(q, () => undefined)));
+  await gpu.settled();
+
+  gpu.dispose();
+  expect(destroyed).toEqual([0]);
+  expect(() => vis.query("tower")).toThrowError(/VGPU-VIS-DISPOSED|disposed/);
+  expect(() => vis.dispose()).not.toThrow();
+  vi.restoreAllMocks();
+});
+
+test("two frames open at once each retain the query set; the newest frame's results still apply", async () => {
+  const gpu = await init();
+  const destroyed: number[] = [];
+  spyQuerySetDestroys(gpu.device.gpu, destroyed);
+  const vis = gpu.visibility({ capacity: 4 });
+  const statue = vis.query("statue");
+  const scene = gpu.target({ size: [4, 4], depth: true });
+
+  const first = gpu.frame();
+  first.pass({ target: scene, visibility: vis }, (p) => p.occlusion(statue, () => undefined));
+  const second = gpu.frame();
+  second.pass({ target: scene, visibility: vis }, (p) => p.occlusion(statue, () => undefined));
+
+  // Submitting the older frame first must not release the newer frame's retain, and it reads nothing
+  // back: the current frame identity is `second`, so the stale frame's results are discarded.
+  first.submit();
+  second.submit();
+  await gpu.settled();
+  // The newest frame's readback applied (the mock resolves query index 0 as 0 samples), so the handle
+  // moved off "unknown" — one frame's results, not two, and no lost readback.
+  expect(statue.state).toBe("hidden");
+
+  vis.dispose();
+  expect(destroyed).toEqual([0]);
+  gpu.dispose();
+  vi.restoreAllMocks();
+});
+
 type EncodeOp = readonly [name: string, ...args: unknown[]];
 
 interface FrameEncoderOps {
