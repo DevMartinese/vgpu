@@ -68,9 +68,10 @@ cube.draw(target);
 
 Everything works like the rest of vgpu: bindings are reflected from the WGSL, `set()` writes uniforms by name, and the draw renders one-shot into any target. Pipelines are compiled per target format and cached, so the same `Draw` can render into different targets. See [Compilation](/concepts/compilation) to pre-warm each signature before the first draw.
 
-Two details specific to geometry:
+Three details specific to geometry:
 
-- 3D needs a depth buffer, and surfaces don't have one — render into a `gpu.target({ depth: true })` and composite it to the canvas. [Effects](/concepts/effects) and [Passes](/concepts/passes) show how.
+- 3D needs a depth buffer, and surfaces don't have one — render into a `gpu.target({ depth: true })` and composite it to the canvas. [Effects](/concepts/effects) and [Passes](/concepts/passes) show how. Deep scenes fight z-fighting with reversed-Z: `depth: { compare: "greater" }` on the draw, `clearDepth: 0` on the pass.
+- A closed mesh like this box never shows its back faces — add `cull: "back"` to the draw and skip roughly half the fragment work.
 - `MeshLike` is an open interface: `gpu.mesh()` builds one from `vgpu/scene` geometry, but you can also pass your own `GPUBuffer`s and vertex layouts. See the [reference](/reference/vgpu/draw#meshlike).
 
 ## No mesh? You spawn triangles
