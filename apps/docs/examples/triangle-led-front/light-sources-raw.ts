@@ -59,7 +59,7 @@ export function createLightSourcesRaw(
     simSize,
     LED_EMITTER_MESH_EXPANSION_PX,
   );
-  const ledMesh = gpu.mesh({
+  const ledGeometry = gpu.geometry({
     label: 'triangle-led-front-led-emitters',
     buffers: [{
       data: ledVertices.buffer as ArrayBuffer,
@@ -81,7 +81,7 @@ export function createLightSourcesRaw(
   const ledEmittersDraw = gpu.draw({
     shader: ledEmittersWgsl,
     label: 'triangle-led-front-led-emitters-pass',
-    mesh: ledMesh,
+    geometry: ledGeometry,
     blend: {
       color: { src: 'one', dst: 'zero' },
       alpha: { src: 'one', dst: 'one', op: 'min' },
@@ -149,7 +149,7 @@ export function createLightSourcesRaw(
     },
     destroy() {
       (target as { destroy?: () => void }).destroy?.();
-      ledMesh.destroy();
+      ledGeometry.destroy();
     },
   };
 }

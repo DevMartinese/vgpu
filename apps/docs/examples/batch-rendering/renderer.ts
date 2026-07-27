@@ -1,4 +1,4 @@
-import type { Bundle, Draw, Effect, Frame, Gpu, Mesh, Surface, Target } from 'vgpu';
+import type { Bundle, Draw, Effect, Frame, Gpu, Geometry, Surface, Target } from 'vgpu';
 import { perspectiveCamera } from 'vgpu/scene';
 import sceneWgsl from './scene.wgsl';
 import blitWgsl from './blit.wgsl';
@@ -7,7 +7,7 @@ import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOpti
 
 type Output = Surface | Target;
 interface ThumbOptions extends ThumbnailOptions {}
-interface Scene { mesh: Mesh; draws: readonly Draw[]; bundle: Bundle }
+interface Scene { geometry: Geometry; draws: readonly Draw[]; bundle: Bundle }
 const CLEAR = [0.008, 0.014, 0.035, 1] as const;
 
 export function createRenderer(options: BrowserRendererOptions): ExampleRenderer {
@@ -61,7 +61,7 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     observer?.disconnect();
     observer = undefined;
     if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
-    scene?.mesh.destroy();
+    scene?.geometry.destroy();
     scene = undefined;
     (target as { destroy?: () => void } | undefined)?.destroy?.();
     target = undefined;
@@ -82,7 +82,7 @@ export function createRenderer(options: BrowserRendererOptions): ExampleRenderer
     blit = createBlit(gpu, target, surface);
     const nextScene = await createScene(gpu, target);
     if (disposed) {
-      nextScene.mesh.destroy();
+      nextScene.geometry.destroy();
       return;
     }
     scene = nextScene;
@@ -128,7 +128,7 @@ export async function renderThumbnail(gpu: Gpu, output: Target, opts: ThumbOptio
       Promise.resolve().then(() => gpu.gpu.queue.onSubmittedWorkDone()),
       Promise.resolve().then(() => gpu.settled()),
     ]);
-    scene?.mesh.destroy();
+    scene?.geometry.destroy();
     (target as { destroy?: () => void }).destroy?.();
   }
 }
@@ -141,15 +141,15 @@ async function createScene(gpu: Gpu, target: Target): Promise<Scene> {
   for (const group of groups) { data.set(group, offset); offset += group.length; }
   if (counts.some((count) => count % 3) || counts.reduce((a, b) => a + b, 0) !== data.length / 9) throw new Error('Invalid packed triangle ranges.');
 
-  const mesh = gpu.mesh({
+  const geometry = gpu.geometry({
     label: 'batch-rendering-packed-primitives',
     buffers: [{ data, stride: 36, attributes: { position: 'float32x3', normal: 'float32x3', color: 'float32x3' } }],
   });
   try {
-    const slices = counts.map((vertexCount, i) => mesh.slice({
+    const slices = counts.map((vertexCount, i) => geometry.slice({
       firstVertex: counts.slice(0, i).reduce((a, b) => a + b, 0), vertexCount, label: ['cubes', 'pyramids', 'octahedra', 'icosahedra'][i],
     }));
-    const draws = slices.map((slice, i) => gpu.draw({ shader: sceneWgsl, mesh: slice, label: `batch-${i}` }));
+    const draws = slices.map((slice, i) => gpu.draw({ shader: sceneWgsl, geometry: slice, label: `batch-${i}` }));
     const initial = camera(2.4, target);
     for (const draw of draws) draw.set({ light: [-0.45, -0.75, -0.35], time: 2.4, viewProjection: initial });
     await Promise.all(draws.map((draw) => draw.compile(target)));
@@ -161,9 +161,9 @@ async function createScene(gpu: Gpu, target: Target): Promise<Scene> {
       b.draw(draws[2]!);
       b.draw(draws[3]!);
     });
-    return { mesh, draws, bundle };
+    return { geometry, draws, bundle };
   } catch (error) {
-    mesh.destroy();
+    geometry.destroy();
     throw error;
   }
 }

@@ -25,7 +25,7 @@ user WGSL can plug into, and a renderer that maps the tree onto vgpu's existing 
 ## Design principles
 
 - **Pure tree, explicit GPU binding.** Nodes/cameras/materials are plain JS state with no GPU
-  resources, mirroring how `SceneGeometry` is pure until `gpu.mesh()`. GPU work happens only
+  resources, mirroring how `SceneGeometry` is pure until `gpu.geometry()`. GPU work happens only
   when a tree is bound via `gpu.scene(root, opts)`.
 - **Stable identities.** World matrices, camera matrices, and light blocks live in stable
   `Float32Array`s updated in place, so bind groups and bundles stay valid across frames.
@@ -230,15 +230,22 @@ How it maps to the perf playbook (this is the point of doing it in-library):
   drawn last back-to-front. Frustum culling and opaque front-to-back sorting are phase 3,
   behind flags with `view.stats` to prove wins.
 
-## Naming decisions to confirm
+## Naming decisions (settled in 0.2.0)
 
-1. **`mesh(geometry, material)` factory vs existing `Mesh` class.** `vgpu/scene` currently
-   exports the low-level buffer-descriptor class `Mesh`. Proposal: the scene-tree node takes
-   the `mesh()` name (three.js-familiar); the descriptor class stops being exported from
-   `vgpu/scene` (it stays reachable as `gpu.mesh(options)` / `MeshLike` on the main surface).
-   Breaking at 0.1.x.
+1. **`mesh(geometry, material)` factory vs the old `Mesh` class — settled by renaming the
+   resource.** `Mesh` now means the renderable scene-tree node (three.js acception); the
+   low-level GPU buffer resource was renamed to `Geometry`. The whole family moved in one
+   clean break — no deprecated aliases: `Mesh` → `Geometry`, `MeshOptions` →
+   `GeometryOptions`, `MeshBuffer(Options)` → `GeometryBuffer(Options)`, `MeshSlice(Options)`
+   → `GeometrySlice(Options)`, `MeshAttributes`/`MeshAttributeOverride`/`MeshData` →
+   `Geometry*`, `MeshLike` → `GeometryLike`, `gpu.mesh()` → `gpu.geometry()`,
+   `DrawOptions.mesh` → `DrawOptions.geometry`, and the `SceneMesh` alias was deleted
+   (`vgpu/scene` re-exports the `Geometry` type instead). `SceneGeometry` (the pure CPU
+   recipe) keeps its name; the `VGPU-MESH-*` error codes keep theirs (scope-bound), while
+   their messages teach the new names. Breaking at 0.2.0.
 2. **`gpu.scene(root, opts)`** as the binding point (vs a standalone `renderer(gpu, …)`);
-   follows the `gpu.*` factory convention and the existing `gpu.mesh(sceneGeometry)` bridge.
+   follows the `gpu.*` factory convention and the existing `gpu.geometry(sceneGeometry)`
+   bridge.
 3. **Auto-aspect** from target unless `aspect` is explicit.
 
 ## Phases

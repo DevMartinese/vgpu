@@ -58,7 +58,7 @@ function createEffects(gpu: Gpu, label: string): AaEffects {
     scene: gpu.draw({
       shader: sceneWgsl,
       label: `${label}-scene`,
-      mesh: {
+      geometry: {
         vertexBuffers: [buffer.gpu],
         vertexBufferLayouts: [{
           arrayStride: 12,

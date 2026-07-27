@@ -1,4 +1,4 @@
-import type { Draw, Effect, Frame, Gpu, Mesh, Surface, Target } from 'vgpu';
+import type { Draw, Effect, Frame, Gpu, Geometry, Surface, Target } from 'vgpu';
 import type { Texture } from 'vgpu/core';
 import { box } from 'vgpu/scene';
 
@@ -52,7 +52,7 @@ const METAL = {
 interface Scene {
   readonly env: Texture;
   readonly hdr: Target;
-  readonly mesh: Mesh;
+  readonly geometry: Geometry;
   readonly cube: Draw;
   readonly present: Effect;
 }
@@ -213,15 +213,15 @@ async function createScene(gpu: Gpu, output: Output): Promise<Scene> {
 
   const env = await bakeEnvironment(gpu, envSampler);
 
-  const mesh = gpu.mesh(box({ size: CUBE_SIZE }));
-  const cube = gpu.draw({ shader: metalWgsl, mesh, label: 'environment-map-metal' });
+  const geometry = gpu.geometry(box({ size: CUBE_SIZE }));
+  const cube = gpu.draw({ shader: metalWgsl, geometry, label: 'environment-map-metal' });
   cube.set({ ...METAL, env_tex: env, env_samp: envSampler });
 
   const present = gpu.effect(presentWgsl, { label: 'environment-map-present' });
   present.set({ env_tex: env, env_samp: envSampler, scene_tex: hdr, scene_samp: sceneSampler });
 
   await Promise.all([cube.compile(hdr), present.compile({ colors: [output.format] })]);
-  return { env, hdr, mesh, cube, present };
+  return { env, hdr, geometry, cube, present };
 }
 
 /**

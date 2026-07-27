@@ -1,4 +1,4 @@
-import type { Draw, Effect, Frame, Gpu, MeshLike, Surface, Target } from 'vgpu';
+import type { Draw, Effect, Frame, Gpu, GeometryLike, Surface, Target } from 'vgpu';
 import { perspectiveCamera, sphere } from 'vgpu/scene';
 
 import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
@@ -27,8 +27,8 @@ interface Maps {
 }
 
 interface Scene {
-  readonly earthMesh: MeshLike;
-  readonly atmosphereMesh: MeshLike;
+  readonly earthGeometry: GeometryLike;
+  readonly atmosphereGeometry: GeometryLike;
   readonly earth: Draw;
   readonly atmosphere: Draw;
   readonly sky: Effect;
@@ -214,15 +214,15 @@ function createMaps(gpu: Gpu, label: string): Maps {
 }
 
 function createScene(gpu: Gpu, maps: Maps, label: string): Scene {
-  const earthMesh = gpu.mesh(sphere(EARTH_TUNING.planet));
-  const atmosphereMesh = gpu.mesh(sphere(EARTH_TUNING.atmosphere));
+  const earthGeometry = gpu.geometry(sphere(EARTH_TUNING.planet));
+  const atmosphereGeometry = gpu.geometry(sphere(EARTH_TUNING.atmosphere));
   return {
-    earthMesh,
-    atmosphereMesh,
-    earth: gpu.draw({ shader: earthWgsl, mesh: earthMesh, label: `${label}-earth` }),
+    earthGeometry,
+    atmosphereGeometry,
+    earth: gpu.draw({ shader: earthWgsl, geometry: earthGeometry, label: `${label}-earth` }),
     // `alpha` blending over the transparent clear is what turns the shell's
     // fresnel alpha into the rim glow, and leaves coverage in the target's alpha.
-    atmosphere: gpu.draw({ shader: atmosphereWgsl, mesh: atmosphereMesh, blend: 'alpha', label: `${label}-atmosphere` }),
+    atmosphere: gpu.draw({ shader: atmosphereWgsl, geometry: atmosphereGeometry, blend: 'alpha', label: `${label}-atmosphere` }),
     sky: gpu.effect(skyWgsl, { label: `${label}-sky` }),
     overlay: gpu.effect(overlayWgsl, { blend: 'premultiplied', label: `${label}-overlay` }),
     bright: gpu.effect(brightPassWgsl, { label: `${label}-bright` }),
@@ -408,8 +408,8 @@ function resizeTargets(targets: Targets, size: readonly [number, number]): void 
 }
 
 function destroyScene(scene: Scene): void {
-  (scene.earthMesh as { destroy?: () => void }).destroy?.();
-  (scene.atmosphereMesh as { destroy?: () => void }).destroy?.();
+  (scene.earthGeometry as { destroy?: () => void }).destroy?.();
+  (scene.atmosphereGeometry as { destroy?: () => void }).destroy?.();
 }
 
 function destroyTargets(targets: Targets): void {

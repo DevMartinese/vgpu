@@ -49,7 +49,7 @@ function createEffects(gpu: Gpu, label: string): EffectChain {
     scene: gpu.draw({
       shader: sceneWgsl,
       label: `${label}-scene`,
-      mesh: {
+      geometry: {
         vertexBuffers: [buffer.gpu],
         vertexBufferLayouts: [{
           arrayStride: 24,

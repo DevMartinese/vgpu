@@ -1,9 +1,9 @@
-import type { Bundle, Draw, Effect, Frame, Gpu, Mesh, Surface, Target } from 'vgpu';
+import type { Bundle, Draw, Effect, Frame, Gpu, Geometry, Surface, Target } from 'vgpu';
 import { perspectiveCamera } from 'vgpu/scene';
 import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '../../lib/example-renderer';
 import { DEFAULT_INSTANCED_RENDERING_CONTROLS, type InstanceCount, type InstancedRenderingControls } from './types';
 import sceneWgsl from './scene.wgsl'; import blitWgsl from './blit.wgsl';
-type Output = Surface | Target; interface ThumbOptions extends ThumbnailOptions {} interface Scene { mesh: Mesh; draw: Draw; bundle: Bundle; extent: number }
+type Output = Surface | Target; interface ThumbOptions extends ThumbnailOptions {} interface Scene { geometry: Geometry; draw: Draw; bundle: Bundle; extent: number }
 const CLEAR = [0.008, 0.014, 0.035, 1] as const;
 const validCount = (count: number): count is InstanceCount => count === 50 || count === 100;
 
@@ -16,10 +16,10 @@ export function createRenderer(options: BrowserRendererOptions<InstancedRenderin
  const resize = (size: RenderSize) => { if (disposed || size.width <= 0 || size.height <= 0) return; pendingSize = size; if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize); };
  const measure = () => { const rect = options.canvas.getBoundingClientRect(); resize({ width: rect.width, height: rect.height, dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)) }); };
  const onWindowResize = () => { if (window.devicePixelRatio === lastDpr) return; lastDpr = window.devicePixelRatio; measure(); };
- const rebuild = (count: InstanceCount, buildGeneration: number) => { if (!gpu || !target || disposed) return; void createScene(gpu, target, count).then((next) => { if (disposed || buildGeneration !== generation) { next.mesh.destroy(); return; } scene?.mesh.destroy(); scene = next; }, (error: unknown) => { if (disposed || buildGeneration !== generation) return; fail(error); }); };
+ const rebuild = (count: InstanceCount, buildGeneration: number) => { if (!gpu || !target || disposed) return; void createScene(gpu, target, count).then((next) => { if (disposed || buildGeneration !== generation) { next.geometry.destroy(); return; } scene?.geometry.destroy(); scene = next; }, (error: unknown) => { if (disposed || buildGeneration !== generation) return; fail(error); }); };
  const setControls = (next: Readonly<InstancedRenderingControls>) => { if (disposed || !validCount(next.count) || next.count === controls.count) return; controls = { count: next.count }; const buildGeneration = ++generation; if (!initializing) rebuild(controls.count, buildGeneration); };
- const dispose = () => { if (disposed) return; disposed = true; generation++; loop?.stop(); loop = undefined; if (resizeFrame) cancelAnimationFrame(resizeFrame); resizeFrame = 0; pendingSize = undefined; observer?.disconnect(); observer = undefined; if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize); scene?.mesh.destroy(); scene = undefined; (target as { destroy?: () => void } | undefined)?.destroy?.(); target = undefined; surface?.dispose(); surface = undefined; gpu?.dispose(); gpu = undefined; };
- const initialize = async () => { const { init } = await import('vgpu'); if (disposed) return; const nextGpu = await init(); if (disposed) { nextGpu.dispose(); return; } gpu = nextGpu; surface = gpu.surface(options.canvas, { dpr: [1, 2] }); target = gpu.target({ size: surface.size, format: 'rgba8unorm', depth: true }); blit = createBlit(gpu, target, surface); while (!disposed) { const buildGeneration = generation; let nextScene: Scene; try { nextScene = await createScene(gpu, target, controls.count); } catch (error) { if (disposed) return; if (buildGeneration !== generation) continue; throw error; } if (disposed) { nextScene.mesh.destroy(); return; } if (buildGeneration !== generation) { nextScene.mesh.destroy(); continue; } scene = nextScene; break; } if (disposed) return; initializing = false; observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure); observer?.observe(options.canvas); window.addEventListener('resize', onWindowResize); measure(); loop = gpu.frame.loop((frame) => { if (!disposed && scene && blit && target && surface && gpu) render(frame, scene, blit, target, surface, gpu.time); }); };
+ const dispose = () => { if (disposed) return; disposed = true; generation++; loop?.stop(); loop = undefined; if (resizeFrame) cancelAnimationFrame(resizeFrame); resizeFrame = 0; pendingSize = undefined; observer?.disconnect(); observer = undefined; if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize); scene?.geometry.destroy(); scene = undefined; (target as { destroy?: () => void } | undefined)?.destroy?.(); target = undefined; surface?.dispose(); surface = undefined; gpu?.dispose(); gpu = undefined; };
+ const initialize = async () => { const { init } = await import('vgpu'); if (disposed) return; const nextGpu = await init(); if (disposed) { nextGpu.dispose(); return; } gpu = nextGpu; surface = gpu.surface(options.canvas, { dpr: [1, 2] }); target = gpu.target({ size: surface.size, format: 'rgba8unorm', depth: true }); blit = createBlit(gpu, target, surface); while (!disposed) { const buildGeneration = generation; let nextScene: Scene; try { nextScene = await createScene(gpu, target, controls.count); } catch (error) { if (disposed) return; if (buildGeneration !== generation) continue; throw error; } if (disposed) { nextScene.geometry.destroy(); return; } if (buildGeneration !== generation) { nextScene.geometry.destroy(); continue; } scene = nextScene; break; } if (disposed) return; initializing = false; observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure); observer?.observe(options.canvas); window.addEventListener('resize', onWindowResize); measure(); loop = gpu.frame.loop((frame) => { if (!disposed && scene && blit && target && surface && gpu) render(frame, scene, blit, target, surface, gpu.time); }); };
  const ready = initialize().catch((error: unknown) => { if (disposed) return; fail(error); throw error; });
  return { ready, setControls, invalidate() {}, resize, dispose };
 }
@@ -30,26 +30,26 @@ export async function renderThumbnail(gpu: Gpu, output: Target, opts: ThumbOptio
   target = gpu.target({ size: output.size, format: 'rgba8unorm', depth: true }); const blit = createBlit(gpu, target, output); scene = await createScene(gpu, target, DEFAULT_INSTANCED_RENDERING_CONTROLS.count); await blit.compile(output); let time = opts.time ?? 2.4;
   for (let i = 0; i < (opts.warmupFrames ?? 3); i++) { time += opts.dt ?? 1 / 60; gpu.frame((frame) => render(frame, scene!, blit, target!, output, time)); }
  } finally {
-  await Promise.allSettled([gpu.gpu.queue.onSubmittedWorkDone(), gpu.settled()]); scene?.mesh.destroy(); (target as (Target & { destroy?: () => void }) | undefined)?.destroy?.();
+  await Promise.allSettled([gpu.gpu.queue.onSubmittedWorkDone(), gpu.settled()]); scene?.geometry.destroy(); (target as (Target & { destroy?: () => void }) | undefined)?.destroy?.();
  }
 }
 
 async function createScene(gpu: Gpu, target: Target, n: number): Promise<Scene> {
-  const mesh = gpu.mesh({
+  const geometry = gpu.geometry({
     label: `instanced-cubes-${n}`,
     buffers: [
       { data: cubeVertices().buffer as ArrayBuffer, stride: 24, attributes: { local_position: 'float32x3', local_normal: 'float32x3' } },
       { data: makeInstances(n).buffer as ArrayBuffer, stride: 28, stepMode: 'instance', attributes: { i_position: 'float32x3', i_color: 'float32x3', i_seed: 'float32' } },
     ],
   });
-  const draw = gpu.draw({ shader: sceneWgsl, mesh, label: `instanced-cubes-${n}` });
+  const draw = gpu.draw({ shader: sceneWgsl, geometry, label: `instanced-cubes-${n}` });
   draw.set({ light: [-0.45, -0.75, -0.35] });
   try {
     await draw.compile(target);
     const bundle = gpu.bundle({ target, label: `instanced-cubes-${n}` }, (b) => b.draw(draw));
-    return { mesh, draw, bundle, extent: n * 0.64 };
+    return { geometry, draw, bundle, extent: n * 0.64 };
   } catch (error) {
-    mesh.destroy();
+    geometry.destroy();
     throw error;
   }
 }

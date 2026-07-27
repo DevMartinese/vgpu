@@ -48,7 +48,7 @@ huge wheel delta with unbounded max distance drives distance to Infinity.
 ## 2. WebGPU features the API currently hides
 
 The audit diffed the scene surface (and the planned SceneView contract) against
-`DrawOptions`/`TargetOptions`/`gpu.mesh` and native WebGPU. Grouped by decision:
+`DrawOptions`/`TargetOptions`/`gpu.geometry` and native WebGPU. Grouped by decision:
 
 ### Blocks phase 2's own plan (must land in phase 2)
 
@@ -68,10 +68,11 @@ The audit diffed the scene surface (and the planned SceneView contract) against
 - **Geometry contract is a closed union** — `mesh()` only takes `SceneGeometry` (15
   primitives, position/normal/uv pinned). Custom vertex data, vertex colors, tangents
   (needed by phase-4 PBR normal mapping), skinning weights, morph targets, non-triangle
-  topologies, index formats, and mesh slices (glTF multi-primitive) are unreachable —
+  topologies, index formats, and geometry slices (glTF multi-primitive) are unreachable —
   **loadGltf cannot be built on this contract**. → Widen to
-  `mesh(geometry: SceneGeometry | Mesh | MeshSlice, …)` accepting `gpu.mesh` objects
-  directly; renderer keys pipelines on the mesh's own layouts/topology. Reserved locations
+  `mesh(geometry: SceneGeometry | Geometry | GeometrySlice, …)` accepting `gpu.geometry()`
+  objects directly (0.2.0 names); renderer keys pipelines on the geometry's own
+  layouts/topology. Reserved locations
   0–2 stay pinned; custom attributes start at `@location(3)` and reach shaderMaterial vertex
   stages by name.
 - **Custom materials can't reach scene lights** — since `@group(0)` is renderer-owned,
