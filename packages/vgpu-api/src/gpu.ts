@@ -4,7 +4,7 @@ import { Device, validateRequiredFeatures } from "@vgpu/core";
 import { createBindGroupCache } from "./bind-cache.ts";
 import { createBundle, type Bundle, type BundleOptions, type BundleRecorder } from "./bundle.ts";
 import { InternalDraw, type Draw, type DrawOptions } from "./draw.ts";
-import { Frame, FrameRunner } from "./frame.ts";
+import { Frame, FrameRunner, type FrameLoopHandle } from "./frame.ts";
 import { InternalEffect, type Effect, type EffectOptions } from "./effect.ts";
 import { createSamplerCache } from "./sampler.ts";
 import { mesh as createSceneMesh } from "./scene/mesh.ts";
@@ -111,6 +111,8 @@ class RingGpu implements Gpu {
   /** Query-based features created by this gpu, disposed with it (each drops itself on its own dispose()). */
   readonly #timers = new Set<Timer>();
   readonly #visibilities = new Set<Visibility>();
+  /** Render loops started through gpu.frame.loop(), stopped with the gpu (each drops itself when it stops on its own). */
+  readonly #loops = new Set<FrameLoopHandle>();
   readonly #settledSources = new Set<SettledSource>();
   #disposed = false;
   #advancing = false;
@@ -123,7 +125,7 @@ class RingGpu implements Gpu {
     this.#shaderModules = createShaderModuleCache(device);
     this.#pipelineLayouts = createPipelineLayoutCache(device);
     this.#samplers = createSamplerCache(device);
-    const runner = new FrameRunner(() => new Frame(device, undefined, (error) => this.#reportError(error), (promise) => this.#trackDelivery(promise), () => this.#clearColorValue), () => this.#advanceFrameState());
+    const runner = new FrameRunner(() => new Frame(device, undefined, (error) => this.#reportError(error), (promise) => this.#trackDelivery(promise), () => this.#clearColorValue), () => this.#advanceFrameState(), (handle) => this.#registerLoop(handle));
     this.frame = callableFrameRunner(runner);
   }
 
@@ -161,6 +163,10 @@ class RingGpu implements Gpu {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    // Stop scheduling first: a loop left running would keep encoding frames against a disposed
+    // device (and a rAF tick landing mid-teardown would throw from inside the scheduler).
+    for (const loop of [...this.#loops]) loop.stop();
+    this.#loops.clear();
     for (const surface of [...this.#surfaces.values()]) surface.dispose();
     // Query features own a query set plus resolve/staging buffers: release them with the gpu that made them.
     for (const timer of [...this.#timers]) timer.dispose();
@@ -213,6 +219,11 @@ class RingGpu implements Gpu {
       ...[...this.#settledSources].flatMap((source) => source()),
     ];
     await Promise.allSettled(snapshot);
+  }
+
+  #registerLoop(handle: FrameLoopHandle): () => void {
+    this.#loops.add(handle);
+    return () => { this.#loops.delete(handle); };
   }
 
   #registerSettledSource(source: SettledSource): () => void {

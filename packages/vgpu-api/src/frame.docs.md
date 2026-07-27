@@ -41,6 +41,7 @@ declare class Frame {
   pass(target: Target, body: Effect | Draw | ((pass: FramePass) => void)): void;
   pass(options: FramePassOptions, body: Effect | Draw | ((pass: FramePass) => void)): void;
   submit(): void;
+  cancel(): void;
 }
 
 declare class FramePass {
@@ -81,7 +82,7 @@ declare class FrameRunner {
 | runner.loop.cb | `(frame: Frame) => void` | ✔ | — | Called on each scheduled frame; frame is submitted in `finally`. Surface auto-resize runs before this callback. |
 | runner.loop.opts.fps | `number` | ✖ | `0` (uncapped) | Positive values cap by minimum frame interval `1000 / fps`; omitted or non-positive uses every rAF/timer tick. |
 
-**Returns:** `gpu.frame()` / `FrameRunner.frame()` return `Frame`; `Frame.pass()` and `Frame.submit()` return `void`; `FramePass.draw()`, `.occlusion()`, and `.bundles()` return `void`; `loop()` returns `FrameLoopHandle` with `stop()`.
+**Returns:** `gpu.frame()` / `FrameRunner.frame()` return `Frame`; `Frame.pass()`, `Frame.submit()`, and `Frame.cancel()` return `void`; `FramePass.draw()`, `.occlusion()`, and `.bundles()` return `void`; `loop()` returns `FrameLoopHandle` with `stop()`.
 
 **Throws:**
 
@@ -106,6 +107,9 @@ declare class FrameRunner {
 - `VGPU-QUERY-NESTED` — `occlusion()` inside an active `occlusion()` body; one scope at a time. Close the outer scope first.
 - `VGPU-QUERY-DUPLICATE` — a handle used twice within one frame, across passes too (see `Visibility`). Create one handle per queried object.
 - `VGPU-FRAME-REENTRANT` — a frame started from another frame or from a surface resize callback. Encode everything in one frame callback.
+- `VGPU-FRAME-CANCELED` — a `frame.pass(...)`, or a retained `FramePass` operation, on a frame closed by `cancel()`; its command encoder was dropped, so the work would never run. Open a new `gpu.frame()`.
+- `VGPU-FRAME-PASS-ACTIVE` — `frame.cancel()` from inside that frame's active pass callback. Return from `frame.pass(...)` first, then cancel, so resources referenced by the native pass descriptor stay alive until the pass closes.
+- `VGPU-FRAME-SUBMITTED` — `frame.cancel()` on a frame that was already submitted; queued GPU work cannot be taken back, and the frame needs no cleanup. Cancel only frames you decided not to submit.
 - `VGPU-R3-BUNDLE-STALE` / `VGPU-R3-BUNDLE-INVALID` — replaying a bundle whose recorded resources changed identity, or a value not created by `gpu.bundle`. Re-record the bundle.
 - Binding errors such as `VGPU-R1-BINDING-NEVER-SET` propagate during encoding. Raw claimed-group validation is delivered asynchronously through `gpu.onError`.
 
@@ -191,6 +195,29 @@ gpu.frame((frame) => {
 
 Soft particles: pass 2 depth-tests against the opaque depth while sampling the same `scene.depth` texture, which WebGPU only allows because the attachment is read-only.
 
+```ts
+import { init } from "vgpu/mock";
+
+const gpu = await init();
+const scene = gpu.target({ size: [64, 64], depth: true });
+const vis = gpu.visibility();
+const proxy = gpu.effect(`@fragment fn fs_main() -> @location(0) vec4f { return vec4f(1); }`);
+
+const frame = gpu.frame(); // manual frame: nothing submits it for you
+frame.pass({ target: scene, visibility: vis }, (pass) => pass.occlusion(vis.query("statue"), proxy));
+
+if (sceneChangedUnderneath()) {
+  frame.cancel(); // no GPU work runs, and the occlusion query set stops being retained for this frame
+  vis.dispose(); // released now instead of at gpu.dispose()
+} else {
+  frame.submit();
+}
+
+function sceneChangedUnderneath(): boolean { return true; }
+```
+
+Cancelling a manual frame: `cancel()` drops the encoder and releases the telemetry retains the frame took, so a `gpu.timer()` / `gpu.visibility()` can be disposed for good without submitting work you no longer want.
+
 ## Notes
 
 - `Frame`, `FramePass`, and `FrameRunner` are type-only public exports. Create frames through `gpu.frame`, not `new Frame(...)`.
@@ -200,6 +227,8 @@ Soft particles: pass 2 depth-tests against the opaque depth while sampling the s
 - `viewport` and `scissor` are set once right after the pass opens and apply to every draw in the pass, including replayed bundles. Both are in physical pixels: surfaces size their textures by `devicePixelRatio`, so a CSS-pixel rectangle must be scaled by dpr.
 - `clear: false` preserves color and depth contents within the same target. On `Surface`, repeated passes in one frame layer onto the same current texture; the first preserved surface pass of a new browser frame reads the swapchain's fresh contents, not the previous frame's image.
 - **Hot loops:** options bags and pass callbacks are read synchronously, so you can hoist and reuse them. For zero-per-frame-JS-cost replay, record stable work with `gpu.bundle` and replay the bundle.
+- `frame.cancel()` discards a frame you decided not to submit: its command encoder is dropped, so nothing it encoded ever runs, and every `gpu.timer()` / `gpu.visibility()` attached to it releases the query set it was holding for that frame — no result, no phantom timing, no phantom `"hidden"`. It is the explicit way out of the retain a manual `gpu.frame()` otherwise keeps until `gpu.dispose()`: a frame is never assumed abandoned, because an old frame can still be submitted. Frames run by `gpu.frame(cb)` / `gpu.frame.loop(cb)` submit themselves and need no cancel.
+- Cancelling is idempotent, like submitting: a second `cancel()` does nothing, and `submit()` after `cancel()` is a no-op — so calling `cancel()` in a `gpu.frame(cb)` callback after its `frame.pass(...)` calls have returned is safe, the runner's submit in `finally` simply finds a closed frame. `cancel()` from inside an active pass callback throws `VGPU-FRAME-PASS-ACTIVE`, because the native pass descriptor still references its telemetry resources; return from `frame.pass(...)` before canceling. The reverse is also an error: `cancel()` after `submit()` throws `VGPU-FRAME-SUBMITTED` (the work is already on the queue and cannot be taken back), and `pass()` or a retained `FramePass` operation after `cancel()` throws `VGPU-FRAME-CANCELED` (it would encode into a dropped encoder and silently never run).
 - `frame.done` is resolve-only. Await it as a completion/timing signal for readbacks, benchmarks, deterministic tests, or teardown; use `gpu.onError` plus `await gpu.settled()` for asynchronous errors.
 - Do not `await frame.done` inside a RAF/frame loop. Schedule the next frame as soon as `gpu.frame()` returns, or you serialize CPU and GPU work.
 - **See also:** `Gpu.frame`, `Surface`, `Effect`, `Draw`, `Bundle`, `Target`, `Timer`, `Visibility`.

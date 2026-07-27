@@ -5,7 +5,7 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { drawStencilWritingOps, drawWritesDepth, encodeDraw, type Draw, type DrawCallOptions, type InternalDraw } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passDepthReadOnlyMsaaError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, queryNestedError, queryNoVisibilityError, surfaceNotInFrameError, targetRequiredError, timerInvalidError, visibilityInvalidError, visibilityNoDepthError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameAlreadySubmittedError, frameCanceledError, framePassActiveError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passDepthReadOnlyMsaaError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, queryNestedError, queryNoVisibilityError, surfaceNotInFrameError, targetRequiredError, timerInvalidError, visibilityInvalidError, visibilityNoDepthError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
 import { isTimerSpan, type InternalTimer, type TimerSpan } from "./timer.ts";
@@ -38,14 +38,6 @@ export interface FramePassOptions {
   readonly visibility?: Visibility;
 }
 
-/**
- * Frame identity passed to a telemetry instance's finalizeFrame to *clear* its pending encoded
- * state instead of encoding: finalizeFrame drops that state before it compares frame identities,
- * so a foreign token clears and returns without touching the encoder. Frame.#abandonTelemetry
- * pairs it with frameSubmitted to release the query-set retain without a phantom readback.
- */
-const ABANDONED_FRAME: unique symbol = Symbol("vgpu.frame.abandoned");
-
 export interface FrameLoopHandle { stop(): void }
 export interface FrameLoopOptions { readonly fps?: number }
 export type FrameLoopCallback = (frame: Frame) => void;
@@ -71,6 +63,8 @@ export class Frame {
    */
   readonly #discardedTelemetry = new Set<InternalTimer | InternalVisibility>();
   #submitted = false;
+  #canceled = false;
+  #passActive = false;
   constructor(
     private readonly device: Device,
     private readonly defaultTarget?: Target,
@@ -84,6 +78,9 @@ export class Frame {
   pass(target: Target, body: Effect | Draw | ((pass: FramePass) => void)): void;
   pass(options: FramePassOptions, body: Effect | Draw | ((pass: FramePass) => void)): void;
   pass(target: Target | FramePassOptions, body: Effect | Draw | ((pass: FramePass) => void)): void {
+    // A canceled frame dropped its encoder: encoding into it would silently never run (and would
+    // re-take the telemetry retains cancel() just released), so reject the call instead.
+    if (this.#canceled) throw frameCanceledError("Frame.pass");
     const targetOnly = isTarget(target);
     const cb = typeof body === "function" ? body : (p: FramePass) => p.draw(body);
     const resolvedTarget = targetOnly ? target : target.target ?? this.defaultTarget;
@@ -150,7 +147,14 @@ export class Frame {
       encoder = this.#encoder.beginRenderPass(descriptor);
       if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
       if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
-      cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true, visibility, this));
+      this.#passActive = true;
+      try {
+        cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true, visibility, this, (where) => {
+          if (this.#canceled) throw frameCanceledError(where);
+        }));
+      } finally {
+        this.#passActive = false;
+      }
     } catch (error) {
       // A failed pass — during setup or in its body — never ran successfully. Leaving telemetry
       // registered makes submit() resolve unwritten queries as phantom results.
@@ -165,7 +169,10 @@ export class Frame {
   }
 
   submit(): void {
-    if (this.#submitted) return;
+    // Closed either way: a re-submit has nothing left to flush, and a canceled frame dropped its
+    // encoder. Both are silent no-ops so `gpu.frame(cb)`'s submit-in-finally never masks a cancel()
+    // (or an exception) from inside the callback.
+    if (this.#submitted || this.#canceled) return;
     this.#submitted = true;
     // Timed and occlusion-queried frames append one resolveQuerySet of each instance's contiguous
     // used range (plus the staging copy) to the still-open frame encoder — zero extra submissions.
@@ -219,19 +226,47 @@ export class Frame {
   }
 
   /**
+   * Discards the frame without submitting it: the command encoder is dropped (nothing this frame
+   * encoded ever runs) and every telemetry instance it attached releases the retain it took on its
+   * query ring, so a `gpu.timer()` / `gpu.visibility()` can be disposed for good without waiting for
+   * `gpu.dispose()`. This is the explicit way out of the leak a manual `gpu.frame()` would otherwise
+   * hold: a frame is never assumed abandoned, because an old frame can still be submitted.
+   *
+   * Idempotent, like `submit()`: cancelling twice is a no-op, and `submit()` after `cancel()` does
+   * nothing. Cancelling a frame that was already submitted throws `VGPU-FRAME-SUBMITTED` — its work
+   * is on the queue and cannot be taken back, so silently accepting the call would hide a real
+   * lifecycle bug.
+   */
+  cancel(): void {
+    if (this.#canceled) return;
+    if (this.#submitted) throw frameAlreadySubmittedError("Frame.cancel");
+    // An active pass descriptor still references telemetry query sets. Releasing their retains here
+    // could destroy them before encoder.end(), and the callback could keep encoding after cancel.
+    if (this.#passActive) throw framePassActiveError("Frame.cancel");
+    this.#canceled = true;
+    // Nothing is finalized and nothing is read back: the encoded passes never reach the queue, so
+    // decoding a resolve would report stale staging bytes as a phantom duration or "hidden".
+    this.#abandonTelemetry(this.#frameTelemetry());
+    this.#timers.clear();
+    this.#visibilities.clear();
+    this.#discardedTelemetry.clear();
+    // The claimed-group validation promises of the dropped encoder are never delivered: no draw of
+    // this frame ran, so any native error they carry is about work that was thrown away.
+    discardClaimedGroupValidationResults(this.#validations);
+    this.#validations.length = 0;
+  }
+
+  /**
    * Ends the frame for telemetry instances that will never see a real frameSubmitted: a pass whose
-   * callback threw, or a frame whose finish/submit failed. Each one took a retain on its query ring
-   * when it was attached to a pass descriptor (so a mid-frame dispose() cannot destroy a set the
-   * frame still points at); without the matching release, a dispose() after the failure leaves the
-   * ring alive forever. Clearing the pending encoded state first is what makes this a release and
-   * not a readback: a resolve that never reached the queue must not be decoded — its staging buffer
-   * holds stale bytes, which would surface as a phantom duration or a phantom "hidden".
+   * callback threw, a frame whose finish/submit failed, or a canceled frame. Each one took a retain
+   * on its query ring when it was attached to a pass descriptor (so a mid-frame dispose() cannot
+   * destroy a set the frame still points at); without the matching release, a dispose() after the
+   * failure leaves the ring alive forever. frameAbandoned() drops the instance's pending encoded
+   * state as it releases: a resolve that never reached the queue must not be decoded — its staging
+   * buffer holds stale bytes, which would surface as a phantom duration or a phantom "hidden".
    */
   #abandonTelemetry(owners: Iterable<InternalTimer | InternalVisibility>): void {
-    for (const owner of owners) {
-      owner.finalizeFrame(ABANDONED_FRAME, this.#encoder);
-      owner.frameSubmitted(this);
-    }
+    for (const owner of owners) owner.frameAbandoned(this);
   }
 
   /** Every telemetry instance this frame attached, discarded ones included. */
@@ -307,8 +342,9 @@ export class Frame {
 
 export class FramePass {
   #occlusionActive = false;
-  constructor(private readonly encoder: GPURenderPassEncoder, readonly target: Target, private readonly validations: ClaimedGroupValidationResult[], private readonly depthReadOnly = false, private readonly visibility?: InternalVisibility, private readonly frame?: Frame) {}
+  constructor(private readonly encoder: GPURenderPassEncoder, readonly target: Target, private readonly validations: ClaimedGroupValidationResult[], private readonly depthReadOnly = false, private readonly visibility?: InternalVisibility, private readonly frame?: Frame, private readonly assertFrameOpen?: (where: string) => void) {}
   draw(drawable: Draw | Effect, opts: DrawCallOptions = {}): void {
+    this.assertFrameOpen?.("FramePass.draw");
     if (this.depthReadOnly) assertDrawableAllowedInReadOnlyPass(drawable, this.target);
     encodeFrameDrawable(drawable, this.encoder, this.target, opts, (result) => this.validations.push(result));
   }
@@ -317,6 +353,7 @@ export class FramePass {
    * real draws on `q.hidden` outside.
    */
   occlusion(query: VisibilityQuery, body: Draw | Effect | (() => void)): void {
+    this.assertFrameOpen?.("FramePass.occlusion");
     if (!this.visibility) throw queryNoVisibilityError();
     // WebGPU beginOcclusionQuery: "no occlusion query must be active for this" — one scope at a time.
     if (this.#occlusionActive) throw queryNestedError();
@@ -334,6 +371,7 @@ export class FramePass {
     }
   }
   bundles(...bundles: readonly Bundle[]): void {
+    this.assertFrameOpen?.("FramePass.bundles");
     // WebGPU executeBundles: "If this.[[depthReadOnly]] is true, bundle.[[depthReadOnly]] must be true.
     // If this.[[stencilReadOnly]] is true, bundle.[[stencilReadOnly]] must be true." gpu.bundle always
     // records bundles with both flags false, so no recorded bundle can replay into a read-only pass;
@@ -423,7 +461,12 @@ function previewValue(value: unknown): string {
 
 export class FrameRunner {
   #running = false;
-  constructor(private readonly createFrame: () => Frame, private readonly advance: () => void) {}
+  /**
+   * @param trackLoop Lifecycle hook for the owning gpu: called with each started loop handle and
+   * returns the untrack function the handle runs when it stops on its own, so `gpu.dispose()` can
+   * stop the loops still running without holding on to the ones already stopped.
+   */
+  constructor(private readonly createFrame: () => Frame, private readonly advance: () => void, private readonly trackLoop?: (handle: FrameLoopHandle) => () => void) {}
   frame(cb?: (frame: Frame) => void): Frame {
     if (this.#running || isSurfaceResizeCallbackActive()) throw frameReentrantError();
     this.#running = true;
@@ -454,10 +497,24 @@ export class FrameRunner {
         lastFrameMs = timestamp;
         this.frame(cb);
       }
-      id = request(tick);
+      // The callback may dispose the owning gpu, which stops this loop while the current tick is
+      // running. Do not enqueue one last (no-op) tick after stop() already canceled the old id.
+      if (!stopped) id = request(tick);
     };
     id = request(tick);
-    return { stop() { stopped = true; cancel(id); } };
+    // Registered with the owning gpu so gpu.dispose() stops it: a loop left running would keep
+    // encoding frames against a disposed device. Stopping is idempotent and drops the registration.
+    let untrack: (() => void) | undefined;
+    const handle: FrameLoopHandle = {
+      stop() {
+        stopped = true;
+        cancel(id);
+        untrack?.();
+        untrack = undefined;
+      },
+    };
+    untrack = this.trackLoop?.(handle);
+    return handle;
   }
 }
 

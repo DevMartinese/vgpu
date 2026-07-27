@@ -191,6 +191,17 @@ export class InternalTimer {
     });
   }
 
+  /**
+   * @internal Frame abandon hook (a failed pass, a failed finish/submit, or Frame.cancel()): the
+   * frame ends without ever reaching the queue. Drops the pending encoded state so no readback can
+   * decode stale staging bytes as a phantom duration, and releases the retain this frame took when
+   * it attached a span — the counterpart of frameSubmitted() for frames that never submit.
+   */
+  frameAbandoned(frame: unknown): void {
+    if (frame === this.#frame) this.#encodedSpans = undefined;
+    this.#releaseRing(frame);
+  }
+
   #beginFrame(frame: unknown): void {
     if (this.#demand > this.#ring.capacity) {
       // Grow only at frame boundaries. The retired ring keeps applying its in-flight readbacks

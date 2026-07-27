@@ -1,5 +1,5 @@
 import type { Buffer, Device } from "@vgpu/core";
-import { VGPUError } from "./errors.ts";
+import { queryReadbackError } from "./errors.ts";
 import type { ErrorSink } from "./pipeline-store.ts";
 
 /**
@@ -260,13 +260,7 @@ class InternalQueryRing implements QueryRing {
   }
 
   #reportDroppedReadback(cause: unknown): void {
-    const error = new VGPUError({
-      code: "VGPU-QUERY-READBACK",
-      message: `${this.#label} dropped a query readback: ${describeCause(cause)}`,
-      fix: "Usually a lost or destroyed device: recreate the gpu (and the timer/visibility instance) before reading queries again. Results resume on the next successful readback; the frame itself is unaffected.",
-      where: "QueryRing.onSubmitted",
-      cause,
-    });
+    const error = queryReadbackError(this.#label, cause);
     const sink = this.#errorSink;
     if (!sink) {
       console.error(error);
@@ -275,9 +269,4 @@ class InternalQueryRing implements QueryRing {
     try { void Promise.resolve(sink(error)).catch((sinkError: unknown) => { console.error(sinkError); }); }
     catch (sinkError) { console.error(sinkError); }
   }
-}
-
-function describeCause(cause: unknown): string {
-  if (cause instanceof Error) return `${cause.name}: ${cause.message}`;
-  return String(cause);
 }

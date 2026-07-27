@@ -554,6 +554,51 @@ export function frameReentrantError(): VGPUError {
   });
 }
 
+/**
+ * A query readback (timer span pair or occlusion slot) that could not be decoded: the map, the
+ * mapped-range copy, or the unmap failed. Reported on gpu.onError instead of rejecting the frame —
+ * the ring drops the readback and keeps going.
+ */
+export function queryReadbackError(label: string, cause: unknown): VGPUError {
+  return new VGPUError({
+    code: "VGPU-QUERY-READBACK",
+    message: `${label} dropped a query readback: ${describeCause(cause)}`,
+    fix: "Usually a lost or destroyed device: recreate the gpu (and the timer/visibility instance) before reading queries again. Results resume on the next successful readback; the frame itself is unaffected.",
+    where: "QueryRing.onSubmitted",
+    cause,
+  });
+}
+
+/** Using a frame that `cancel()` closed: its encoder was dropped, so anything encoded into it would never run. */
+export function frameCanceledError(where: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-FRAME-CANCELED",
+    message: "the frame was canceled; its command encoder was dropped and nothing more can be encoded or submitted on it.",
+    fix: "Open a new gpu.frame() for further work; cancel() is the last operation on a frame.",
+    where,
+  });
+}
+
+/** cancel() from inside an active pass would release resources still referenced by its descriptor. */
+export function framePassActiveError(where: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-FRAME-PASS-ACTIVE",
+    message: "the frame cannot be canceled while a pass callback is active.",
+    fix: "Return from the frame.pass(...) callback first, then call frame.cancel(); this keeps pass descriptor resources alive until the pass is closed.",
+    where,
+  });
+}
+
+/** cancel() after submit(): the command buffer is already on the queue, so there is nothing left to release. */
+export function frameAlreadySubmittedError(where: string): VGPUError {
+  return new VGPUError({
+    code: "VGPU-FRAME-SUBMITTED",
+    message: "the frame was already submitted; submitted GPU work cannot be canceled.",
+    fix: "Call cancel() only on a frame you decided not to submit; the frame you did submit needs no cleanup.",
+    where,
+  });
+}
+
 export function incompatibleResourceError(binding: BindingInfo, expected: string, fix?: string): VGPUError {
   return new VGPUError({
     code: "VGPU-R1-BINDING-INCOMPATIBLE-RESOURCE",
@@ -602,6 +647,11 @@ export function sharedUniformLayoutMismatchError(opts: {
     message: `Uniform '${opts.bindingName}' layout ${opts.adoptedLayout} from ${opts.adoptedSource} != ${opts.incomingLayout} from ${opts.incomingSource}. Fix: align structs or split uniforms.`,
     where: "gpu.uniforms",
   });
+}
+
+function describeCause(cause: unknown): string {
+  if (cause instanceof Error) return `${cause.name}: ${cause.message}`;
+  return String(cause);
 }
 
 function hasVersion(input: unknown): input is { readonly version: unknown } {
