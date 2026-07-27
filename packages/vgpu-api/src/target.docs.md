@@ -170,6 +170,10 @@ pingPong.swap();
 
 ## Notes
 
+- Choose `Target` for offscreen intermediates that must be reused, sampled, read back, or ping-ponged; choose `Surface` only for the canvas swapchain (see `Surface`). A target can be rendered in multiple passes and sampled by later effects.
+- Use simple `format` for one color attachment. Use `colors` when a pass writes multiple attachments (MRT/G-buffer), then consume `target.colors[i]` in later lighting/post passes.
+- Set `depth: true` for ordinary z-testing; choose `depth: "depth24plus-stencil8"` when stencil masking is required. Enable `msaa: true`/`4` for anti-aliased 3D geometry, but do not combine MSAA with `clear: false` preservation or `depthReadOnly`: the internal multisample render attachments (including depth) are discarded, while the resolved `.color(s)` remain sampleable/readable.
+- `target.read()` is intended for tests, snapshots, and diagnostics—not a per-frame hot path. For iterative simulation or post-processing, use `gpu.pingPong(...)` and swap targets instead of readback.
 - There is no global resolution binding. Pass `target.size` or `target.texelSize` explicitly to shaders.
 - `Surface.color` wraps the canvas current texture; offscreen target colors are stable until resize/destroy.
 - `target.read()` and `surface.read()` return RGBA bytes. BGRA canvas formats are read back with red/blue channels swizzled to RGBA.

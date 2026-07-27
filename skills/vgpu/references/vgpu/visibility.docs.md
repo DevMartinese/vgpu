@@ -103,6 +103,7 @@ console.log(q.state, q.hidden, q.age); // "unknown" false Infinity
 
 ## Notes
 
+- Use visibility for scenes with many expensive objects and large occluders (interiors, city blocks, dense foliage). It is a cheap proxy, not a universal culling system: small/overlapping occluders can produce popping, and every query requires a depth-enabled target.
 - Results are **zero vs non-zero only**, mirroring WebGPU occlusion query semantics: a resolved value of `0` means no samples passed depth testing inside the scope; any non-zero value is unspecified. vgpu decodes that to `"hidden"` / `"visible"` and never exposes a sample count.
 - The occlusion scope body **always executes** — the proxy draw is what the GPU measures, so it cannot be skipped. Cull the real draws outside the scope by checking `q.hidden`.
 - Latch contract: handle state changes only between frames (when a readback applies) and through `reset()`, so `hidden`/`state`/`age` are stable while a frame callback runs. Expect one frame of popping when an object comes back into view; oversized proxies soften popping at the cost of overdraw — the looser the proxy, the more the real object draws.

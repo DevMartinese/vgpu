@@ -97,6 +97,9 @@ The granted feature makes `gpu.timer()` succeed. In a browser, drop the `adapter
 
 ## Notes
 
+- Choose the entrypoint for the runtime: use `vgpu` in browsers with WebGPU; use `vgpu/node` for headless Node rendering with a real adapter; use `vgpu/mock` for deterministic tests that do not require a GPU. Keep application code on the same `init(options?)` shape so the switch is local.
+- Request optional features only when a code path uses them: `"timestamp-query"` enables `gpu.timer()`, `"depth-clip-control"` enables `DrawOptions.unclippedDepth`, and `"indirect-first-instance"` enables indirect draws that provide a non-zero first instance. Do not request features speculatively; unsupported names fail `init`.
+- In tests, declare and request a mock feature explicitly: `init({ adapter: createMockAdapter({ features: ["timestamp-query"] }), requiredFeatures: ["timestamp-query"] })` lets you exercise feature gates instead of silently relying on defaults.
 - `init(canvas)` is intentionally not supported. Create surfaces explicitly with `gpu.surface(canvas)`.
 - `size`, `dpr`, and `autoResize` are `SurfaceOptions`, not `InitOptions`.
 - The browser, node, and mock entrypoints all use the same `init(options?)` shape.
