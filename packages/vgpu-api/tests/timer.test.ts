@@ -426,7 +426,7 @@ test("the abandon path releases the retain of its own frame, not of the other op
   const target = gpu.target({ size: [4, 4] });
 
   // The older frame's pass fails, so its telemetry is rolled back: it will end through the abandon
-  // path (finalizeFrame(ABANDONED) + frameSubmitted) instead of a real readback.
+  // path (frameAbandoned) instead of a real readback.
   const first = gpu.frame();
   expect(() => first.pass({ target, timer: timer.span("first") }, () => { throw new Error("pass body blew up"); })).toThrowError(/pass body blew up/);
   const second = gpu.frame();

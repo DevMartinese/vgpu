@@ -259,6 +259,17 @@ export class InternalVisibility {
     });
   }
 
+  /**
+   * @internal Frame abandon hook (a failed pass, a failed finish/submit, or Frame.cancel()): the
+   * frame ends without ever reaching the queue. Drops the pending encoded state so no readback can
+   * decode stale staging bytes as a phantom "hidden", and releases the retain this frame took when
+   * it opened a visibility pass — the counterpart of frameSubmitted() for frames that never submit.
+   */
+  frameAbandoned(frame: unknown): void {
+    if (frame === this.#frame) this.#encodedEntries = undefined;
+    this.#releaseRing(frame);
+  }
+
   #beginFrame(frame: unknown): void {
     this.#frame = frame;
     this.#frameEntries = [];
