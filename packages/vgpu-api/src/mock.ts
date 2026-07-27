@@ -2,6 +2,7 @@ import { createMockAdapter } from "@vgpu/adapter-mock";
 import { createGpu, type InitOptions } from "./init.ts";
 
 export { createMockAdapter } from "@vgpu/adapter-mock";
+export type { CreateMockAdapterOptions } from "@vgpu/adapter-mock";
 export { getMockGPUDeviceInstrumentation } from "@vgpu/core";
 export type { Bundle, BundleOptions, BundleRecorder, Compute, ComputeOptions, DispatchOptions, Gpu, ClearColor, GpuErrorListener, InitOptions, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions, Surface, SurfaceOptions, SurfaceResizeEvent, Timer, TimerSpan, Visibility, VisibilityOptions, VisibilityQuery } from "./init.ts";
 export type { BlendComponentOptions, BlendOptions, BlendPreset, DepthOptions, Draw, DrawOptions, DrawCallOptions, DrawLayoutOptions, MeshLike, StencilFaceOptions, StencilOptions } from "./draw.ts";
