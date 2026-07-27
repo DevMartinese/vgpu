@@ -189,6 +189,20 @@ describe("api-review §1.3 — constructors validate before super() reparents ch
     expect(keptParent).toBe(true);
   });
 
+  test("perspectiveCamera with an invalid target does not strand its children", () => {
+    const { code, keptParent } = orphanCheck((child) =>
+      perspectiveCamera({ fov: 45, target: [0, 0] as never, children: [child] }));
+    expect(code).toBe("VGPU-SCENE-VALUE-INVALID");
+    expect(keptParent).toBe(true);
+  });
+
+  test("orthographicCamera with an invalid up vector does not strand its children", () => {
+    const { code, keptParent } = orphanCheck((child) =>
+      orthographicCamera({ left: -1, right: 1, bottom: -1, top: 1, target: [0, 0, 0], up: [0, 1] as never, children: [child] }));
+    expect(code).toBe("VGPU-SCENE-VALUE-INVALID");
+    expect(keptParent).toBe(true);
+  });
+
   test("orthographicCamera with an invalid range does not strand its children", () => {
     const { code, keptParent } = orphanCheck((child) =>
       orthographicCamera({ left: -1, right: 1, bottom: -1, top: 1, near: 0, far: 10, children: [child] }));

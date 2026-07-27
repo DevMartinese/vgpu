@@ -122,6 +122,7 @@ export class PerspectiveCamera extends CameraNode {
     validateFov("perspectiveCamera", options.fov);
     if (options.aspect !== undefined) validateAspect("perspectiveCamera", options.aspect);
     validateRange("perspectiveCamera", options.near ?? 0.1, options.far ?? 100);
+    validateInitialLookAt("perspectiveCamera", options.target, options.up);
     super("perspective-camera", options);
     this.#fov = options.fov;
     this.#aspect = options.aspect;
@@ -190,6 +191,7 @@ export class OrthographicCamera extends CameraNode {
     validateExtent("orthographicCamera", "left", options.left, "right", options.right);
     validateExtent("orthographicCamera", "bottom", options.bottom, "top", options.top);
     validateRange("orthographicCamera", options.near ?? 0.1, options.far ?? 100);
+    validateInitialLookAt("orthographicCamera", options.target, options.up);
     super("orthographic-camera", options);
     this.#left = options.left;
     this.#right = options.right;
@@ -246,6 +248,12 @@ export function perspectiveCamera(options: PerspectiveCameraOptions): Perspectiv
 /** Creates a stateful orthographic camera node for shaders expecting `viewProjection`. */
 export function orthographicCamera(options: OrthographicCameraOptions): OrthographicCamera {
   return new OrthographicCamera(options);
+}
+
+function validateInitialLookAt(where: string, target: CameraVec3 | undefined, up: CameraVec3 | undefined): void {
+  if (target === undefined) return;
+  if (target.length !== 3) throw sceneValueError(where, "target", "an array of 3 numbers");
+  if (up !== undefined && up.length !== 3) throw sceneValueError(where, "up", "an array of 3 numbers");
 }
 
 function validateFov(where: string, fov: number): void {
