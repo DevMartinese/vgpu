@@ -461,7 +461,12 @@ function previewValue(value: unknown): string {
 
 export class FrameRunner {
   #running = false;
-  constructor(private readonly createFrame: () => Frame, private readonly advance: () => void) {}
+  /**
+   * @param trackLoop Lifecycle hook for the owning gpu: called with each started loop handle and
+   * returns the untrack function the handle runs when it stops on its own, so `gpu.dispose()` can
+   * stop the loops still running without holding on to the ones already stopped.
+   */
+  constructor(private readonly createFrame: () => Frame, private readonly advance: () => void, private readonly trackLoop?: (handle: FrameLoopHandle) => () => void) {}
   frame(cb?: (frame: Frame) => void): Frame {
     if (this.#running || isSurfaceResizeCallbackActive()) throw frameReentrantError();
     this.#running = true;
@@ -492,10 +497,24 @@ export class FrameRunner {
         lastFrameMs = timestamp;
         this.frame(cb);
       }
-      id = request(tick);
+      // The callback may dispose the owning gpu, which stops this loop while the current tick is
+      // running. Do not enqueue one last (no-op) tick after stop() already canceled the old id.
+      if (!stopped) id = request(tick);
     };
     id = request(tick);
-    return { stop() { stopped = true; cancel(id); } };
+    // Registered with the owning gpu so gpu.dispose() stops it: a loop left running would keep
+    // encoding frames against a disposed device. Stopping is idempotent and drops the registration.
+    let untrack: (() => void) | undefined;
+    const handle: FrameLoopHandle = {
+      stop() {
+        stopped = true;
+        cancel(id);
+        untrack?.();
+        untrack = undefined;
+      },
+    };
+    untrack = this.trackLoop?.(handle);
+    return handle;
   }
 }
 
