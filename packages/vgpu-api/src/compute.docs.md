@@ -155,6 +155,9 @@ GPU-driven dispatch: the first pass writes the workgroup counts from GPU-side st
 
 ## Notes
 
+- Use explicit `dispatch(x, y, z)` when the CPU already knows stable workgroup counts. Use `dispatch({ indirect })` when a preceding GPU pass decides the count (compaction, particles), so no CPU readback is needed.
+- Declare storage `read` for source-only buffers and `read-write` for state that a kernel updates. For iterative simulation, bind `gpu.pingPongStorage(...)` read/write pairs and swap after each step instead of aliasing one writable buffer.
+- `StorageBuffer.read()` is for tests, snapshots, and diagnostics; avoid awaiting it in a hot loop unless CPU synchronization is intentional.
 - Use `gpu.pingPongStorage(bytes)` when a compute step reads previous state and writes next state; binding the same writable storage identity twice is rejected before dispatch.
 - Bindings use compute visibility only when statically reachable from the selected compute entry point; unused declarations stay in the layout with visibility `0`.
 - `constants` maps to `GPUProgrammableStage.constants` of the compute stage; the pipeline is created inside `gpu.compute()`, so recreate the compute to change them.
