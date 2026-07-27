@@ -62,19 +62,19 @@ struct VertexOut {
 }
 `;
 
-test("gpu.mesh(scene geometry) v1 parity: layouts, counts, buffers, and usages", async () => {
+test("gpu.geometry(scene geometry) v1 parity: layouts, counts, buffers, and usages", async () => {
   const gpu = await init();
   try {
     const snapshot: Record<string, unknown> = {};
-    for (const [kind, geometry] of GEOMETRIES) {
-      const mesh = gpu.mesh(geometry);
+    for (const [kind, descriptor] of GEOMETRIES) {
+      const geometry = gpu.geometry(descriptor);
       snapshot[kind] = {
-        vertexCount: mesh.vertexCount,
-        indexCount: mesh.indexCount,
-        indexFormat: mesh.indexFormat,
-        vertexBufferLayouts: mesh.vertexBufferLayouts,
-        vertexBuffers: mesh.vertexBuffers?.map(bufferSummary),
-        indexBuffer: mesh.indexBuffer ? bufferSummary(mesh.indexBuffer) : undefined,
+        vertexCount: geometry.vertexCount,
+        indexCount: geometry.indexCount,
+        indexFormat: geometry.indexFormat,
+        vertexBufferLayouts: geometry.vertexBufferLayouts,
+        vertexBuffers: geometry.vertexBuffers?.map(bufferSummary),
+        indexBuffer: geometry.indexBuffer ? bufferSummary(geometry.indexBuffer) : undefined,
       };
     }
 
@@ -761,12 +761,12 @@ test("gpu.mesh(scene geometry) v1 parity: layouts, counts, buffers, and usages",
   }
 });
 
-test("gpu.mesh(scene geometry) v1 parity: mock pipeline descriptor receives exact vertex layout", async () => {
+test("gpu.geometry(scene geometry) v1 parity: mock pipeline descriptor receives exact vertex layout", async () => {
   const gpu = await init();
   try {
-    const mesh = gpu.mesh(capsule());
+    const geometry = gpu.geometry(capsule());
     const target = gpu.target({ size: [4, 4], format: "rgba8unorm" });
-    const draw = gpu.draw({ shader: PRIMITIVE_SHADER, mesh, label: "mesh-v1-parity-capsule" });
+    const draw = gpu.draw({ shader: PRIMITIVE_SHADER, geometry, label: "geometry-v1-parity-capsule" });
 
     draw.pipelineFor(target);
 
@@ -783,7 +783,7 @@ test("gpu.mesh(scene geometry) v1 parity: mock pipeline descriptor receives exac
             },
           ],
         },
-        "label": "mesh-v1-parity-capsule.pipeline",
+        "label": "geometry-v1-parity-capsule.pipeline",
         "layout": "GPUPipelineLayout",
         "multisample": {
           "count": 1,

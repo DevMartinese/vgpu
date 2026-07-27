@@ -1,42 +1,42 @@
 import type { Buffer as CoreBuffer, Device } from "@vgpu/core";
 import type { EntryPointInputInfo, WGSLType } from "@vgpu/wgsl/reflect-source";
-import type { MeshLike } from "../draw.ts";
+import type { GeometryLike } from "../draw.ts";
 import { meshAttributeAmbiguousError, meshAttributeUnmatchedError, meshDataMisalignedError, meshFormatMismatchError, meshInputMissingError, meshLayoutInvalidError, meshLimitExceededError, meshLocationConflictError, meshRangeInvalidError, meshWriteRangeError } from "../errors.ts";
 
-/** @internal Resolves named mesh attributes against reflected shader inputs. */
-export const meshLayoutResolver = Symbol("vgpu.mesh.layoutResolver");
-/** @internal Implemented by v2 meshes and slices for draw-time layout resolution. */
-export interface MeshLayoutResolvable {
+/** @internal Resolves named geometry attributes against reflected shader inputs. */
+export const geometryLayoutResolver = Symbol("vgpu.geometry.layoutResolver");
+/** @internal Implemented by v2 geometries and slices for draw-time layout resolution. */
+export interface GeometryLayoutResolvable {
   /** Resolves and validates concrete shader locations for a vertex entry point. */
-  [meshLayoutResolver](inputs: readonly EntryPointInputInfo[], where: string): readonly GPUVertexBufferLayout[];
+  [geometryLayoutResolver](inputs: readonly EntryPointInputInfo[], where: string): readonly GPUVertexBufferLayout[];
 }
 
-/** CPU-side bytes accepted when creating or updating an owned mesh buffer. */
-export type MeshData = ArrayBuffer | ArrayBufferView<ArrayBuffer>;
+/** CPU-side bytes accepted when creating or updating an owned geometry buffer. */
+export type GeometryData = ArrayBuffer | ArrayBufferView<ArrayBuffer>;
 
 /** Overrides the format and optional byte offset or shader location of a named attribute. */
-export interface MeshAttributeOverride {
+export interface GeometryAttributeOverride {
   readonly format: GPUVertexFormat;
   readonly offset?: number;
   readonly location?: number;
 }
 
 /** Named attributes in declaration order for one vertex buffer stream. */
-export type MeshAttributes = { readonly [name: string]: GPUVertexFormat | MeshAttributeOverride };
+export type GeometryAttributes = { readonly [name: string]: GPUVertexFormat | GeometryAttributeOverride };
 
 /** Describes one owned-data or caller-owned vertex buffer stream. */
-export interface MeshBufferOptions {
-  readonly attributes: MeshAttributes;
-  readonly data?: MeshData;
+export interface GeometryBufferOptions {
+  readonly attributes: GeometryAttributes;
+  readonly data?: GeometryData;
   readonly buffer?: GPUBuffer;
   readonly stride?: number;
   readonly stepMode?: GPUVertexStepMode;
   readonly label?: string;
 }
 
-/** Options for constructing an immutable mesh layout and its GPU buffers. */
-export interface MeshOptions {
-  readonly buffers: readonly MeshBufferOptions[];
+/** Options for constructing an immutable geometry layout and its GPU buffers. */
+export interface GeometryOptions {
+  readonly buffers: readonly GeometryBufferOptions[];
   readonly vertexCount?: number;
   readonly instanceCount?: number;
   readonly indices?: Uint16Array | Uint32Array | readonly number[];
@@ -47,17 +47,17 @@ export interface MeshOptions {
   readonly label?: string;
 }
 
-/** Public handle for one fixed-size mesh vertex buffer stream. */
-export interface MeshBuffer {
+/** Public handle for one fixed-size geometry vertex buffer stream. */
+export interface GeometryBuffer {
   readonly gpu: GPUBuffer;
   readonly stride: number;
   readonly stepMode: GPUVertexStepMode;
   /** Updates bytes in an owned buffer without changing its identity or size. */
-  write(data: MeshData, byteOffset?: number): void;
+  write(data: GeometryData, byteOffset?: number): void;
 }
 
-/** Selects an immutable indexed or non-indexed range view of a mesh. */
-export interface MeshSliceOptions {
+/** Selects an immutable indexed or non-indexed range view of a geometry. */
+export interface GeometrySliceOptions {
   readonly firstIndex?: number;
   readonly indexCount?: number;
   readonly baseVertex?: number;
@@ -67,9 +67,9 @@ export interface MeshSliceOptions {
   readonly label?: string;
 }
 
-/** Frozen range view that shares its parent mesh's buffers and pipeline layout. */
-export interface MeshSlice extends MeshLike {
-  readonly mesh: Mesh;
+/** Frozen range view that shares its parent geometry's buffers and pipeline layout. */
+export interface GeometrySlice extends GeometryLike {
+  readonly geometry: Geometry;
   readonly firstIndex?: number;
   readonly baseVertex?: number;
   readonly firstVertex?: number;
@@ -86,8 +86,8 @@ type NormalizedBuffer = {
   readonly owned?: CoreBuffer;
 };
 
-/** Immutable mesh layout with fixed-size mutable owned buffers. */
-export class Mesh implements MeshLike {
+/** Immutable geometry layout with fixed-size mutable owned buffers. */
+export class Geometry implements GeometryLike {
   readonly vertexCount?: number;
   readonly indexCount?: number;
   readonly instanceCount?: number;
@@ -97,15 +97,15 @@ export class Mesh implements MeshLike {
   readonly vertexBufferLayouts: readonly GPUVertexBufferLayout[];
   readonly topology: GPUPrimitiveTopology;
   readonly stripIndexFormat?: GPUIndexFormat;
-  readonly buffers: readonly MeshBuffer[];
+  readonly buffers: readonly GeometryBuffer[];
   readonly #indexOwned?: CoreBuffer;
   readonly #indexByteLength?: number;
   readonly #normalized: readonly NormalizedBuffer[];
   readonly #resolvedLayouts = new Map<string, readonly GPUVertexBufferLayout[]>();
   #destroyed = false;
 
-  constructor(device: Device, opts: MeshOptions) {
-    const where = "gpu.mesh";
+  constructor(device: Device, opts: GeometryOptions) {
+    const where = "gpu.geometry";
     if (opts.buffers.length > 8) throw meshLimitExceededError(where, `${opts.buffers.length} vertex buffers exceed limit 8.`);
     let attrCount = 0;
     const locations = new Set<number>();
@@ -137,7 +137,7 @@ export class Mesh implements MeshLike {
     this.#normalized = normalized;
     this.vertexBufferLayouts = Object.freeze(normalized.map((n) => n.layout));
     this.vertexBuffers = Object.freeze(normalized.map((n) => n.gpu));
-    this.buffers = Object.freeze(normalized.map((n, i) => new InternalMeshBuffer(`${where}.buffers[${i}]`, n)));
+    this.buffers = Object.freeze(normalized.map((n, i) => new InternalGeometryBuffer(`${where}.buffers[${i}]`, n)));
     this.vertexCount = opts.vertexCount ?? vertexCapacity;
     this.instanceCount = opts.instanceCount ?? instanceCapacity;
     this.indexBuffer = index.gpu;
@@ -145,12 +145,12 @@ export class Mesh implements MeshLike {
     this.indexCount = opts.indexCount ?? index.count;
     this.#indexOwned = index.owned;
     this.#indexByteLength = index.byteLength;
-    lockPublicMeshProperties(this);
+    lockPublicGeometryProperties(this);
   }
 
   /** @internal Resolves named attributes for one reflected vertex entry point. */
-  [meshLayoutResolver](inputs: readonly EntryPointInputInfo[], where: string): readonly GPUVertexBufferLayout[] {
-    if (this.#destroyed) throw meshLayoutInvalidError(where, "Mesh is destroyed; create a live mesh.");
+  [geometryLayoutResolver](inputs: readonly EntryPointInputInfo[], where: string): readonly GPUVertexBufferLayout[] {
+    if (this.#destroyed) throw meshLayoutInvalidError(where, "Geometry is destroyed; create a live geometry.");
     const key = inputs.map((input) => `${input.name}:${input.location}:${shaderTypeBase(input.type)}`).join("|");
     const cached = this.#resolvedLayouts.get(key);
     if (cached) return cached;
@@ -177,36 +177,36 @@ export class Mesh implements MeshLike {
     return result;
   }
 
-  /** Creates a frozen range view sharing this mesh's buffers and layout identity. */
-  slice(opts: MeshSliceOptions = {}): MeshSlice {
-    return new InternalMeshSlice(this, opts);
+  /** Creates a frozen range view sharing this geometry's buffers and layout identity. */
+  slice(opts: GeometrySliceOptions = {}): GeometrySlice {
+    return new InternalGeometrySlice(this, opts);
   }
 
   /** Updates bytes in vertex buffer stream 0 without resizing it. */
-  write(data: MeshData, byteOffset = 0): void {
+  write(data: GeometryData, byteOffset = 0): void {
     const first = this.buffers[0];
-    if (!first) throw meshWriteRangeError("mesh.write", "No vertex buffer 0; add one before writing.");
+    if (!first) throw meshWriteRangeError("geometry.write", "No vertex buffer 0; add one before writing.");
     first.write(data, byteOffset);
   }
 
   /** Updates bytes in the owned index buffer without resizing it. */
   writeIndices(data: Uint16Array | Uint32Array, byteOffset = 0): void {
-    if (this.#destroyed) throw meshWriteRangeError("mesh.writeIndices", "Mesh is destroyed; create a new mesh before writing.");
-    if (!this.#indexOwned || this.#indexByteLength === undefined) throw meshWriteRangeError("mesh.writeIndices", "No owned index buffer; write caller-owned buffers directly.");
-    validateWriteRange("mesh.writeIndices", this.#indexByteLength, data.byteLength, byteOffset);
-    this.#indexOwned.write(data as MeshData, byteOffset);
+    if (this.#destroyed) throw meshWriteRangeError("geometry.writeIndices", "Geometry is destroyed; create a new geometry before writing.");
+    if (!this.#indexOwned || this.#indexByteLength === undefined) throw meshWriteRangeError("geometry.writeIndices", "No owned index buffer; write caller-owned buffers directly.");
+    validateWriteRange("geometry.writeIndices", this.#indexByteLength, data.byteLength, byteOffset);
+    this.#indexOwned.write(data as GeometryData, byteOffset);
   }
 
-  /** Destroys buffers owned by this mesh; caller-owned buffers are untouched. */
+  /** Destroys buffers owned by this geometry; caller-owned buffers are untouched. */
   destroy(): void {
     if (this.#destroyed) return;
     this.#destroyed = true;
-    for (const buffer of this.buffers) (buffer as InternalMeshBuffer).destroyOwned();
+    for (const buffer of this.buffers) (buffer as InternalGeometryBuffer).destroyOwned();
     this.#indexOwned?.destroy();
   }
 }
 
-class InternalMeshBuffer implements MeshBuffer {
+class InternalGeometryBuffer implements GeometryBuffer {
   readonly gpu: GPUBuffer;
   readonly stride: number;
   readonly stepMode: GPUVertexStepMode;
@@ -217,8 +217,8 @@ class InternalMeshBuffer implements MeshBuffer {
     this.stepMode = inner.stepMode;
     Object.freeze(this);
   }
-  write(data: MeshData, byteOffset = 0): void {
-    if (this.#state.destroyed) throw meshWriteRangeError(this.where, "Mesh is destroyed; create a new mesh before writing.");
+  write(data: GeometryData, byteOffset = 0): void {
+    if (this.#state.destroyed) throw meshWriteRangeError(this.where, "Geometry is destroyed; create a new geometry before writing.");
     if (!this.inner.owned || this.inner.byteLength === undefined) throw meshWriteRangeError(this.where, "Caller-owned buffer; write it directly.");
     validateWriteRange(this.where, this.inner.byteLength, byteLength(data), byteOffset);
     this.inner.owned.write(data, byteOffset);
@@ -226,8 +226,8 @@ class InternalMeshBuffer implements MeshBuffer {
   destroyOwned(): void { this.#state.destroyed = true; this.inner.owned?.destroy(); }
 }
 
-class InternalMeshSlice implements MeshSlice {
-  readonly mesh: Mesh;
+class InternalGeometrySlice implements GeometrySlice {
+  readonly geometry: Geometry;
   readonly vertexCount?: number;
   readonly indexCount?: number;
   readonly instanceCount?: number;
@@ -240,47 +240,47 @@ class InternalMeshSlice implements MeshSlice {
   readonly firstIndex?: number;
   readonly baseVertex?: number;
   readonly firstVertex?: number;
-  [meshLayoutResolver](inputs: readonly EntryPointInputInfo[], where: string): readonly GPUVertexBufferLayout[] { return this.mesh[meshLayoutResolver](inputs, where); }
-  constructor(mesh: Mesh, opts: MeshSliceOptions) {
-    this.mesh = mesh;
-    this.vertexBuffers = mesh.vertexBuffers;
-    this.indexBuffer = mesh.indexBuffer;
-    this.indexFormat = mesh.indexFormat;
-    this.vertexBufferLayouts = mesh.vertexBufferLayouts;
-    this.topology = mesh.topology;
-    this.stripIndexFormat = mesh.stripIndexFormat;
-    if (mesh.indexBuffer) {
-      if (opts.firstVertex !== undefined || opts.vertexCount !== undefined) throw meshRangeInvalidError("mesh.slice", "Indexed slice needs firstIndex/indexCount/baseVertex; omit vertex range fields.");
+  [geometryLayoutResolver](inputs: readonly EntryPointInputInfo[], where: string): readonly GPUVertexBufferLayout[] { return this.geometry[geometryLayoutResolver](inputs, where); }
+  constructor(geometry: Geometry, opts: GeometrySliceOptions) {
+    this.geometry = geometry;
+    this.vertexBuffers = geometry.vertexBuffers;
+    this.indexBuffer = geometry.indexBuffer;
+    this.indexFormat = geometry.indexFormat;
+    this.vertexBufferLayouts = geometry.vertexBufferLayouts;
+    this.topology = geometry.topology;
+    this.stripIndexFormat = geometry.stripIndexFormat;
+    if (geometry.indexBuffer) {
+      if (opts.firstVertex !== undefined || opts.vertexCount !== undefined) throw meshRangeInvalidError("geometry.slice", "Indexed slice needs firstIndex/indexCount/baseVertex; omit vertex range fields.");
       const firstIndex = opts.firstIndex ?? 0;
-      const max = mesh.indexCount ?? 0;
+      const max = geometry.indexCount ?? 0;
       const count = opts.indexCount ?? (max - firstIndex);
-      validateRange("mesh.slice", "firstIndex", firstIndex, max);
-      validateRange("mesh.slice", "indexCount", count, max - firstIndex);
-      validateRange("mesh.slice", "baseVertex", opts.baseVertex ?? 0, Number.MAX_SAFE_INTEGER);
+      validateRange("geometry.slice", "firstIndex", firstIndex, max);
+      validateRange("geometry.slice", "indexCount", count, max - firstIndex);
+      validateRange("geometry.slice", "baseVertex", opts.baseVertex ?? 0, Number.MAX_SAFE_INTEGER);
       this.firstIndex = firstIndex;
       this.indexCount = count;
       this.baseVertex = opts.baseVertex ?? 0;
-      this.vertexCount = mesh.vertexCount;
+      this.vertexCount = geometry.vertexCount;
     } else {
-      if (opts.firstIndex !== undefined || opts.indexCount !== undefined || opts.baseVertex !== undefined) throw meshRangeInvalidError("mesh.slice", "Non-indexed slice needs firstVertex/vertexCount; omit index range fields.");
+      if (opts.firstIndex !== undefined || opts.indexCount !== undefined || opts.baseVertex !== undefined) throw meshRangeInvalidError("geometry.slice", "Non-indexed slice needs firstVertex/vertexCount; omit index range fields.");
       const firstVertex = opts.firstVertex ?? 0;
-      const max = mesh.vertexCount ?? 0;
+      const max = geometry.vertexCount ?? 0;
       const count = opts.vertexCount ?? (max - firstVertex);
-      validateRange("mesh.slice", "firstVertex", firstVertex, max);
-      validateRange("mesh.slice", "vertexCount", count, max - firstVertex);
+      validateRange("geometry.slice", "firstVertex", firstVertex, max);
+      validateRange("geometry.slice", "vertexCount", count, max - firstVertex);
       this.firstVertex = firstVertex;
       this.vertexCount = count;
-      this.indexCount = mesh.indexCount;
+      this.indexCount = geometry.indexCount;
     }
-    validateRange("mesh.slice", "instanceCount", opts.instanceCount ?? mesh.instanceCount ?? 0, Number.MAX_SAFE_INTEGER);
-    this.instanceCount = opts.instanceCount ?? mesh.instanceCount;
+    validateRange("geometry.slice", "instanceCount", opts.instanceCount ?? geometry.instanceCount ?? 0, Number.MAX_SAFE_INTEGER);
+    this.instanceCount = opts.instanceCount ?? geometry.instanceCount;
     Object.freeze(this);
   }
 }
 
-/** Constructs a validated v2 mesh for the supplied device. */
-export function mesh(device: Device, opts: MeshOptions): Mesh {
-  return new Mesh(device, opts);
+/** Constructs a validated v2 geometry for the supplied device. */
+export function geometry(device: Device, opts: GeometryOptions): Geometry {
+  return new Geometry(device, opts);
 }
 
 /** Returns the byte width of one value in a WebGPU vertex format. */
@@ -293,7 +293,7 @@ export function formatByteSize(fmt: GPUVertexFormat): number {
   return (Number(bits) / 8) * Number(lanes ?? 1);
 }
 
-function normalizeBuffer(device: Device, opts: MeshBufferOptions, where: string): NormalizedBuffer {
+function normalizeBuffer(device: Device, opts: GeometryBufferOptions, where: string): NormalizedBuffer {
   if (opts.data !== undefined && opts.buffer !== undefined) throw meshLayoutInvalidError(where, "Choose data or buffer, not both.");
   const stepMode = opts.stepMode ?? "vertex";
   if (stepMode !== "vertex" && stepMode !== "instance") throw meshLayoutInvalidError(where, `Invalid stepMode: ${String(stepMode)}.`);
@@ -327,7 +327,7 @@ function normalizeBuffer(device: Device, opts: MeshBufferOptions, where: string)
   return { layout, attributes: Object.freeze(metas), stride, stepMode, byteLength: bytes, gpu: owned?.gpu ?? requiredBuffer(opts.buffer, where), owned };
 }
 
-function normalizeIndex(device: Device, opts: MeshOptions, where: string): { readonly gpu?: GPUBuffer; readonly owned?: CoreBuffer; readonly format?: GPUIndexFormat; readonly count?: number; readonly byteLength?: number } {
+function normalizeIndex(device: Device, opts: GeometryOptions, where: string): { readonly gpu?: GPUBuffer; readonly owned?: CoreBuffer; readonly format?: GPUIndexFormat; readonly count?: number; readonly byteLength?: number } {
   if (opts.indices !== undefined && opts.indexBuffer !== undefined) throw meshLayoutInvalidError(where, "Choose indices or indexBuffer, not both.");
   if (opts.indices === undefined) {
     const rawFields = [opts.indexBuffer, opts.indexFormat, opts.indexCount];
@@ -343,7 +343,7 @@ function normalizeIndex(device: Device, opts: MeshOptions, where: string): { rea
   const bytes = data.byteLength;
   if (bytes % (format === "uint16" ? 2 : 4) !== 0) throw meshDataMisalignedError(where, `Index byteLength ${bytes} is invalid for ${format}.`);
   const owned = device.createBuffer({ label: opts.label ? `${opts.label}.indices` : undefined, size: Math.max(4, bytes), usage: ["index", "copy_dst"] });
-  owned.write(data as MeshData);
+  owned.write(data as GeometryData);
   return { gpu: owned.gpu, owned, format, count: data.length, byteLength: bytes };
 }
 
@@ -362,17 +362,17 @@ function validateOptionalCapacity(where: string, field: string, value: number | 
   validateRange(where, field, value, capacity ?? Number.MAX_SAFE_INTEGER);
 }
 
-function lockPublicMeshProperties(mesh: Mesh): void {
-  for (const key of Object.keys(mesh)) if (key !== "destroyed") Object.defineProperty(mesh, key, { writable: false, configurable: false });
+function lockPublicGeometryProperties(geometry: Geometry): void {
+  for (const key of Object.keys(geometry)) if (key !== "destroyed") Object.defineProperty(geometry, key, { writable: false, configurable: false });
 }
 
 const TOPOLOGIES = new Set<unknown>(["point-list", "line-list", "line-strip", "triangle-list", "triangle-strip"]);
 
 function requiredBuffer(buffer: GPUBuffer | undefined, where: string): GPUBuffer {
-  if (!buffer) throw meshLayoutInvalidError(where, "Provide mesh buffer data or buffer.");
+  if (!buffer) throw meshLayoutInvalidError(where, "Provide geometry buffer data or buffer.");
   return buffer;
 }
-function byteLength(data: MeshData): number { return data.byteLength; }
+function byteLength(data: GeometryData): number { return data.byteLength; }
 function roundUp4(n: number): number { return (n + 3) & ~3; }
 function validateWriteRange(where: string, capacity: number, length: number, offset: number): void {
   if (!Number.isInteger(offset) || offset < 0 || offset % 4 !== 0 || length % 4 !== 0 || offset + length > capacity) throw meshWriteRangeError(where, `Write size ${length}/offset ${String(offset)} must be 4-aligned within ${capacity} bytes.`);

@@ -19,13 +19,11 @@ import {
   type VertexAttributes,
 } from "./geometry-src/index.ts";
 import type { SceneGeometry } from "./geometry.ts";
-import { Mesh, type MeshOptions } from "./mesh-descriptor.ts";
+import { Geometry, type GeometryOptions } from "./geometry-descriptor.ts";
 
-export type SceneMesh = Mesh;
+type PrimitiveFactory = (device: Device, geometry: SceneGeometry) => MeshPrimitive;
 
-type MeshFactory = (device: Device, geometry: SceneGeometry) => MeshPrimitive;
-
-const meshFactories: { readonly [K in SceneGeometry["kind"]]: MeshFactory } = {
+const primitiveFactories: { readonly [K in SceneGeometry["kind"]]: PrimitiveFactory } = {
   box: (device, geometry) => renderBox({ device, ...geometry.props }),
   capsule: (device, geometry) => renderCapsule({ device, radius: 0.5, height: 1, ...geometry.props }),
   cone: (device, geometry) => renderCone({ device, radius: 0.5, height: 1, ...geometry.props }),
@@ -44,16 +42,16 @@ const meshFactories: { readonly [K in SceneGeometry["kind"]]: MeshFactory } = {
 };
 
 /** Converts a pure scene geometry descriptor into the vertex/index buffer contract consumed by gpu.draw(). */
-export function mesh(device: Device, geometry: SceneGeometry): SceneMesh {
-  const primitive = primitiveMesh(device, geometry);
-  return new Mesh(device, primitiveMeshOptions(primitive));
+export function createGeometry(device: Device, geometry: SceneGeometry): Geometry {
+  const primitive = primitiveFor(device, geometry);
+  return new Geometry(device, primitiveGeometryOptions(primitive));
 }
 
-function primitiveMesh(device: Device, geometry: SceneGeometry): MeshPrimitive {
-  return meshFactories[geometry.kind](device, geometry);
+function primitiveFor(device: Device, geometry: SceneGeometry): MeshPrimitive {
+  return primitiveFactories[geometry.kind](device, geometry);
 }
 
-function primitiveMeshOptions(primitive: MeshPrimitive): MeshOptions {
+function primitiveGeometryOptions(primitive: MeshPrimitive): GeometryOptions {
   const attrs = primitive.attributes;
   const attributes: Record<string, GPUVertexFormat | { readonly format: GPUVertexFormat; readonly offset?: number; readonly location?: number }> = {
     position: { ...attrs.position, location: 0 },

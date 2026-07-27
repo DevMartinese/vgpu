@@ -48,8 +48,7 @@ export { orbit } from "./scene/orbit.ts";
 export type { Mat4, OrbitOptions } from "./scene/orbit.ts";
 /** Three-component vector type accepted by low-level scene camera helpers. */
 export type { Vec3 } from "./scene/geometry-src/index.ts";
-export type { SceneMesh } from "./scene/mesh.ts";
-export type { MeshAttributeOverride, MeshAttributes, MeshBuffer, MeshBufferOptions, MeshData, MeshOptions, MeshSlice, MeshSliceOptions } from "./scene/mesh-descriptor.ts";
+export type { Geometry, GeometryAttributeOverride, GeometryAttributes, GeometryBuffer, GeometryBufferOptions, GeometryData, GeometryOptions, GeometrySlice, GeometrySliceOptions } from "./scene/geometry-descriptor.ts";
 export { group, SceneNode } from "./scene/tree/node.ts";
 export type { NodeOptions, NodeTransformValues, QuatLike, SceneNodeKind, Vec3Like } from "./scene/tree/node.ts";
 export { mesh, MeshNode, scene } from "./scene/tree/mesh-node.ts";
