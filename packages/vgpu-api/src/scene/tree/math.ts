@@ -84,6 +84,15 @@ export function transformPoint(out: Float32Array, m: Mat4, p: Float32Array): Flo
   return out;
 }
 
+/** out = the linear part of m applied to a direction (no translation). */
+export function transformDirection(out: Float32Array, m: Mat4, v: Float32Array): Float32Array {
+  const x = v[0]!, y = v[1]!, z = v[2]!;
+  out[0] = m[0]! * x + m[4]! * y + m[8]! * z;
+  out[1] = m[1]! * x + m[5]! * y + m[9]! * z;
+  out[2] = m[2]! * x + m[6]! * y + m[10]! * z;
+  return out;
+}
+
 /** Intrinsic XYZ Euler angles (radians) to quaternion. */
 export function quatFromEuler(out: Float32Array, x: number, y: number, z: number): Float32Array {
   const c1 = Math.cos(x / 2), s1 = Math.sin(x / 2);

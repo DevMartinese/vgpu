@@ -32,6 +32,9 @@ export class DirectionalLight extends SceneNode {
   #intensity = 1;
 
   constructor(options: DirectionalLightOptions = {}) {
+    // Validate before super(): SceneNode's constructor reparents `options.children`, so a
+    // throw after it would strand them on a light nobody can reach.
+    validateLightOptions(`${options.label ?? "directional-light"}.set`, options);
     super("directional-light", options);
     this.#apply(options);
   }
@@ -69,6 +72,8 @@ export class AmbientLight extends SceneNode {
   #intensity = 1;
 
   constructor(options: AmbientLightOptions = {}) {
+    // Validate before super(): see DirectionalLight.
+    validateLightOptions(`${options.label ?? "ambient-light"}.set`, options);
     super("ambient-light", options);
     this.#apply(options);
   }
@@ -107,6 +112,21 @@ function writeVec3(out: Float32Array, value: Vec3Like, name: string, where: stri
   out[0] = value[0]!;
   out[1] = value[1]!;
   out[2] = value[2]!;
+}
+
+/**
+ * Raw-option check runnable before `super()` (no `this`). `#apply()` re-runs the same
+ * checks after construction, so the two paths cannot drift.
+ */
+function validateLightOptions(where: string, options: DirectionalLightOptions | AmbientLightOptions): void {
+  const direction = (options as DirectionalLightOptions).direction;
+  if (direction !== undefined && direction.length !== 3) {
+    throw sceneValueError(where, "direction", "an array of 3 numbers");
+  }
+  if (options.color !== undefined && options.color.length !== 3) {
+    throw sceneValueError(where, "color", "an array of 3 numbers");
+  }
+  if (options.intensity !== undefined) requireNonNegative(where, options.intensity);
 }
 
 function requireNonNegative(where: string, value: number): number {

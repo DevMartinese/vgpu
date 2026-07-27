@@ -117,9 +117,12 @@ export class PerspectiveCamera extends CameraNode {
   #far: number;
 
   constructor(options: PerspectiveCameraOptions) {
-    super("perspective-camera", options);
+    // Validate before super(): SceneNode's constructor reparents `options.children`, so a
+    // throw after it would strand them on a camera nobody can reach.
     validateFov("perspectiveCamera", options.fov);
+    if (options.aspect !== undefined) validateAspect("perspectiveCamera", options.aspect);
     validateRange("perspectiveCamera", options.near ?? 0.1, options.far ?? 100);
+    super("perspective-camera", options);
     this.#fov = options.fov;
     this.#aspect = options.aspect;
     this.#near = options.near ?? 0.1;
@@ -136,6 +139,7 @@ export class PerspectiveCamera extends CameraNode {
       this._projectionDirty = true;
     }
     if (values.aspect !== undefined) {
+      validateAspect(where, values.aspect);
       this.#aspect = values.aspect;
       this._projectionDirty = true;
     }
@@ -182,8 +186,11 @@ export class OrthographicCamera extends CameraNode {
   #far: number;
 
   constructor(options: OrthographicCameraOptions) {
-    super("orthographic-camera", options);
+    // Validate before super() so a rejected option bag cannot strand `options.children`.
+    validateExtent("orthographicCamera", "left", options.left, "right", options.right);
+    validateExtent("orthographicCamera", "bottom", options.bottom, "top", options.top);
     validateRange("orthographicCamera", options.near ?? 0.1, options.far ?? 100);
+    super("orthographic-camera", options);
     this.#left = options.left;
     this.#right = options.right;
     this.#bottom = options.bottom;
@@ -197,6 +204,12 @@ export class OrthographicCamera extends CameraNode {
     super.set(values);
     const where = `${this.label ?? this.kind}.set`;
     let projectionTouched = false;
+    if (values.left !== undefined || values.right !== undefined) {
+      validateExtent(where, "left", values.left ?? this.#left, "right", values.right ?? this.#right);
+    }
+    if (values.bottom !== undefined || values.top !== undefined) {
+      validateExtent(where, "bottom", values.bottom ?? this.#bottom, "top", values.top ?? this.#top);
+    }
     if (values.left !== undefined) { this.#left = values.left; projectionTouched = true; }
     if (values.right !== undefined) { this.#right = values.right; projectionTouched = true; }
     if (values.bottom !== undefined) { this.#bottom = values.bottom; projectionTouched = true; }
@@ -242,4 +255,18 @@ function validateFov(where: string, fov: number): void {
 function validateRange(where: string, near: number, far: number): void {
   if (!(near > 0)) throw sceneValueError(where, "near", "a positive near plane distance");
   if (!(far > near)) throw sceneValueError(where, "far", "a far plane distance greater than `near`");
+}
+
+/** `canvas.width / canvas.height` is 0 or NaN during layout; that must not reach the matrix. */
+function validateAspect(where: string, aspect: number): void {
+  if (!(aspect > 0) || !Number.isFinite(aspect)) {
+    throw sceneValueError(where, "aspect", "a positive, finite width/height ratio");
+  }
+}
+
+function validateExtent(where: string, minName: string, min: number, maxName: string, max: number): void {
+  if (!Number.isFinite(min)) throw sceneValueError(where, minName, "a finite number");
+  if (!Number.isFinite(max)) throw sceneValueError(where, maxName, "a finite number");
+  // Flipped ranges stay legal (a Y-flip is a real use case); empty ones divide by zero.
+  if (min === max) throw sceneValueError(where, maxName, `a value different from \`${minName}\``);
 }

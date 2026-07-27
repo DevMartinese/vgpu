@@ -11,9 +11,18 @@ export type MaterialBlend = "alpha" | "additive" | "premultiplied";
  * no GPU resources; pipelines are compiled when a tree is bound with `gpu.scene()`.
  */
 export abstract class SceneMaterial {
-  abstract readonly kind: SceneMaterialKind;
+  /**
+   * Set by the base constructor (not by a subclass field) so it is already readable while
+   * a subclass constructor validates its options — subclass fields are installed only
+   * after `super()` returns, which used to make validation errors report `undefined.set`.
+   */
+  readonly kind: SceneMaterialKind;
   label: string | undefined;
   blend: MaterialBlend | undefined;
+
+  constructor(kind: SceneMaterialKind) {
+    this.kind = kind;
+  }
 }
 
 export interface ColorMaterialOptions {
@@ -33,8 +42,8 @@ abstract class ColorMaterial extends SceneMaterial {
   #color = new Float32Array([1, 1, 1]);
   #opacity = 1;
 
-  constructor(options: ColorMaterialOptions = {}) {
-    super();
+  constructor(kind: SceneMaterialKind, options: ColorMaterialOptions = {}) {
+    super(kind);
     this.label = options.label;
     this.blend = options.blend;
     this.#apply(options);
@@ -71,17 +80,30 @@ abstract class ColorMaterial extends SceneMaterial {
 
 /** Flat-color material; renders without lights. */
 export class UnlitMaterial extends ColorMaterial {
-  readonly kind = "unlit";
+  // `declare` redeclares the base field's type only (no own property, no init order issue).
+  declare readonly kind: "unlit";
+
+  constructor(options: ColorMaterialOptions = {}) {
+    super("unlit", options);
+  }
 }
 
 /** N·L diffuse material lit by scene lights (uses `@vgpu/wgsl-std/light` lambert). */
 export class LambertMaterial extends ColorMaterial {
-  readonly kind = "lambert";
+  declare readonly kind: "lambert";
+
+  constructor(options: ColorMaterialOptions = {}) {
+    super("lambert", options);
+  }
 }
 
 /** Debug material that shades world-space normals; needs no lights or parameters. */
 export class NormalMaterial extends SceneMaterial {
-  readonly kind = "normal";
+  declare readonly kind: "normal";
+
+  constructor() {
+    super("normal");
+  }
 }
 
 export interface ShaderMaterialOptions {
@@ -97,12 +119,12 @@ export interface ShaderMaterialOptions {
  * at `@group(1)`.
  */
 export class ShaderMaterial extends SceneMaterial {
-  readonly kind = "shader";
+  declare readonly kind: "shader";
   readonly source: string;
   #values: Record<string, unknown>;
 
   constructor(source: string, options: ShaderMaterialOptions = {}) {
-    super();
+    super("shader");
     this.source = source;
     this.label = options.label;
     this.blend = options.blend;

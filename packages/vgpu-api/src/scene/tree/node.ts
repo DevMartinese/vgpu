@@ -1,14 +1,13 @@
 import { sceneCycleError, sceneValueError } from "./errors.ts";
 import {
   composeTrs,
-  conjugateQuat,
   copyMat4,
   identityMat4,
+  invertAffineMat4,
   multiplyMat4,
-  multiplyQuat,
   quatFromEuler,
-  quatFromMat4Rotation,
   quatLookAt,
+  transformDirection,
   transformPoint,
   type Mat4,
 } from "./math.ts";
@@ -48,8 +47,7 @@ const UP: Float32Array = new Float32Array([0, 1, 0]);
 const TMP_EYE = new Float32Array(3);
 const TMP_TARGET = new Float32Array(3);
 const TMP_UP = new Float32Array(3);
-const TMP_QUAT = new Float32Array(4);
-const TMP_PARENT_QUAT = new Float32Array(4);
+const TMP_PARENT_INVERSE = new Float32Array(16);
 
 /**
  * Base scene-tree node: a TRS transform with parent/children links. Mutation goes through
@@ -120,25 +118,27 @@ export class SceneNode {
     if (transformTouched) this.#markTransformDirty();
   }
 
-  /** Rotates the node so its -Z axis points at a world-space target. */
+  /**
+   * Rotates the node so its -Z axis points at a world-space target.
+   *
+   * The whole computation runs in parent space (the target and up hint are pulled through
+   * the parent's affine inverse), which stays exact under non-uniform parent scale: an
+   * affine map sends the parent-space ray through the target to the world-space ray through
+   * the world target. Extracting a scale-stripped parent rotation instead — as an earlier
+   * version did — skews the forward vector whenever the parent scale is anisotropic.
+   */
   lookAt(target: Vec3Like, up: Vec3Like = UP): this {
     const where = `${this.label ?? this.kind}.lookAt`;
     writeVec3(TMP_TARGET, target, "target", where);
     writeVec3(TMP_UP, up, "up", where);
+    TMP_EYE.set(this.#position);
     const parent = this.#parent;
     if (parent) {
-      transformPoint(TMP_EYE, parent.worldMatrix, this.#position);
-    } else {
-      TMP_EYE.set(this.#position);
+      invertAffineMat4(TMP_PARENT_INVERSE, parent.worldMatrix);
+      transformPoint(TMP_TARGET, TMP_PARENT_INVERSE, TMP_TARGET);
+      transformDirection(TMP_UP, TMP_PARENT_INVERSE, TMP_UP);
     }
-    quatLookAt(TMP_QUAT, TMP_EYE, TMP_TARGET, TMP_UP);
-    if (parent) {
-      quatFromMat4Rotation(TMP_PARENT_QUAT, parent.worldMatrix);
-      conjugateQuat(TMP_PARENT_QUAT, TMP_PARENT_QUAT);
-      multiplyQuat(this.#quaternion, TMP_PARENT_QUAT, TMP_QUAT);
-    } else {
-      this.#quaternion.set(TMP_QUAT);
-    }
+    quatLookAt(this.#quaternion, TMP_EYE, TMP_TARGET, TMP_UP);
     this.#markTransformDirty();
     return this;
   }
