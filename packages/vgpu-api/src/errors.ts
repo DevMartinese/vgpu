@@ -224,11 +224,15 @@ export function passPreserveMsaaError(): VGPUError {
   });
 }
 
-export function passClearDepthInvalidError(value: unknown): VGPUError {
+export function passClearDepthInvalidError(
+  value: unknown,
+  reason = "expected a number in [0, 1].",
+  fix = `Use 1 (default), or 0 with depth: { compare: "greater" } for reversed-Z.`,
+): VGPUError {
   return new VGPUError({
     code: "VGPU-PASS-CLEARDEPTH-INVALID",
-    message: `clearDepth received ${String(value)}; expected a number in [0, 1].`,
-    fix: `Use 1 (default), or 0 with depth: { compare: "greater" } for reversed-Z.`,
+    message: `clearDepth received ${String(value)}; ${reason}`,
+    fix,
     where: "Frame.pass",
   });
 }
@@ -287,6 +291,15 @@ export function passDepthReadOnlyError(reason: string, fix: string, where: "Fram
   });
 }
 
+
+export function passDepthReadOnlyMsaaError(): VGPUError {
+  return new VGPUError({
+    code: "VGPU-PASS-DEPTH-READONLY-MSAA",
+    message: "depthReadOnly cannot read an MSAA target's depth: multisampled depth is stored with storeOp \"discard\", so a read-only pass tests against discarded contents.",
+    fix: "Use a non-MSAA target for read-only depth, or drop depthReadOnly and let the pass own its depth.",
+    where: "Frame.pass",
+  });
+}
 
 export function timerInvalidError(reason: string, fix: string, where = "gpu.timer"): VGPUError {
   return new VGPUError({

@@ -162,6 +162,37 @@ test("depthReadOnly contradiction rules throw at pass open", async () => {
   gpu.dispose();
 });
 
+test("depthReadOnly is rejected on an MSAA target", async () => {
+  const gpu = await init();
+  const msaa = gpu.target({ size: [2, 2], depth: true, msaa: true });
+  expect(msaa.sampleCount).toBe(4);
+
+  // Multisampled depth is stored with storeOp "discard", so a read-only pass would depth-test
+  // against discarded contents — silent garbage, not an error the driver reports.
+  expect(() => gpu.frame((frame) => frame.pass({ target: msaa, depthReadOnly: true }, () => undefined)))
+    .toThrowError(/VGPU-PASS-DEPTH-READONLY-MSAA|storeOp "discard"/);
+  // Symmetric to the clear:false rule on MSAA targets.
+  expect(() => gpu.frame((frame) => frame.pass({ target: msaa, clear: false }, () => undefined)))
+    .toThrowError(/VGPU-PASS-PRESERVE-MSAA|cannot preserve MSAA/);
+  // depthReadOnly: false stays inert on MSAA targets.
+  expect(() => gpu.frame((frame) => frame.pass({ target: msaa, depthReadOnly: false }, () => undefined))).not.toThrow();
+  gpu.dispose();
+});
+
+test("clearDepth on a target without depth throws instead of being silently dropped", async () => {
+  const gpu = await init();
+  const colorOnly = gpu.target({ size: [2, 2] });
+  const depthTarget = gpu.target({ size: [2, 2], depth: true });
+
+  expect(() => gpu.frame((frame) => frame.pass({ target: colorOnly, clearDepth: 0 }, () => undefined)))
+    .toThrowError(/VGPU-PASS-CLEARDEPTH-INVALID|no depth attachment/);
+  // Range and preserve rules still take precedence, and the same option is fine with depth.
+  expect(() => gpu.frame((frame) => frame.pass({ target: colorOnly, clearDepth: 2 }, () => undefined)))
+    .toThrowError(/VGPU-PASS-CLEARDEPTH-INVALID|expected a number in \[0, 1\]/);
+  expect(() => gpu.frame((frame) => frame.pass({ target: depthTarget, clearDepth: 0 }, () => undefined))).not.toThrow();
+  gpu.dispose();
+});
+
 test("bundles cannot replay into a depthReadOnly pass", async () => {
   const gpu = await init();
   const target = gpu.target({ size: [2, 2], depth: true });

@@ -5,7 +5,7 @@ import { replayBundles, type Bundle } from "./bundle.ts";
 import { drawStencilWritingOps, drawWritesDepth, encodeDraw, type Draw, type DrawCallOptions, type InternalDraw } from "./draw.ts";
 import { effectDraw, type Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
-import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, queryNestedError, queryNoVisibilityError, surfaceNotInFrameError, targetRequiredError, timerInvalidError, visibilityInvalidError, visibilityNoDepthError } from "./errors.ts";
+import { claimedGroupNativeValidationError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passDepthReadOnlyMsaaError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, queryNestedError, queryNoVisibilityError, surfaceNotInFrameError, targetRequiredError, timerInvalidError, visibilityInvalidError, visibilityNoDepthError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
 import { isTimerSpan, type InternalTimer, type TimerSpan } from "./timer.ts";
@@ -38,6 +38,14 @@ export interface FramePassOptions {
   readonly visibility?: Visibility;
 }
 
+/**
+ * Frame identity passed to a telemetry instance's finalizeFrame to *clear* its pending encoded
+ * state instead of encoding: finalizeFrame drops that state before it compares frame identities,
+ * so a foreign token clears and returns without touching the encoder. Frame.#abandonTelemetry
+ * pairs it with frameSubmitted to release the query-set retain without a phantom readback.
+ */
+const ABANDONED_FRAME: unique symbol = Symbol("vgpu.frame.abandoned");
+
 export interface FrameLoopHandle { stop(): void }
 export interface FrameLoopOptions { readonly fps?: number }
 export type FrameLoopCallback = (frame: Frame) => void;
@@ -55,6 +63,13 @@ export class Frame {
   readonly #validations: ClaimedGroupValidationResult[] = [];
   readonly #timers = new Set<InternalTimer>();
   readonly #visibilities = new Set<InternalVisibility>();
+  /**
+   * Telemetry instances whose per-frame bookkeeping a failed pass invalidated: their frame is
+   * neither finalized nor read back, so a throwing pass callback cannot leave a phantom result.
+   * Kept alongside the sets so a later pass re-attaching the same instance in this frame stays
+   * dropped too — the failed pass's span/slots are still in that instance's frame bookkeeping.
+   */
+  readonly #discardedTelemetry = new Set<InternalTimer | InternalVisibility>();
   #submitted = false;
   constructor(
     private readonly device: Device,
@@ -81,6 +96,11 @@ export class Frame {
     if (clearDepth !== undefined) {
       if (typeof clearDepth !== "number" || !(clearDepth >= 0 && clearDepth <= 1)) throw passClearDepthInvalidError(clearDepth);
       if (preserve) throw passPreserveClearDepthError();
+      // Dead-option rule, same as clearStencil below: without a depth attachment there is no
+      // depthClearValue in the descriptor, so clearDepth would silently do nothing.
+      if (!resolvedTarget.depth) {
+        throw passClearDepthInvalidError(clearDepth, "but the target has no depth attachment, so clearDepth would have no effect.", "Create the target with depth: true (or a depth format), or drop clearDepth.");
+      }
     }
     const clearStencil = targetOnly ? undefined : target.clearStencil;
     if (clearStencil !== undefined) {
@@ -102,27 +122,43 @@ export class Frame {
       // pass, so clear (color) stays legal, but the read-only depth/stencil aspects omit their ops entirely
       // and can never be cleared.
       if (!resolvedTarget.depth) throw passDepthReadOnlyError("is set, but the target has no depth attachment, so there is nothing to make read-only.", "Create the target with depth: true (or a depth format), or drop depthReadOnly.");
+      // Symmetric to the clear:false MSAA rule: an MSAA target's depth aspect is stored with
+      // storeOp "discard" (target-utils depthAttachment), so nothing survives the pass that wrote
+      // it. Reading it back read-only would depth-test every draw against discarded contents —
+      // silent garbage (with visibility attached, every query reports "hidden").
+      if (resolvedTarget.sampleCount === 4) throw passDepthReadOnlyMsaaError();
       if (clearDepth !== undefined) throw passDepthReadOnlyError("cannot be combined with clearDepth; a read-only depth aspect omits its load/store ops and is never cleared.", "Remove clearDepth, or drop depthReadOnly.");
       if (clearStencil !== undefined) throw passDepthReadOnlyError("cannot be combined with clearStencil; a read-only stencil aspect omits its load/store ops and is never cleared.", "Remove clearStencil, or drop depthReadOnly.");
     }
     const viewport = targetOnly ? undefined : validatedViewport(target.viewport, this.device.gpu.limits, resolvedTarget.size);
     const scissor = targetOnly ? undefined : validatedScissor(target.scissor, resolvedTarget.size);
-    const timestampWrites = targetOnly ? undefined : this.#attachTimerSpan(target.timer);
-    const visibility = targetOnly ? undefined : this.#attachVisibility(target.visibility, resolvedTarget);
-    // timestampWrites and occlusionQuerySet are target-independent pass state: decorate the descriptor after obtaining it from the target.
-    let descriptor = resolvedTarget.renderPassDescriptor({ clear: clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly });
-    if (timestampWrites) descriptor = { ...descriptor, timestampWrites };
-    // Mirrors the WebGPU pass descriptor rule: occlusionQuerySet must be a valid query set of type "occlusion".
-    if (visibility) descriptor = { ...descriptor, occlusionQuerySet: visibility.querySet };
-    const encoder = this.#encoder.beginRenderPass(descriptor);
-    if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
-    if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
-    try { cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true, visibility, this)); }
-    catch (error) {
+    let timer: { readonly owner: InternalTimer; readonly timestampWrites: GPURenderPassTimestampWrites | undefined } | undefined;
+    let visibility: InternalVisibility | undefined;
+    let encoder: GPURenderPassEncoder | undefined;
+    try {
+      // Attaching telemetry mutates per-frame bookkeeping before the native pass opens. Keep the whole
+      // attach/setup/body sequence atomic so any later validation/native setup failure rolls it back,
+      // not only exceptions thrown by the user callback.
+      timer = targetOnly ? undefined : this.#attachTimerSpan(target.timer);
+      const timestampWrites = timer?.timestampWrites;
+      visibility = targetOnly ? undefined : this.#attachVisibility(target.visibility, resolvedTarget);
+      // timestampWrites and occlusionQuerySet are target-independent pass state: decorate the descriptor after obtaining it from the target.
+      let descriptor = resolvedTarget.renderPassDescriptor({ clear: clear === undefined || clear === true || clear === false ? this.defaultClearColor() : clear, preserve, clearDepth, clearStencil, depthReadOnly });
+      if (timestampWrites) descriptor = { ...descriptor, timestampWrites };
+      // Mirrors the WebGPU pass descriptor rule: occlusionQuerySet must be a valid query set of type "occlusion".
+      if (visibility) descriptor = { ...descriptor, occlusionQuerySet: visibility.querySet };
+      encoder = this.#encoder.beginRenderPass(descriptor);
+      if (viewport) encoder.setViewport(viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth);
+      if (scissor) encoder.setScissorRect(scissor[0], scissor[1], scissor[2], scissor[3]);
+      cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true, visibility, this));
+    } catch (error) {
+      // A failed pass — during setup or in its body — never ran successfully. Leaving telemetry
+      // registered makes submit() resolve unwritten queries as phantom results.
+      this.#discardTelemetry(timer?.owner, visibility);
       discardClaimedGroupValidationResults(this.#validations);
       this.#validations.length = 0;
       discardClaimedGroupValidationScopes(this.device);
-      try { encoder.end(); } catch { /* ignore cleanup failure after encode failure */ }
+      try { encoder?.end(); } catch { /* ignore cleanup failure after encode failure */ }
       throw error;
     }
     endRenderPassWithClaimValidation(this.device, encoder, this.#validations);
@@ -133,13 +169,16 @@ export class Frame {
     this.#submitted = true;
     // Timed and occlusion-queried frames append one resolveQuerySet of each instance's contiguous
     // used range (plus the staging copy) to the still-open frame encoder — zero extra submissions.
-    for (const timer of this.#timers) timer.finalizeFrame(this, this.#encoder);
-    for (const visibility of this.#visibilities) visibility.finalizeFrame(this, this.#encoder);
+    for (const timer of this.#liveTimers()) timer.finalizeFrame(this, this.#encoder);
+    for (const visibility of this.#liveVisibilities()) visibility.finalizeFrame(this, this.#encoder);
     let commandBuffer: GPUCommandBuffer;
     const finishContext = this.#validations[0]?.context;
     if (finishContext) pushClaimedGroupValidationScope(this.device, finishContext);
     try { commandBuffer = this.#encoder.finish(); }
     catch (error) {
+      // finish() failed, so the resolves encoded above never reach the queue: nothing may be read
+      // back, but every instance still has to release the retain it took when it was attached.
+      this.#abandonTelemetry(this.#frameTelemetry());
       const result = finishContext ? popLastClaimedGroupValidationScope(this.device) : undefined;
       discardClaimedGroupValidationResults(this.#validations);
       if (result) discardClaimedGroupValidationResults([result]);
@@ -156,6 +195,9 @@ export class Frame {
     if (submitContext) pushClaimedGroupValidationScope(this.device, submitContext);
     try { this.device.gpu.queue.submit([commandBuffer]); }
     catch (error) {
+      // Same as the finish() failure: the command buffer never ran, so release the retains and read
+      // nothing back — the resolve's staging bytes are stale, not this frame's results.
+      this.#abandonTelemetry(this.#frameTelemetry());
       const result = submitContext ? popLastClaimedGroupValidationScope(this.device) : undefined;
       discardClaimedGroupValidationResults(this.#validations);
       if (result) discardClaimedGroupValidationResults([result]);
@@ -169,18 +211,72 @@ export class Frame {
       if (result) this.#validations[0] = this.#validations[0] ? preferClaimedGroupValidationResult(result, this.#validations[0]) : result;
     }
     // The submit succeeded: start each timer's and visibility's non-blocking readback of this frame's resolve.
-    for (const timer of this.#timers) timer.frameSubmitted(this);
-    for (const visibility of this.#visibilities) visibility.frameSubmitted(this);
+    for (const timer of this.#liveTimers()) timer.frameSubmitted(this);
+    for (const visibility of this.#liveVisibilities()) visibility.frameSubmitted(this);
+    // Instances a failed pass dropped are skipped above, so they still hold this frame's retain.
+    this.#abandonTelemetry(this.#discardedTelemetry);
     this.done = this.#trackDone(claimedGroupValidationDone(this.device, this.#validations, { errorSink: this.errorSink }));
   }
 
-  #attachTimerSpan(span: TimerSpan | undefined): GPURenderPassTimestampWrites | undefined {
+  /**
+   * Ends the frame for telemetry instances that will never see a real frameSubmitted: a pass whose
+   * callback threw, or a frame whose finish/submit failed. Each one took a retain on its query ring
+   * when it was attached to a pass descriptor (so a mid-frame dispose() cannot destroy a set the
+   * frame still points at); without the matching release, a dispose() after the failure leaves the
+   * ring alive forever. Clearing the pending encoded state first is what makes this a release and
+   * not a readback: a resolve that never reached the queue must not be decoded — its staging buffer
+   * holds stale bytes, which would surface as a phantom duration or a phantom "hidden".
+   */
+  #abandonTelemetry(owners: Iterable<InternalTimer | InternalVisibility>): void {
+    for (const owner of owners) {
+      owner.finalizeFrame(ABANDONED_FRAME, this.#encoder);
+      owner.frameSubmitted(this);
+    }
+  }
+
+  /** Every telemetry instance this frame attached, discarded ones included. */
+  #frameTelemetry(): (InternalTimer | InternalVisibility)[] {
+    return [...this.#timers, ...this.#visibilities, ...this.#discardedTelemetry];
+  }
+
+  #discardTelemetry(timer: InternalTimer | undefined, visibility: InternalVisibility | undefined): void {
+    if (timer) {
+      this.#timers.delete(timer);
+      this.#discardedTelemetry.add(timer);
+    }
+    if (visibility) {
+      this.#visibilities.delete(visibility);
+      this.#discardedTelemetry.add(visibility);
+    }
+  }
+
+  #liveTimers(): InternalTimer[] {
+    return [...this.#timers].filter((timer) => !this.#discardedTelemetry.has(timer));
+  }
+
+  #liveVisibilities(): InternalVisibility[] {
+    return [...this.#visibilities].filter((visibility) => !this.#discardedTelemetry.has(visibility));
+  }
+
+  /** Registers the span for this frame; returns the owning timer so a failed pass can roll its telemetry back. */
+  #attachTimerSpan(span: TimerSpan | undefined): { readonly owner: InternalTimer; readonly timestampWrites: GPURenderPassTimestampWrites | undefined } | undefined {
     if (span === undefined) return undefined;
     if (!isTimerSpan(span)) {
       throw timerInvalidError(`FramePassOptions.timer received ${previewValue(span)}; expected a TimerSpan from timer.span(name).`, `Create const timer = gpu.timer() once, then pass timer.span("name") per pass.`, "Frame.pass");
     }
-    this.#timers.add(span.owner);
-    return span.owner.attachSpan(span, this, this.device);
+    const owner = span.owner;
+    const alreadyAttached = this.#timers.has(owner);
+    try {
+      const timestampWrites = owner.attachSpan(span, this, this.device);
+      this.#timers.add(owner);
+      return { owner, timestampWrites };
+    } catch (error) {
+      // A duplicate/capacity error can occur after this timer already contributed an earlier pass
+      // to the frame. The outer assignment has not completed yet, so discard it here rather than
+      // letting submit() report that earlier pass as a successful partial frame.
+      if (alreadyAttached) this.#discardTelemetry(owner, undefined);
+      throw error;
+    }
   }
 
   #attachVisibility(visibility: Visibility | undefined, resolvedTarget: Target): InternalVisibility | undefined {
