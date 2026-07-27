@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 1,
+  "contractId": "vgpu-examples/v1",
+  "revision": "75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609",
+  "source": {
+    "repository": "https://github.com/vgpu/vgpu",
+    "gitCommit": "62d8f7227850d1d792e8bbf71b9568d74d4eb414"
+  },
+  "examples": [
+    {
+      "id": "gradient",
+      "title": "Simple Gradient",
+      "description": "Map screen coordinates to color with a tiny fullscreen fragment shader.",
+      "tags": [
+        "gradient",
+        "animation",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "fragment-shader",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 3,
+      "aggregateSha256": "08dafb4e2a6efb8dac4087aaecd1f6931f6483b322595cf207b679e6f0de0fb6",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/gradient/manifest.json",
+      "manifestSha256": "db15bdcbef547e50ab25de9801eb687dbea97c6ee0cd8d72860add2784080eb1"
+    },
+    {
+      "id": "triangle-led-front",
+      "title": "Triangle LED Hero",
+      "description": "Analytic edge-glow triangle with LED emitters, floor radiance, and interactive color deploy. Canvas-scoped pointer input drives the lighting while an accessible mode selector chooses highlighted edges.",
+      "tags": [
+        "triangle",
+        "led",
+        "raycasting",
+        "lighting"
+      ],
+      "capabilities": [
+        "webgpu",
+        "select-control",
+        "pointer-input",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 24,
+      "aggregateSha256": "baa30bc2bb437229bd800c72c06e7fa44dc835739a456c5df0a8f726ad72ab5e",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/triangle-led-front/manifest.json",
+      "manifestSha256": "d8b9e3e3f7bad54775804f9f20a1774e34e4bc1302d53a8ead199d8d700cbdac"
+    },
+    {
+      "id": "anti-aliasing",
+      "title": "Anti-Aliasing",
+      "description": "One high-contrast scene through Off, MSAA 4×, SSAA 2×, and FXAA — pick a mode and watch the edges.",
+      "tags": [
+        "anti-aliasing",
+        "msaa",
+        "ssaa",
+        "fxaa"
+      ],
+      "capabilities": [
+        "webgpu",
+        "render-targets",
+        "select-control",
+        "multi-pass",
+        "responsive-canvas"
+      ],
+      "fileCount": 7,
+      "aggregateSha256": "10f2835045bdbd84fb30c7b12a4dc09ec74833ea73a524f16c31fe46ca96954d",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/anti-aliasing/manifest.json",
+      "manifestSha256": "7625bb53946814683e4da9f7f5e2b5719d4aa042e3e5c04c3f595f0e23a78ae5"
+    },
+    {
+      "id": "post-processing",
+      "title": "Post-Processing",
+      "description": "A bloom → chromatic-aberration effect chain over crisp animated geometry, with each pass toggleable.",
+      "tags": [
+        "post-processing",
+        "bloom",
+        "chromatic-aberration",
+        "color-grading"
+      ],
+      "capabilities": [
+        "webgpu",
+        "checkbox-controls",
+        "multi-pass",
+        "hdr",
+        "responsive-canvas"
+      ],
+      "fileCount": 8,
+      "aggregateSha256": "6809ecbd0e6e1072c937dd55aa91714f47c19a56e4070032bc8104589962b5ee",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/post-processing/manifest.json",
+      "manifestSha256": "4538e20f1f655e06daa9642496fd399ac756619ff8b18b7dd40c06f26c4b431b"
+    },
+    {
+      "id": "black-hole",
+      "title": "Black Hole",
+      "description": "Raymarched gravitational lensing — null geodesics bend starlight around an event horizon while a Keplerian accretion disk glows with Doppler beaming, graded through an HDR bloom chain.",
+      "tags": [
+        "black-hole",
+        "raymarching",
+        "hdr",
+        "bloom"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 6,
+      "aggregateSha256": "594c97b2b33db675478b2557e8eefa12ee9c4706881e2e6d3a6f896117334968",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/black-hole/manifest.json",
+      "manifestSha256": "fa7ab8162e3db13e6686a30bc23f16ce107398e9eae0ae8a9ebf39049bf4367e"
+    },
+    {
+      "id": "earth",
+      "title": "Earth",
+      "description": "A procedural planet with GPU-baked albedo, night lights and clouds, a lit atmosphere, and an HDR bloom chain tuned so only the sun glows.",
+      "tags": [
+        "lighting",
+        "hdr",
+        "bloom",
+        "rendering"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "controls",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas",
+        "textures"
+      ],
+      "fileCount": 15,
+      "aggregateSha256": "ca20be832893d2c97f8d6ae33834211155c57304474bd7e5128cfa0813031cd1",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/earth/manifest.json",
+      "manifestSha256": "3c9b7c40419e5268eee9347fe837a703962bc0ec0df4019f91e5a1856d00b9ed"
+    },
+    {
+      "id": "fluid",
+      "title": "Interactive Fluid",
+      "description": "A compact pressure-projected fluid solver with velocity advection, colorful dye, and pointer or touch stirring.",
+      "tags": [
+        "fluid",
+        "simulation",
+        "compute",
+        "navier-stokes"
+      ],
+      "capabilities": [
+        "webgpu",
+        "compute-shader",
+        "fixed-timestep",
+        "pointer-input",
+        "multi-pass",
+        "responsive-canvas"
+      ],
+      "fileCount": 15,
+      "aggregateSha256": "6a190fa99971efd10d6e99085254ad2481e052d9013b25f89276bdc38816e212",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/fluid/manifest.json",
+      "manifestSha256": "e0dde23b197888d1cf0993151d2b23ee856803be1996ceb70aa599e136dd61bf"
+    },
+    {
+      "id": "instanced-rendering",
+      "title": "Instanced Rendering",
+      "description": "One cube mesh + one instance stream, with 125,000 independently animated cubes.",
+      "tags": [
+        "instancing",
+        "indirect-rendering",
+        "performance"
+      ],
+      "capabilities": [
+        "webgpu",
+        "select-control",
+        "instanced-rendering",
+        "offscreen-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 6,
+      "aggregateSha256": "c9b1b1b1c4df04f911e6fc127eeeb5962bc19508c015cf01dfb0ee48f65d640a",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/instanced-rendering/manifest.json",
+      "manifestSha256": "68f4eb84b48d07abec58a35ee0fee44d002c5b780d92ab863627e8c020038ebd"
+    },
+    {
+      "id": "batch-rendering",
+      "title": "Batch Rendering",
+      "description": "Four primitive ranges in one mesh, recorded once as a render bundle.",
+      "tags": [
+        "batch-rendering",
+        "render-bundles",
+        "instancing"
+      ],
+      "capabilities": [
+        "webgpu",
+        "render-bundles",
+        "offscreen-rendering",
+        "resize"
+      ],
+      "fileCount": 4,
+      "aggregateSha256": "968413399682ac598690076f817070e8aecd46d3115497ce7fdecb26c68cff2d",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/batch-rendering/manifest.json",
+      "manifestSha256": "c3ba14eeacef105d1b82b88802fc91a94154539f2cbe999c0e7362c0893ca622"
+    },
+    {
+      "id": "fft-ocean",
+      "title": "Particles ocean",
+      "description": "A deep-water surface driven by a real inverse FFT. A Phillips spectrum evolves in frequency space, Stockham passes produce a displacement field, and half a million particles ride the waves through an HDR bloom chain.",
+      "tags": [
+        "ocean",
+        "fft",
+        "particles",
+        "compute"
+      ],
+      "capabilities": [
+        "webgpu",
+        "compute-shader",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 19,
+      "aggregateSha256": "fb71b9f8eefa5e82b1777fcd5a1b65bdc37b000644f5ac69546428e01e11ec8f",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/fft-ocean/manifest.json",
+      "manifestSha256": "16766648dbf5b4fc57f5da769ecebaf1ab1fd77e68ceb213b75faeab11063f4e"
+    },
+    {
+      "id": "raymarched-fractal",
+      "title": "Raymarched fractal",
+      "description": "A raymarched Sierpiński tetrahedron emerges from pure black under directional light and restrained HDR bloom, with drag-only orbit controls.",
+      "tags": [
+        "raymarching",
+        "raymarch",
+        "fractal",
+        "sierpinski",
+        "hdr",
+        "bloom"
+      ],
+      "capabilities": [
+        "webgpu",
+        "demand-rendering",
+        "pointer-orbit",
+        "multi-pass",
+        "responsive-canvas"
+      ],
+      "fileCount": 8,
+      "aggregateSha256": "e482c2e45b41d0401c36a47d8c9640646c04c5036eb41dd9939af9889031528a",
+      "manifestUrl": "https://vgpu.labs.vercel.dev/api/examples/v1/revisions/75d85d53ef3738b54caf58174f27e317512a4771693325eb3a390db85cbc3609/examples/raymarched-fractal/manifest.json",
+      "manifestSha256": "3d8e1b0676fd07b5053a665d5f7158160a1151051481bbd94023b0386132d02c"
+    }
+  ]
+}
