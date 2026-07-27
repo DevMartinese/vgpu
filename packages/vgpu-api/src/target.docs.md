@@ -39,7 +39,13 @@ interface Target {
   resize(size: readonly [number, number]): void;
   read(): Promise<Uint8Array>;
   onDestroy(cb: ResourceDestroyCallback<Target>): UnsubscribeResourceDestroy;
-  renderPassDescriptor(clear?: ClearColor, preserve?: boolean): GPURenderPassDescriptor;
+  renderPassDescriptor(opts?: {
+    readonly clear?: ClearColor;
+    readonly preserve?: boolean;
+    readonly clearDepth?: number;
+    readonly clearStencil?: number;
+    readonly depthReadOnly?: boolean;
+  }): GPURenderPassDescriptor;
 }
 
 interface PingPongTargets { readonly read: Target; readonly write: Target; swap(): void; }
@@ -53,8 +59,8 @@ interface PingPongStorage { readonly read: import("vgpu").StorageBuffer; readonl
 | gpu.target.opts | `TargetOptions` | ✔ | — | Creates an offscreen target. `size` is mandatory. |
 | opts.size | `readonly [number, number]` | ✔ | — | Initial offscreen texture size in physical pixels. |
 | opts.format | `GPUTextureFormat` | ✖ | `"rgba8unorm"` | Used for single-color targets when `colors` is omitted. |
-| opts.colors | `readonly { format: GPUTextureFormat }[]` | ✖ | `[{ format: opts.format ?? "rgba8unorm" }]` | MRT color attachments. `target.color` is `colors[0]`. |
-| opts.depth | `boolean \| GPUTextureFormat` | ✖ | `undefined` | `true` means `"depth24plus"`; a string uses that depth format; omitted means no depth. |
+| opts.colors | `readonly { format: GPUTextureFormat }[]` | ✖ | `[{ format: opts.format ?? "rgba8unorm" }]` | Multiple render targets (MRT): one attachment per entry, all written by one pass — the G-buffer layout for deferred shading. `target.color` is `colors[0]`. |
+| opts.depth | `boolean \| GPUTextureFormat` | ✖ | `undefined` | `true` means `"depth24plus"`; a string uses that depth format; omitted means no depth. Combined depth-stencil formats such as `"depth24plus-stencil8"` are supported; stencil-only `"stencil8"` is rejected. |
 | opts.msaa | `boolean \| 4` | ✖ | `false` / sample count `1` | Only `true` or `4` enables MSAA, creating color/depth attachments with sample count `4` and resolving to sampleable `.color(s)`. |
 | opts.label | `string` | ✖ | `undefined` | Prefix for created texture labels. |
 | target.resize.size | `readonly [number, number]` | ✔ | — | Recreates offscreen textures unless size is unchanged. |
@@ -62,14 +68,17 @@ interface PingPongStorage { readonly read: import("vgpu").StorageBuffer; readonl
 | target.onDestroy.cb | `ResourceDestroyCallback<Target>` | ✔ | — | Subscribes to target destruction. |
 | target.renderPassDescriptor.clear | `ClearColor` | ✖ | `[0, 0, 0, 1]` | Clear color for all color attachments unless `preserve` is true. `Frame.pass` supplies `gpu.clearColor` for omitted/`true` clears and a per-pass color when provided. |
 | target.renderPassDescriptor.preserve | `boolean` | ✖ | `false` | Optional implementer hook used by `Frame.pass({ clear: false })`; when true, color and depth attachments should load existing contents and omit clear values. |
+| target.renderPassDescriptor.clearDepth | `number` | ✖ | `1` | Depth clear value used when the pass clears. `Frame.pass` supplies `FramePassOptions.clearDepth`; ignored while preserving and on targets without depth. |
+| target.renderPassDescriptor.clearStencil | `number` | ✖ | `0` | Stencil clear value used when the pass clears. `Frame.pass` supplies `FramePassOptions.clearStencil`; ignored while preserving and on targets whose depth format has no stencil aspect. |
+| target.renderPassDescriptor.depthReadOnly | `boolean` | ✖ | `false` | When true, the depth-stencil attachment is built with `depthReadOnly: true` and omits `depthLoadOp`/`depthStoreOp`, as WebGPU requires for read-only aspects; formats with a stencil aspect also set `stencilReadOnly: true` and omit the stencil ops. `Frame.pass` supplies `FramePassOptions.depthReadOnly`. |
 | gpu.pingPong.width | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | gpu.pingPong.height | `number` | ✔ | — | Floored and clamped to at least `1`. |
 | gpu.pingPong.opts | `TargetTextureOptions` | ✖ | `{}` | Texture options for both targets. Size is intentionally not accepted; positional width/height win. |
 | gpu.pingPongStorage.bytes | `number` | ✔ | — | Creates two `"read-write"` storage buffers. |
 
-**Returns:** `gpu.target()` returns `Target`; `resize()` returns `void`; `read()` returns `Promise<Uint8Array>`; `renderPassDescriptor(clear?, preserve?)` returns a WebGPU render pass descriptor; `gpu.pingPong()` returns `PingPongTargets`; `gpu.pingPongStorage()` returns `PingPongStorage`.
+**Returns:** `gpu.target()` returns `Target`; `resize()` returns `void`; `read()` returns `Promise<Uint8Array>`; `renderPassDescriptor(opts?)` returns a WebGPU render pass descriptor; `gpu.pingPong()` returns `PingPongTargets`; `gpu.pingPongStorage()` returns `PingPongStorage`.
 
-**Throws:** `VGPU-TARGET-SIZE-REQUIRED` when runtime JS calls `gpu.target()` without `size`; `VGPU-TARGET-MSAA-INVALID` when runtime JS passes an unsupported `msaa` value (only `true` / `4` are accepted); `VGPU-RING1-UNSUPPORTED` when `msaa: true` / `4` with `rgba16float` is used on a Dawn compatibility-mode device; underlying core texture/readback operations can throw native WebGPU validation errors.
+**Throws:** `VGPU-TARGET-SIZE-REQUIRED` when runtime JS calls `gpu.target()` without `size`; `VGPU-TARGET-MSAA-INVALID` when runtime JS passes an unsupported `msaa` value (only `true` / `4` are accepted); `VGPU-TARGET-DEPTH-STENCIL-ONLY` when `depth` receives the stencil-only `"stencil8"` format (stencil-only depth targets are not supported yet); `VGPU-RING1-UNSUPPORTED` when `msaa: true` / `4` with `rgba16float` is used on a Dawn compatibility-mode device; underlying core texture/readback operations can throw native WebGPU validation errors.
 
 ## Examples
 
@@ -86,6 +95,36 @@ gpu.frame((frame) => {
   frame.pass({ target: scene, clear: [0, 0, 0, 1] }, (pass) => pass.draw(post));
 });
 ```
+
+```ts
+import { init } from "vgpu/mock";
+
+const gpu = await init();
+// G-buffer for deferred shading: albedo, normals, material parameters.
+const gbuffer = gpu.target({
+  size: [512, 512],
+  colors: [{ format: "rgba8unorm" }, { format: "rgba16float" }, { format: "rgba8unorm" }],
+  depth: true,
+});
+const fill = gpu.draw({
+  shader: `
+    @vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+      var p = array<vec2f, 3>(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
+      return vec4f(p[vi], 0, 1);
+    }
+    struct GBuffer { @location(0) albedo: vec4f, @location(1) normal: vec4f, @location(2) material: vec4f }
+    @fragment fn fs_main() -> GBuffer {
+      return GBuffer(vec4f(0.8, 0.2, 0.2, 1), vec4f(0, 0, 1, 0), vec4f(0.5, 0.1, 0, 0));
+    }
+  `,
+});
+
+gpu.frame((frame) => {
+  frame.pass(gbuffer, fill); // one draw fills all three attachments
+});
+```
+
+One geometry pass fills every G-buffer attachment; a later lighting effect samples them as `gbuffer.colors[0]`–`[2]`. Per-attachment blend/write-mask overrides for MRT draws live on `DrawOptions.colors`.
 
 ```ts
 import { init } from "vgpu/mock";
@@ -131,9 +170,15 @@ pingPong.swap();
 
 ## Notes
 
+- Choose `Target` for offscreen intermediates that must be reused, sampled, read back, or ping-ponged; choose `Surface` only for the canvas swapchain (see `Surface`). A target can be rendered in multiple passes and sampled by later effects.
+- Use simple `format` for one color attachment. Use `colors` when a pass writes multiple attachments (MRT/G-buffer), then consume `target.colors[i]` in later lighting/post passes.
+- Set `depth: true` for ordinary z-testing; choose `depth: "depth24plus-stencil8"` when stencil masking is required. Enable `msaa: true`/`4` for anti-aliased 3D geometry, but do not combine MSAA with `clear: false` preservation or `depthReadOnly`: the internal multisample render attachments (including depth) are discarded, while the resolved `.color(s)` remain sampleable/readable.
+- `target.read()` is intended for tests, snapshots, and diagnostics—not a per-frame hot path. For iterative simulation or post-processing, use `gpu.pingPong(...)` and swap targets instead of readback.
 - There is no global resolution binding. Pass `target.size` or `target.texelSize` explicitly to shaders.
 - `Surface.color` wraps the canvas current texture; offscreen target colors are stable until resize/destroy.
 - `target.read()` and `surface.read()` return RGBA bytes. BGRA canvas formats are read back with red/blue channels swizzled to RGBA.
 - Size-dependent targets derived from a surface should be created from the real initial `surface.size` and resized from `surface.onResize(...)`.
-- Custom `Target` implementers should honor the optional `renderPassDescriptor(clear?, preserve?)` second argument to participate in `Frame.pass({ clear: false })`; older one-argument implementations remain structurally assignable but will clear if they ignore `preserve`.
+- Custom `Target` implementers should honor the optional `renderPassDescriptor(opts?)` options-bag fields to participate in `Frame.pass({ clear: false })`, `FramePassOptions.clearDepth`, `FramePassOptions.clearStencil`, and `FramePassOptions.depthReadOnly`; implementations that ignore a field will clear (with depth `1`, stencil `0`) instead.
+- Depth formats with a stencil aspect (`"depth24plus-stencil8"`, `"depth32float-stencil8"`) emit `stencilLoadOp`/`stencilStoreOp` on the pass depth-stencil attachment, mirroring the depth load/store behavior with `stencilClearValue` from `FramePassOptions.clearStencil` (default `0`), as WebGPU requires when the stencil aspect is writable.
+- `target.depth` is created with `texture_binding` usage in addition to `render_attachment`, so it can be bound with `set()` as a sampled depth texture — including inside the same pass when it opened with `FramePassOptions.depthReadOnly`.
 - **See also:** `Surface`, `FramePassOptions`, `Effect`, `Draw`, `Bundle`, `Compute` storage ping-pong.

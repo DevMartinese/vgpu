@@ -4,11 +4,13 @@ export const exampleSlugs = [
   'anti-aliasing',
   'post-processing',
   'black-hole',
+  'earth',
   'fluid',
   'instanced-rendering',
   'batch-rendering',
   'fft-ocean',
   'raymarched-fractal',
+  'environment-map',
 ] as const;
 
 export type ExampleSlug = (typeof exampleSlugs)[number];

@@ -70,6 +70,7 @@ make should be backed by pixels you actually read.
 - Use `effect.draw(target)` for simple single-pass draws; use `gpu.frame((f) => ...)` to batch multi-pass work and `gpu.frame.loop(...)` for animation.
 - Use `set()` for every binding declared in WGSL; missing bindings fail with `VGPU-R1-BINDING-NEVER-SET`.
 - Keep plain JS values plain from their first `set()`; if you need user-owned lifetime, pass a resource from the first `set()`.
+- Request optional device capabilities at startup with `init({ requiredFeatures: [...] })` — for example `"timestamp-query"` for `gpu.timer()`; a name the adapter lacks fails init with `VGPU-FEATURE-UNSUPPORTED`.
 
 ## Where to go next
 

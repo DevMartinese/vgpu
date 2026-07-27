@@ -16,14 +16,19 @@ export class Readback {
       size: byteLength,
       usage: stagingUsage,
     });
-    const encoder = this.device.createCommandEncoder();
-    encoder.copyBufferToBuffer(source, offset, staging, 0, byteLength);
-    this.device.queue.submit([encoder.finish()]);
-    await staging.mapAsync(mapReadMode());
-    const copy = staging.getMappedRange().slice(0);
-    staging.unmap();
-    staging.destroy();
-    return copy;
+    // Every exit path destroys the staging buffer: on device loss mapAsync rejects (and unmap can throw),
+    // and a skipped destroy would leak one buffer per read for the lifetime of the device.
+    try {
+      const encoder = this.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(source, offset, staging, 0, byteLength);
+      this.device.queue.submit([encoder.finish()]);
+      await staging.mapAsync(mapReadMode());
+      const copy = staging.getMappedRange().slice(0);
+      unmapQuietly(staging);
+      return copy;
+    } finally {
+      destroyQuietly(staging);
+    }
   }
 
   async readTexture(texture: GPUTexture, size: readonly [number, number, number?], format: GPUTextureFormat): Promise<Uint8Array> {
@@ -33,24 +38,41 @@ export class Readback {
     const bytesPerRow = align(width * bytesPerPixel, 256);
     const byteLength = bytesPerRow * height;
     const staging = this.device.createBuffer({ size: byteLength, usage: stagingUsage });
-    const encoder = this.device.createCommandEncoder();
-    encoder.copyTextureToBuffer({ texture }, { buffer: staging, bytesPerRow, rowsPerImage: height }, { width, height });
-    this.device.queue.submit([encoder.finish()]);
-    await staging.mapAsync(mapReadMode());
-    const padded = new Uint8Array(staging.getMappedRange());
-    const pixels = new Uint8Array(width * height * bytesPerPixel);
-    for (let y = 0; y < height; y++) {
-      const src = y * bytesPerRow;
-      const dst = y * width * bytesPerPixel;
-      pixels.set(padded.subarray(src, src + width * bytesPerPixel), dst);
+    // Same contract as read(): unmap is best-effort, destroy is guaranteed even when the device is lost.
+    let pixels: Uint8Array;
+    try {
+      const encoder = this.device.createCommandEncoder();
+      encoder.copyTextureToBuffer({ texture }, { buffer: staging, bytesPerRow, rowsPerImage: height }, { width, height });
+      this.device.queue.submit([encoder.finish()]);
+      await staging.mapAsync(mapReadMode());
+      const padded = new Uint8Array(staging.getMappedRange());
+      pixels = new Uint8Array(width * height * bytesPerPixel);
+      for (let y = 0; y < height; y++) {
+        const src = y * bytesPerRow;
+        const dst = y * width * bytesPerPixel;
+        pixels.set(padded.subarray(src, src + width * bytesPerPixel), dst);
+      }
+      unmapQuietly(staging);
+    } finally {
+      destroyQuietly(staging);
     }
-    staging.unmap();
-    staging.destroy();
     if (formatInfo.swizzle === "bgra-to-rgba") swizzleBgraToRgba(pixels);
     return pixels;
   }
 
   destroy(): void {}
+}
+
+/** Best-effort: a lost device rejects/throws on unmap, and the buffer is destroyed right after anyway. */
+function unmapQuietly(buffer: GPUBuffer): void {
+  try { buffer.unmap(); }
+  catch { /* device lost or already unmapped: destroy still releases the buffer */ }
+}
+
+/** Guaranteed release: never let a cleanup failure replace the original error (or the returned data). */
+function destroyQuietly(buffer: GPUBuffer): void {
+  try { buffer.destroy(); }
+  catch { /* device lost: the buffer dies with the device */ }
 }
 
 function align(value: number, alignment: number): number {

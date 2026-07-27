@@ -12,6 +12,7 @@ export interface MockGPUDeviceInstrumentation {
     createRenderPipeline: number;
     createRenderPipelineAsync: number;
     createComputePipeline: number;
+    createQuerySet: number;
   };
   readonly createBufferDescriptors: GPUBufferDescriptor[];
   readonly createBindGroupLayoutDescriptors: GPUBindGroupLayoutDescriptor[];
@@ -21,18 +22,26 @@ export interface MockGPUDeviceInstrumentation {
   readonly createRenderPipelineDescriptors: GPURenderPipelineDescriptor[];
   readonly createRenderPipelineAsyncDescriptors: GPURenderPipelineDescriptor[];
   readonly createComputePipelineDescriptors: GPUComputePipelineDescriptor[];
+  readonly createQuerySetDescriptors: GPUQuerySetDescriptor[];
+  /** Render-pass occlusion scope ops in encode order: ["begin", queryIndex] / ["end"]. */
+  readonly occlusionQueryOps: Array<readonly ["begin", number] | readonly ["end"]>;
 }
 
 const mockInstrumentationKey = "__vgpuMockInstrumentation";
 
 type InstrumentedGPUDevice = GPUDevice & { [mockInstrumentationKey]?: MockGPUDeviceInstrumentation };
 
-export function createMockGPUDevice(): GPUDevice {
+export interface MockGPUDeviceOptions {
+  /** Features the mock device reports through GPUDevice.features. Defaults to none, matching a device requested without requiredFeatures. */
+  readonly features?: readonly GPUFeatureName[];
+}
+
+export function createMockGPUDevice(options: MockGPUDeviceOptions = {}): GPUDevice {
   const instrumentation = createMockGPUDeviceInstrumentation();
   const device: InstrumentedGPUDevice = {
     [mockInstrumentationKey]: instrumentation,
     limits: createMockSupportedLimits(),
-    features: createMockSupportedFeatures(),
+    features: createMockSupportedFeatures(options.features),
     createBuffer(desc: GPUBufferDescriptor): MockGPUBuffer {
       instrumentation.calls.createBuffer += 1;
       instrumentation.createBufferDescriptors.push(desc);
@@ -101,19 +110,57 @@ export function createMockGPUDevice(): GPUDevice {
         setIndexBuffer() {},
         draw() {},
         drawIndexed() {},
+        drawIndirect() {},
+        drawIndexedIndirect() {},
         finish: () => ({} as GPURenderBundle),
       // Mock render bundle encoder: only state/draw/finish methods used by render tests are implemented.
       } as unknown as GPURenderBundleEncoder;
+    },
+    createQuerySet(desc: GPUQuerySetDescriptor): GPUQuerySet {
+      instrumentation.calls.createQuerySet += 1;
+      instrumentation.createQuerySetDescriptors.push(desc);
+      return {
+        label: desc.label ?? "",
+        type: desc.type,
+        count: desc.count,
+        destroy() {},
+      // Mock query set: type/count/label/destroy are enough for timestampWrites and resolveQuerySet paths.
+      } as unknown as GPUQuerySet;
     },
     createCommandEncoder(desc: GPUCommandEncoderDescriptor = {}): GPUCommandEncoder {
       instrumentation.calls.createCommandEncoder += 1;
       instrumentation.createCommandEncoderDescriptors.push(desc);
       return {
-        copyBufferToBuffer() {},
+        copyBufferToBuffer(source: GPUBuffer, sourceOffset: number, destination: GPUBuffer, destinationOffset: number, size?: number) {
+          if (!isMockGPUBuffer(source) || !isMockGPUBuffer(destination)) return;
+          const bytes = size ?? source.__vgpuMockBytes.length - sourceOffset;
+          destination.__vgpuMockBytes.set(source.__vgpuMockBytes.subarray(sourceOffset, sourceOffset + bytes), destinationOffset);
+        },
+        resolveQuerySet(querySet: GPUQuerySet, firstQuery: number, queryCount: number, destination: GPUBuffer, destinationOffset: number) {
+          if (!isMockGPUBuffer(destination)) return;
+          // Deterministic fake query values so map/decode paths are testable end-to-end without a GPU:
+          // query index i resolves to the u64 i * i * 1e6. Read as timestamp ns ticks, a begin/end pair
+          // at indices (2k, 2k + 1) yields a positive, per-pair-distinct delta of (4k + 1) * 1e6 ns = (4k + 1) ms.
+          // Read as occlusion sample counts (zero vs non-zero), index 0 decodes to "hidden" (0) and every
+          // other index to "visible" (non-zero), covering both decode paths.
+          const view = new DataView(destination.__vgpuMockBytes.buffer, destination.__vgpuMockBytes.byteOffset, destination.__vgpuMockBytes.byteLength);
+          for (let i = 0; i < queryCount; i++) {
+            const index = BigInt(firstQuery + i);
+            view.setBigUint64(destinationOffset + i * 8, index * index * 1_000_000n, true);
+          }
+        },
         copyTextureToBuffer() {},
-        beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, end() {} }) as unknown as GPUComputePassEncoder,
-        // Mock render pass encoder: only binding/pipeline/draw/bundle/end methods used by tests are implemented.
-        beginRenderPass: () => ({ setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, executeBundles() {}, draw() {}, drawIndexed() {}, end() {} }) as unknown as GPURenderPassEncoder,
+        copyTextureToTexture() {},
+        beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, dispatchWorkgroupsIndirect() {}, end() {} }) as unknown as GPUComputePassEncoder,
+        // Mock render pass encoder: only binding/pipeline/draw/bundle/query/end methods used by tests are implemented.
+        // setBlendConstant/setStencilReference/setViewport/setScissorRect and beginOcclusionQuery/endOcclusionQuery are deliberately absent from the mock render bundle encoder above, matching WebGPU (drawIndirect/drawIndexedIndirect are present there, also matching WebGPU).
+        beginRenderPass: () => ({
+          setBindGroup() {}, setVertexBuffer() {}, setIndexBuffer() {}, setPipeline() {}, setBlendConstant() {}, setStencilReference() {}, setViewport() {}, setScissorRect() {}, executeBundles() {}, draw() {}, drawIndexed() {}, drawIndirect() {}, drawIndexedIndirect() {},
+          // Instrumented no-ops so occlusion scope shape (indices + begin/end pairing) is assertable.
+          beginOcclusionQuery(queryIndex: number) { instrumentation.occlusionQueryOps.push(["begin", queryIndex]); },
+          endOcclusionQuery() { instrumentation.occlusionQueryOps.push(["end"]); },
+          end() {},
+        }) as unknown as GPURenderPassEncoder,
         finish: () => ({}),
       // Mock command encoder: only copy/render/finish methods used by core/render are implemented.
       } as unknown as GPUCommandEncoder;
@@ -155,6 +202,7 @@ function createMockGPUDeviceInstrumentation(): MockGPUDeviceInstrumentation {
       createRenderPipeline: 0,
       createRenderPipelineAsync: 0,
       createComputePipeline: 0,
+      createQuerySet: 0,
     },
     createBufferDescriptors: [],
     createBindGroupLayoutDescriptors: [],
@@ -164,6 +212,8 @@ function createMockGPUDeviceInstrumentation(): MockGPUDeviceInstrumentation {
     createRenderPipelineDescriptors: [],
     createRenderPipelineAsyncDescriptors: [],
     createComputePipelineDescriptors: [],
+    createQuerySetDescriptors: [],
+    occlusionQueryOps: [],
   };
 }
 
@@ -204,8 +254,8 @@ function createMockSupportedLimits(): GPUSupportedLimits {
   } as unknown as GPUSupportedLimits;
 }
 
-function createMockSupportedFeatures(): GPUSupportedFeatures {
-  return new Set<GPUFeatureName>() as unknown as GPUSupportedFeatures;
+function createMockSupportedFeatures(features: readonly GPUFeatureName[] = []): GPUSupportedFeatures {
+  return new Set<GPUFeatureName>(features) as unknown as GPUSupportedFeatures;
 }
 
 function createMockBuffer(desc: GPUBufferDescriptor): MockGPUBuffer {

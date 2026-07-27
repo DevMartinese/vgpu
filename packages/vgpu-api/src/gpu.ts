@@ -1,10 +1,10 @@
 import type { ShaderSource } from "@vgpu/wgsl";
 import type { RequiredDeviceLimits, VGPUAdapter } from "@vgpu/core";
-import { Device } from "@vgpu/core";
+import { Device, validateRequiredFeatures } from "@vgpu/core";
 import { createBindGroupCache } from "./bind-cache.ts";
 import { createBundle, type Bundle, type BundleOptions, type BundleRecorder } from "./bundle.ts";
 import { InternalDraw, type Draw, type DrawOptions } from "./draw.ts";
-import { Frame, FrameRunner } from "./frame.ts";
+import { Frame, FrameRunner, type FrameLoopHandle } from "./frame.ts";
 import { InternalEffect, type Effect, type EffectOptions } from "./effect.ts";
 import { createSamplerCache } from "./sampler.ts";
 import { mesh as createSceneMesh } from "./scene/mesh.ts";
@@ -18,6 +18,8 @@ import { createPingPongStorage, createPingPongTargets } from "./ping-pong.ts";
 import { toWgsl } from "./shader-source.ts";
 import { createSharedUniforms } from "./uniforms.ts";
 import { CanvasSurface, type Surface, type SurfaceCanvas, type SurfaceOptions } from "./surface.ts";
+import { createTimer, type Timer } from "./timer.ts";
+import { createVisibility, type Visibility, type VisibilityOptions } from "./visibility.ts";
 import type { ClearColor } from "./target-utils.ts";
 import { createPipelineLayoutCache, createPipelineStore, createShaderModuleCache, type PipelineLayoutCache, type PipelineStore, type SettledSource, type ShaderModuleCache } from "./pipeline-store.ts";
 
@@ -29,9 +31,26 @@ export interface InitOptions {
   readonly label?: string;
 }
 
-export interface ComputeOptions { readonly label?: string; readonly set?: Record<string, unknown> }
-export interface Compute { set(values: Record<string, unknown>): this; dispatch(x: number, y?: number, z?: number): void }
+export interface ComputeOptions {
+  readonly label?: string;
+  readonly set?: Record<string, unknown>;
+  /** Values for WGSL `override` constants, keyed by name (or by numeric id as a string when the override has @id). Immutable after construction. */
+  readonly constants?: Readonly<Record<string, number | boolean>>;
+  /** Compute entry point to use when the shader has several. Defaults to the first @compute entry point. */
+  readonly entry?: string;
+}
+export interface DispatchOptions {
+  /** GPU-driven dispatch: read the workgroup counts from a buffer instead of CPU-side counts. */
+  readonly indirect: StorageBuffer | { readonly buffer: StorageBuffer; readonly offset?: number };
+}
+export interface Compute { set(values: Record<string, unknown>): this; dispatch(x: number, y?: number, z?: number): void; dispatch(opts: DispatchOptions): void }
 export type StorageAccess = "read" | "read-write";
+export interface StorageOptions {
+  /** Binding access for shader reflection. Defaults to "read-write". */
+  readonly access?: StorageAccess;
+  /** Adds the "indirect" buffer usage so the buffer can supply GPU-read draw/dispatch arguments. Defaults to false. */
+  readonly indirect?: boolean;
+}
 export interface StorageBuffer { readonly size: number; readonly access: StorageAccess; read(): Promise<ArrayBuffer>; write(data: BufferSource): void }
 export interface PingPongTargets { readonly read: Target; readonly write: Target; swap(): void }
 export interface PingPongStorage { readonly read: StorageBuffer; readonly write: StorageBuffer; swap(): void }
@@ -55,7 +74,11 @@ export interface Gpu {
   mesh(options: MeshOptions): Mesh;
   dispose(): void;
   compute(source: string | ShaderSource, opts?: ComputeOptions): Compute;
-  storage(bytes: number, access?: StorageAccess): StorageBuffer;
+  storage(bytes: number, access?: StorageAccess | StorageOptions): StorageBuffer;
+  /** GPU pass timing. Needs the "timestamp-query" device feature — request it at init: init({ requiredFeatures: ["timestamp-query"] }). */
+  timer(): Timer;
+  /** Occlusion query results for visibility culling. Core WebGPU — no device feature required. Pass the instance as FramePassOptions.visibility and wrap proxy draws in pass.occlusion(handle, body). */
+  visibility(options?: VisibilityOptions): Visibility;
   pingPong(width: number, height: number, opts?: TargetTextureOptions): PingPongTargets;
   pingPongStorage(bytes: number): PingPongStorage;
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T>;
@@ -85,6 +108,11 @@ class RingGpu implements Gpu {
   readonly #surfaces = new Map<SurfaceCanvas, CanvasSurface>();
   readonly #errorListeners = new Set<GpuErrorListener>();
   readonly #pendingDeliveries = new Set<Promise<void>>();
+  /** Query-based features created by this gpu, disposed with it (each drops itself on its own dispose()). */
+  readonly #timers = new Set<Timer>();
+  readonly #visibilities = new Set<Visibility>();
+  /** Render loops started through gpu.frame.loop(), stopped with the gpu (each drops itself when it stops on its own). */
+  readonly #loops = new Set<FrameLoopHandle>();
   readonly #settledSources = new Set<SettledSource>();
   #disposed = false;
   #advancing = false;
@@ -97,7 +125,7 @@ class RingGpu implements Gpu {
     this.#shaderModules = createShaderModuleCache(device);
     this.#pipelineLayouts = createPipelineLayoutCache(device);
     this.#samplers = createSamplerCache(device);
-    const runner = new FrameRunner(() => new Frame(device, undefined, (error) => this.#reportError(error), (promise) => this.#trackDelivery(promise), () => this.#clearColorValue), () => this.#advanceFrameState());
+    const runner = new FrameRunner(() => new Frame(device, undefined, (error) => this.#reportError(error), (promise) => this.#trackDelivery(promise), () => this.#clearColorValue), () => this.#advanceFrameState(), (handle) => this.#registerLoop(handle));
     this.frame = callableFrameRunner(runner);
   }
 
@@ -135,7 +163,16 @@ class RingGpu implements Gpu {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    // Stop scheduling first: a loop left running would keep encoding frames against a disposed
+    // device (and a rAF tick landing mid-teardown would throw from inside the scheduler).
+    for (const loop of [...this.#loops]) loop.stop();
+    this.#loops.clear();
     for (const surface of [...this.#surfaces.values()]) surface.dispose();
+    // Query features own a query set plus resolve/staging buffers: release them with the gpu that made them.
+    for (const timer of [...this.#timers]) timer.dispose();
+    for (const visibility of [...this.#visibilities]) visibility.dispose();
+    this.#timers.clear();
+    this.#visibilities.clear();
     this.#pipelineStore.dispose();
     this.#shaderModules.dispose();
     this.#pipelineLayouts.dispose();
@@ -144,7 +181,28 @@ class RingGpu implements Gpu {
     this.device.dispose();
   }
   compute(source: string | ShaderSource, opts: ComputeOptions = {}): Compute { return new ComputePipeline(this.device, toWgsl(source), opts, this.#cache); }
-  storage(bytes: number, access: StorageAccess = "read-write"): StorageBuffer { return createStorageBuffer(this.device, bytes, access); }
+  storage(bytes: number, access: StorageAccess | StorageOptions = "read-write"): StorageBuffer {
+    const opts = typeof access === "string" ? { access } : access;
+    return createStorageBuffer(this.device, bytes, opts.access ?? "read-write", undefined, opts.indirect ?? false);
+  }
+  timer(): Timer {
+    const timer: Timer = createTimer(this.device, {
+      trackSettled: (promise) => this.#trackDelivery(promise),
+      errorSink: (error) => this.#reportError(error),
+      onDispose: () => { this.#timers.delete(timer); },
+    });
+    this.#timers.add(timer);
+    return timer;
+  }
+  visibility(options: VisibilityOptions = {}): Visibility {
+    const visibility: Visibility = createVisibility(this.device, options, () => this.frameCount, {
+      trackSettled: (promise) => this.#trackDelivery(promise),
+      errorSink: (error) => this.#reportError(error),
+      onDispose: () => { this.#visibilities.delete(visibility); },
+    });
+    this.#visibilities.add(visibility);
+    return visibility;
+  }
   pingPong(width: number, height: number, opts: TargetTextureOptions = {}): PingPongTargets { return createPingPongTargets(this.device, width, height, opts); }
   pingPongStorage(bytes: number): PingPongStorage { return createPingPongStorage(this.device, bytes); }
   uniforms<T extends Record<string, unknown>>(values: T): SharedUniforms<T> { return createSharedUniforms(this.device, values); }
@@ -161,6 +219,11 @@ class RingGpu implements Gpu {
       ...[...this.#settledSources].flatMap((source) => source()),
     ];
     await Promise.allSettled(snapshot);
+  }
+
+  #registerLoop(handle: FrameLoopHandle): () => void {
+    this.#loops.add(handle);
+    return () => { this.#loops.delete(handle); };
   }
 
   #registerSettledSource(source: SettledSource): () => void {
@@ -230,6 +293,7 @@ async function requestBrowserDevice(opts: InitOptions): Promise<Device> {
   const nav = globalThis.navigator as Navigator & { gpu?: GPU };
   const adapter = await nav.gpu?.requestAdapter({ powerPreference: opts.powerPreference });
   if (!adapter) throw unsupportedError("init", "navigator.gpu.requestAdapter() returned null.");
+  validateRequiredFeatures(adapter.features, opts.requiredFeatures);
   const gpuDevice = await adapter.requestDevice({ requiredFeatures: opts.requiredFeatures, requiredLimits: opts.requiredLimits });
   return new Device(gpuDevice, adapter.info ?? null);
 }

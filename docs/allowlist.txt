@@ -1,6 +1,7 @@
 vgpu init packages/vgpu-api/src/init.docs.md
 vgpu Gpu packages/vgpu-api/src/gpu.docs.md
 vgpu InitOptions packages/vgpu-api/src/init.docs.md
+vgpu/mock createMockAdapter packages/adapter-mock/src/create-mock-adapter.docs.md
 vgpu Effect packages/vgpu-api/src/effect.docs.md
 vgpu EffectOptions packages/vgpu-api/src/effect.docs.md
 vgpu Draw packages/vgpu-api/src/draw.docs.md
@@ -25,8 +26,13 @@ vgpu PingPongStorage packages/vgpu-api/src/target.docs.md
 vgpu SharedUniforms packages/vgpu-api/src/uniforms.docs.md
 vgpu StorageBuffer packages/vgpu-api/src/compute.docs.md
 vgpu StorageAccess packages/vgpu-api/src/compute.docs.md
+vgpu Timer packages/vgpu-api/src/timer.docs.md
+vgpu TimerSpan packages/vgpu-api/src/timer.docs.md
 vgpu Uniform packages/vgpu-api/src/core/uniform.docs.md
 vgpu UniformOptions packages/vgpu-api/src/core/uniform.docs.md
+vgpu Visibility packages/vgpu-api/src/visibility.docs.md
+vgpu VisibilityOptions packages/vgpu-api/src/visibility.docs.md
+vgpu VisibilityQuery packages/vgpu-api/src/visibility.docs.md
 vgpu/core Device packages/core/src/device.docs.md
 vgpu/core DeviceOptions packages/core/src/device.docs.md
 vgpu/core CreateDeviceOptions packages/core/src/device.docs.md
