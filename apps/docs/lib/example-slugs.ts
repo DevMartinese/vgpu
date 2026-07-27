@@ -10,6 +10,7 @@ export const exampleSlugs = [
   'batch-rendering',
   'fft-ocean',
   'raymarched-fractal',
+  'environment-map',
 ] as const;
 
 export type ExampleSlug = (typeof exampleSlugs)[number];

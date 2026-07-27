@@ -100,3 +100,11 @@ test("mock render pass encoders record occlusion query scopes; bundle encoders h
   expect("beginOcclusionQuery" in bundleEncoder).toBe(false);
   expect("endOcclusionQuery" in bundleEncoder).toBe(false);
 });
+
+test("mock command encoder implements the copy methods callers reach for", () => {
+  const encoder = createMockGPUDevice().createCommandEncoder();
+
+  for (const method of ["copyBufferToBuffer", "copyTextureToBuffer", "copyTextureToTexture"] as const) {
+    expect(typeof encoder[method], `encoder.${method} is missing from the mock`).toBe("function");
+  }
+});
