@@ -38,7 +38,9 @@ export function HeroTabs() {
   };
 
   return (
-    <div className="flex w-full flex-col gap-3">
+    // No `gap` on the column: the rule carries its own asymmetric margins (see
+    // below), and a gap would add to both sides equally.
+    <div className="flex w-full flex-col">
       <div
         role="tablist"
         aria-label="Setup option"
@@ -76,9 +78,19 @@ export function HeroTabs() {
         #4D4D4D dead centre and ramps straight down to both ends. A solid centre
         band reads noticeably heavier than the reference.
       */}
+      {/*
+        Asymmetric margins, not a uniform column gap: the rule belongs to the
+        snippet below it, so it sits closer to that than to the tabs above.
+
+        The two numbers are not the two visual gaps. The tabs run `leading-none`
+        (box hugs the glyphs) while the snippet runs `leading-relaxed` (~5px of
+        half-leading above its ink), so an equal margin already reads as a
+        bigger gap underneath. mt-5/mb-2 = 20/8px of box spacing lands at
+        roughly 25/14px of measured ink-to-ink spacing.
+      */}
       <div
         aria-hidden
-        className="h-px w-full bg-[linear-gradient(to_right,transparent,#4D4D4D,transparent)]"
+        className="mb-2 mt-5 h-px w-full bg-[linear-gradient(to_right,transparent,#4D4D4D,transparent)]"
       />
 
       <button
