@@ -67,6 +67,15 @@ export interface HeroSettings {
    * setting — 2 is the intended result.
    */
   diskLayers: number;
+  /**
+   * Maximum scene rotation the mouse can reach, in radians (0 disables it).
+   *
+   * The pointer turns the SCENE around the Y axis, not the camera: the baked
+   * G-buffer stays valid because the geometry is axisymmetric, so this is a
+   * per-frame uniform and never triggers a bake. See `Shade.sceneYaw` in
+   * shade.wgsl for the sign convention and the symmetry precondition.
+   */
+  mouseYaw: number;
   /** Owned by disk.wgsl. */
   disk: DiskLook;
   /** Owned by stars.wgsl. */
@@ -80,31 +89,34 @@ export interface HeroSettings {
  */
 export function defaultHeroSettings(): HeroSettings {
   return {
-    cameraY: 0.135,
-    distance: 16.5,
-    diskRadius: 15.5,
-    fov: 2.65,
+    cameraY: 0.085,
+    distance: 13.5,
+    diskRadius: 10.8,
+    fov: 2.67,
     // Canvas covers the whole hero now, so the hole sits dead center.
     centerY: 0,
     debugView: 0,
     diskLayers: 2,
+    // ~8.6 degrees each way: enough to read as a living, turnable scene without
+    // ever swinging the disk far enough to look like a camera cut.
+    mouseYaw: 0.15,
     disk: {
-      brightness: 0.05,
-      speed: 0.26,
-      stretch: 4.5,
-      detail: 3,
-      turbulence: 3,
-      density: 1,
-      doppler: 1,
-      spare0: -0.04,
-      spare1: -0.77,
-      spare2: -0.15,
-      spare3: -0.51,
+      brightness: 0.098,
+      speed: 0.75,
+      stretch: 5.75,
+      detail: 3.44,
+      turbulence: 4.46,
+      density: 1.38,
+      doppler: 1.21,
+      spare0: 0.43,
+      spare1: -0.25,
+      spare2: -0.67,
+      spare3: 0.69,
     },
     stars: {
-      brightness: 0.79,
-      brightnessMin: 0.05,
-      brightnessMax: 1.1,
+      brightness: 0.82,
+      brightnessMin: 1,
+      brightnessMax: 2.93,
       density: 2.92,
       twinkle: 0,
     },
@@ -123,6 +135,19 @@ export const BAKE_KEYS = ['cameraY', 'distance', 'diskRadius', 'fov', 'centerY']
  * the drag settles (see `resolveBake`).
  */
 const BAKE_THROTTLE_MS = 200;
+
+/**
+ * Smoothing time constant for the mouse-driven scene rotation, in seconds.
+ *
+ * Applied as `k = 1 - exp(-dt / tau)` so the response is frame-rate independent
+ * (a plain `lerp(current, target, 0.05)` would rotate twice as fast on a 120 Hz
+ * display). 0.325 s reproduces exactly that historical 0.05-per-frame feel at
+ * 60 fps.
+ */
+const SCENE_YAW_TAU_S = 0.325;
+
+/** Upper bound on the smoothing timestep, so a backgrounded tab cannot snap. */
+const MAX_FRAME_DT_S = 0.1;
 
 export interface HeroRendererOptions {
   canvas: HTMLCanvasElement;
@@ -191,6 +216,12 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   let forceBake = true;
   let bakedGeometry: number[] | undefined;
   let lastBakeAt = Number.NEGATIVE_INFINITY;
+  // Mouse-driven scene rotation. Pure per-frame state: the listener only writes
+  // a number, the render loop turns it into one uniform, and NOTHING here can
+  // ever schedule a bake (the G-buffer is rotation-invariant by construction).
+  let pointerXNormalized = 0;
+  let currentSceneYaw = 0;
+  let lastYawAt: number | undefined;
 
   const rebake = () => { forceBake = true; };
 
@@ -214,6 +245,41 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     lastBakeAt = now;
     bakedGeometry = BAKE_KEYS.map((key) => settings[key]);
     return true;
+  };
+
+  /**
+   * Pointer -> scene rotation target. The canvas is `pointer-events-none`, so
+   * this listens on `window`: events over the hero copy bubble up all the same.
+   *
+   * Touch and pen are ignored on purpose — a tap would slam the scene to a
+   * corner value and leave it there.
+   */
+  const onPointerMove = (event: PointerEvent) => {
+    if (event.pointerType !== 'mouse') return;
+    const width = Math.max(window.innerWidth, 1);
+    pointerXNormalized = Math.min(1, Math.max(-1, (event.clientX / width) * 2 - 1));
+  };
+  /** Pointer gone (left the window, tab hidden, window blurred): drift back to center. */
+  const recenterPointer = () => { pointerXNormalized = 0; };
+  const onPointerOut = (event: PointerEvent) => {
+    // relatedTarget === null means the pointer left the window, not just one element.
+    if (event.relatedTarget === null) recenterPointer();
+  };
+  const onVisibilityChange = () => { if (document.hidden) recenterPointer(); };
+
+  /**
+   * Advances the smoothed scene rotation and returns the value for this frame.
+   *
+   * Frame-rate independent: `k = 1 - exp(-dt / tau)`. The first frame has no
+   * previous timestamp, so `dt = 0` and the scene starts at exactly 0 — it can
+   * never pop into place on load.
+   */
+  const advanceSceneYaw = (now: number): number => {
+    const dt = lastYawAt === undefined ? 0 : Math.min(Math.max((now - lastYawAt) / 1000, 0), MAX_FRAME_DT_S);
+    lastYawAt = now;
+    const target = pointerXNormalized * Math.max(0, settings.mouseYaw);
+    currentSceneYaw += (target - currentSceneYaw) * (1 - Math.exp(-dt / SCENE_YAW_TAU_S));
+    return currentSceneYaw;
   };
 
   const applyResize = () => {
@@ -265,7 +331,13 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     pendingSize = undefined;
     observer?.disconnect();
     observer = undefined;
-    if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerout', onPointerOut);
+      window.removeEventListener('blur', recenterPointer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    }
     if (targets) destroyTargets(targets);
     targets = undefined;
     surface?.dispose();
@@ -291,6 +363,12 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
     observer?.observe(options.canvas);
     window.addEventListener('resize', onWindowResize);
+    // Passive: the handler only stores a number, it never reads layout, touches
+    // the GPU or cancels the event.
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerout', onPointerOut, { passive: true });
+    window.addEventListener('blur', recenterPointer);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     measure();
     loop = gpu.frame.loop((frame) => {
       if (disposed || !effects || !targets || !surface) return;
@@ -298,9 +376,12 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
       // rebake()) means NO geometry setting can ever be applied without a bake:
       // fov, cameraY & friends are pure bake inputs and the shade pass ignores
       // them, so a missed invalidation would silently do nothing.
-      const runBake = resolveBake(clockMs());
+      const now = clockMs();
+      const runBake = resolveBake(now);
       if (runBake) setBakeUniforms(effects, targets, settings);
-      setShadeUniforms(effects, targets, settings, gpu!.time);
+      // The mouse rotation is a uniform, never a bake: the scene is axisymmetric
+      // so the baked G-buffer is still exact in the rotated frame.
+      setShadeUniforms(effects, targets, settings, gpu!.time, advanceSceneYaw(now));
       renderChain(frame, effects, targets, surface, runBake);
     });
   };
@@ -388,6 +469,7 @@ function setShadeUniforms(
   targets: Targets,
   settings: HeroSettings,
   time: number,
+  sceneYaw: number,
 ): void {
   effects.shade.set({
     shade: {
@@ -396,6 +478,9 @@ function setShadeUniforms(
       diskOuter: settings.diskRadius,
       debugView: settings.debugView,
       diskLayers: settings.diskLayers,
+      // Active rotation of the SCENE (camera yaw would be -sceneYaw). Smoothed
+      // from the pointer by the render loop; the bake never sees it.
+      sceneYaw,
     },
     // Look uniforms are passed straight through: the WGSL structs in disk.wgsl /
     // stars.wgsl are the source of truth for their fields.

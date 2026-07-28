@@ -12,7 +12,7 @@
 // No raymarching happens here: the geodesics were solved once by bake.wgsl.
 // See GBUFFER.md for the full contract.
 
-import { GBufferSample, GBufferLayers, decodeGBuffer, ISCO, PI_CONST } from "./gbuffer.wgsl";
+import { GBufferSample, GBufferLayers, decodeGBuffer, ISCO, PI_CONST, TAU } from "./gbuffer.wgsl";
 import { DiskLook, DiskSample, shadeDisk } from "./disk.wgsl";
 import { StarLook, shadeStars } from "./stars.wgsl";
 
@@ -26,6 +26,24 @@ struct Shade {
   debugView: f32,
   /** 1 = front disk crossing only, 2 = also composite the second crossing. */
   diskLayers: f32,
+  /**
+   * ACTIVE rotation of the whole scene around the Y axis, in radians.
+   *
+   * The camera is frozen by the bake and never moves; the scene (disk + lensed
+   * sky) is rotated instead, which is exact because the geometry is
+   * axisymmetric: Schwarzschild gravity plus a ring centered on `y = 0`. So the
+   * baked G-buffer stays valid and a mouse move costs ONE uniform, never a bake.
+   *
+   * PRECONDITION: it stops being exact the moment anything breaks that symmetry
+   * (a warped/tilted disk, an occluder, non-spherical gravity, world lighting
+   * that does not rotate with the scene).
+   *
+   * Sign: rotating the scene by `+theta` is the same as rotating the camera by
+   * `-theta` (`Bake.yaw` is camera yaw, opposite sign — hence the different
+   * name). The frame pass therefore evaluates the baked samples in the inverse
+   * frame: `R_y(-sceneYaw)`.
+   */
+  sceneYaw: f32,
 }
 
 /**
@@ -69,6 +87,59 @@ fn diskFootprint(g: GBufferSample) -> f32 {
   );
 }
 
+/**
+ * Active rotation around +Y: takes (0,0,r) to (sin(a)r, 0, cos(a)r), the exact
+ * matrix the bake's camera yaw uses. Because the project defines the azimuth as
+ * `atan2(z, x)`, it maps `azimuth -> azimuth - a`.
+ */
+fn rotateY(v: vec3f, angle: f32) -> vec3f {
+  let c = cos(angle);
+  let s = sin(angle);
+  return vec3f(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+}
+
+/** Wraps an angle back into (-PI, PI], the range `diskPolar.y` is contracted to. */
+fn wrapAngle(angle: f32) -> f32 {
+  return angle - TAU * floor((angle + PI_CONST) / TAU);
+}
+
+/**
+ * Re-expresses one baked crossing in the rotated scene.
+ *
+ * The scene is rotated ACTIVELY by `shade.sceneYaw`, so a sample baked in world
+ * space has to be evaluated in the inverse frame: every world vector goes
+ * through `R_y(-sceneYaw)` (the minus is passed in by the caller, on purpose —
+ * it is the whole sign convention and must stay visible).
+ *
+ * Position, view direction and ray direction rotate TOGETHER. Rotating only one
+ * of them would slide the Doppler lobe or the sky against the disk; rotating all
+ * of them keeps every dot product (Doppler beaming, edge-on foreshortening)
+ * bit-for-bit equal to the unrotated scene, because the matrix is orthogonal.
+ *
+ * Invariant, and therefore untouched: the disk radius (`diskPolar.x`,
+ * `diskUv.x`), the normal (0, +/-1, 0), `side`, and all three flags.
+ */
+fn rotateSample(g: GBufferSample, angle: f32) -> GBufferSample {
+  var rotated = g;
+  rotated.position = rotateY(g.position, angle);
+  rotated.viewDirection = rotateY(g.viewDirection, angle);
+  rotated.rayDirection = rotateY(g.rayDirection, angle);
+  // Equivalent to atan2(rotated.position.z, rotated.position.x), but defined for
+  // misses too (their position is exactly (0,0,0), where atan2 is not).
+  let azimuth = wrapAngle(g.diskPolar.y - angle);
+  rotated.diskPolar = vec2f(g.diskPolar.x, azimuth);
+  rotated.diskUv = vec2f(g.diskUv.x, (azimuth + PI_CONST) / TAU);
+  return rotated;
+}
+
+/** Both crossings, moved into the rotated scene by the same transform. */
+fn rotateLayers(layers: GBufferLayers, angle: f32) -> GBufferLayers {
+  var rotated: GBufferLayers;
+  rotated.front = rotateSample(layers.front, angle);
+  rotated.back = rotateSample(layers.back, angle);
+  return rotated;
+}
+
 /** A layer that contributes nothing, so it can be composited unconditionally. */
 fn emptyDiskSample() -> DiskSample {
   var sample: DiskSample;
@@ -98,19 +169,25 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   let dimensions = vec2f(textureDimensions(gHit1, 0));
   let texel = vec2i(clamp(uv * dimensions, vec2f(0.0), dimensions - vec2f(1.0)));
 
-  let layers = decodeGBuffer(
+  let baked = decodeGBuffer(
     textureLoad(gHit1, texel, 0).xy,
     textureLoad(gHit2, texel, 0).xy,
     textureLoad(gSky, texel, 0),
     textureLoad(gView, texel, 0),
     shade.diskOuter,
   );
-  let g = layers.front;
 
   // Both footprints, in uniform control flow. The second layer sits at a
   // different radius and azimuth, so it needs its own measurement.
-  let frontFootprint = diskFootprint(layers.front);
-  let backFootprint = diskFootprint(layers.back);
+  //
+  // Measured on the BAKED samples, before the scene rotation. A rigid rotation
+  // preserves the magnitude of a derivative, but these estimators take a
+  // per-component max (an L-inf norm, not a rotation-invariant one), so
+  // measuring after the rotation would make the LOD breathe by up to ~sqrt(2)
+  // as the mouse moves. The physical (angular / radial) footprint is invariant,
+  // so the pre-rotation measurement is the correct one.
+  let frontFootprint = diskFootprint(baked.front);
+  let backFootprint = diskFootprint(baked.back);
 
   // Angular footprint of the LENSED direction map, in radians per pixel. Also
   // derivatives, so also uniform control flow.
@@ -123,9 +200,11 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   // as "unlensed stars" in a band hugging the shadow — the opposite of what
   // should be there. Same class of bug as the disk moire, same class of fix:
   // measure the footprint and fade the detail that no longer fits in a pixel.
+  // Also measured on the baked direction, for the same reason as above.
+  let bakedRayDirection = baked.front.rayDirection;
   let skyFootprint = max(
-    max(fwidth(g.rayDirection.x), fwidth(g.rayDirection.y)),
-    fwidth(g.rayDirection.z),
+    max(fwidth(bakedRayDirection.x), fwidth(bakedRayDirection.y)),
+    fwidth(bakedRayDirection.z),
   );
   // The correct band-limited value is the sky's MEAN radiance, which for a
   // sparse star field is essentially black, so fading out is the right limit.
@@ -134,6 +213,14 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   // fully gone by 4 and untouched below 1. Do not widen this without re-reading
   // that view -- fading too early eats real stars, too late leaves the speckle.
   let starLod = 1.0 - smoothstep(STAR_CELL, STAR_CELL * 4.0, skyFootprint);
+
+  // Everything below this line looks at the ROTATED scene: the mouse turns the
+  // world around the hole's spin axis, and the baked G-buffer is still exact
+  // because the geometry is axisymmetric (see `Shade.sceneYaw`). Disk and sky
+  // are rotated by the same transform, so they never slide against each other,
+  // and the debug views show what was actually sampled.
+  let layers = rotateLayers(baked, -shade.sceneYaw);
+  let g = layers.front;
 
   var background = vec3f(0.0);
   if (!g.isBlackHole && g.escaped) {

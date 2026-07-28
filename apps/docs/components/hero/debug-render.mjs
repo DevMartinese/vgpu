@@ -20,6 +20,11 @@
 //   --views <list>       comma list of: final,normals,diskuv,flags,raydir,density,skylod,hit2,all
 //   --<key> <value>      any geometry setting: cameraY, distance, diskRadius, fov, centerY
 //   --diskLayers <1|2>   1 = front disk hit only, 2 = also the hidden second hit (A/B)
+//   --yaw <radians>      SCENE yaw applied by the frame pass (default 0). This is the
+//                        instantaneous rotation, not the mouse amplitude: the harness
+//                        has no pointer and no smoothing, so `mouseYaw` is ignored.
+//   --bakeYaw <radians>  CAMERA yaw baked into the G-buffer (default 0). Ground truth
+//                        for the rotation: `--yaw t` must match `--bakeYaw -t`.
 //   --disk.<key> <v>     any DiskLook field (brightness, speed, stretch, detail, ...)
 //   --stars.<key> <v>    any StarLook field (brightness, density, twinkle, ...)
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
@@ -40,30 +45,33 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Keep in sync with `defaultHeroSettings()` in renderer.ts. */
 const DEFAULT_SETTINGS = {
-  cameraY: 0.135,
-  distance: 16.5,
-  diskRadius: 15.5,
-  fov: 2.65,
+  cameraY: 0.085,
+  distance: 13.5,
+  diskRadius: 10.8,
+  fov: 2.67,
   centerY: 0,
   debugView: 0,
   diskLayers: 2,
+  // Mouse amplitude in the browser. The harness has no pointer: use --yaw to set
+  // an instantaneous scene rotation instead.
+  mouseYaw: 0.15,
   disk: {
-    brightness: 0.05,
-    speed: 0.26,
-    stretch: 4.5,
-    detail: 3,
-    turbulence: 3,
-    density: 1,
-    doppler: 1,
-    spare0: -0.04,
-    spare1: -0.77,
-    spare2: -0.15,
-    spare3: -0.51,
+    brightness: 0.098,
+    speed: 0.75,
+    stretch: 5.75,
+    detail: 3.44,
+    turbulence: 4.46,
+    density: 1.38,
+    doppler: 1.21,
+    spare0: 0.43,
+    spare1: -0.25,
+    spare2: -0.67,
+    spare3: 0.69,
   },
   stars: {
-    brightness: 0.79,
-    brightnessMin: 0.05,
-    brightnessMax: 1.1,
+    brightness: 0.82,
+    brightnessMin: 1,
+    brightnessMax: 2.93,
     density: 2.92,
     twinkle: 0,
   },
@@ -85,7 +93,7 @@ const VIEWS = {
 const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
 
 function parseArgs(argv) {
-  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false };
+  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0 };
   const patch = {};
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -103,6 +111,11 @@ function parseArgs(argv) {
       continue;
     }
     if (key === 'time') { options.time = Number(value); continue; }
+    // Scene yaw vs camera yaw: `--yaw t` rotates the scene in the frame pass and
+    // must produce the same image as `--bakeYaw -t`, which rotates the camera and
+    // re-bakes. That equivalence is the whole justification for the feature.
+    if (key === 'yaw') { options.yaw = Number(value); continue; }
+    if (key === 'bakeYaw') { options.bakeYaw = Number(value); continue; }
     if (key === 'views') { options.views = value.split(',').map((v) => v.trim()).filter(Boolean); continue; }
     if (key === 'set') { deepMerge(patch, JSON.parse(value)); continue; }
     setPath(patch, key.split('.'), Number(value));
@@ -195,7 +208,9 @@ async function main() {
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
   bake.set({ bake: {
     resolution: gbuffer.size,
-    yaw: 0,
+    // Camera yaw. The page always bakes with 0 and rotates the scene in the frame
+    // pass instead; this exists only as the ground truth for that rotation.
+    yaw: options.bakeYaw,
     pitch: settings.cameraY,
     orbitRadius: settings.distance,
     diskOuter: settings.diskRadius,
@@ -226,6 +241,8 @@ async function main() {
       diskOuter: settings.diskRadius,
       debugView,
       diskLayers: settings.diskLayers,
+      // Instantaneous scene rotation; the browser smooths it from the pointer.
+      sceneYaw: options.yaw,
     } });
     composite.set({ composite: { exposure: 1.15, debug: debugView > 0 ? 1 : 0 } });
     gpu.frame((frame) => {

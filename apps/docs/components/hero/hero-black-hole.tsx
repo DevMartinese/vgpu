@@ -46,18 +46,25 @@ export function HeroBlackHole() {
     return () => { cancelled = true; rendererRef.current = null; dispose?.(); };
   }, []);
 
-  // Dev tuning panel. Geometry sliders re-run the one-shot bake; the disk-look
-  // sliders are read every frame and need no bake.
+  // Dev tuning panel, gated behind `?debug` (http://localhost:3010/?debug).
+  // Geometry sliders re-run the one-shot bake; the disk-look sliders are read
+  // every frame and need no bake.
   useEffect(() => {
     if (!hasWebGpu) return;
+    // Read the query string straight off `window` instead of useSearchParams:
+    // this is a client-only concern, so it avoids dragging the component into a
+    // Suspense boundary. Bailing out BEFORE the dynamic import below is what
+    // keeps the lil-gui chunk from ever being requested in production.
+    if (!new URLSearchParams(window.location.search).has('debug')) return;
     let cancelled = false;
     let gui: { destroy(): void } | undefined;
 
-    // "hide UI": drops the hero copy (header, H1, tagline, CTAs, tabs, the
-    // legibility gradient) so the shader can be judged on its own. It is only a
+    // "hide UI": drops the hero copy (header, tagline, setup snippet, the
+    // legibility scrim) so the shader can be judged on its own. It is only a
     // class on <html> — see `.hero-solo` in globals.css — so it is instantly
-    // reversible and never unmounts anything. Default ON for now.
-    const ui = { hideUi: true };
+    // reversible and never unmounts anything. Default OFF: the composed page is
+    // the real design now, and this is just a tuning aid.
+    const ui = { hideUi: false };
     const applyHideUi = () => document.documentElement.classList.toggle(HERO_SOLO_CLASS, ui.hideUi);
     applyHideUi();
 
@@ -81,6 +88,12 @@ export function HeroBlackHole() {
       geometry.add(settings, 'fov', 0.6, 5, 0.01).name('fov (focal len)');
       geometry.add(settings, 'centerY', -1, 1, 0.01).name('center Y (ndc, + = up)');
 
+      // Mouse rotation is a per-frame uniform, NOT geometry: the scene is
+      // axisymmetric, so turning it around Y reuses the same baked G-buffer.
+      // 0 disables the interaction entirely.
+      const interaction = panel.addFolder('interaction (per frame)');
+      interaction.add(settings, 'mouseYaw', 0, 0.4, 0.005).name('mouse yaw max (rad)');
+
       // --- disk.wgsl owns this block (DiskLook) ---
       const disk = panel.addFolder('disk look (per frame)');
       // brightness lives near 0.05 now that disk.wgsl carries a much larger
@@ -102,8 +115,11 @@ export function HeroBlackHole() {
       const stars = panel.addFolder('stars (per frame)').close();
       // Per-star emission is `brightness * mix(brightness min, brightness max, hash)`.
       stars.add(settings.stars, 'brightness', 0, 3, 0.01).name('brightness (global)');
-      stars.add(settings.stars, 'brightnessMin', 0, 1, 0.01).name('brightness min');
-      stars.add(settings.stars, 'brightnessMax', 0, 3, 0.01).name('brightness max');
+      // Shared 0..4 scale: min and max are the two ends of one emission range,
+      // so a common axis makes them comparable. It also leaves headroom over the
+      // shipped defaults (1 and 2.93), which were pinned at the old 1 / 3 tops.
+      stars.add(settings.stars, 'brightnessMin', 0, 4, 0.01).name('brightness min');
+      stars.add(settings.stars, 'brightnessMax', 0, 4, 0.01).name('brightness max');
       stars.add(settings.stars, 'density', 0, 6, 0.01).name('density');
       stars.add(settings.stars, 'twinkle', 0, 1, 0.01).name('twinkle');
 

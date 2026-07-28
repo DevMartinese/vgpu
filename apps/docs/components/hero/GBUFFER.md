@@ -107,7 +107,7 @@ Channel details:
   fringes.
 
 Units: `HORIZON = 1.0` (Schwarzschild radius), `ISCO = 3.0`, camera distance
-`settings.distance` (default 16.5), escape radius `max(30, distance + 8)`.
+`settings.distance` (default 13.5), escape radius `max(30, distance + 8)`.
 
 ### The two disk hits
 
@@ -214,7 +214,12 @@ export fn shadeStars(direction: vec3f, look: StarLook, time: f32) -> vec3f
 - `direction` is `g.rayDirection`, i.e. **already bent by gravity** — lensing of
   the star field is free, do not re-derive it.
 - The camera is frozen by the bake and there is **no pointer parallax**: the sky
-  is static, `time` is the only thing that may move (e.g. twinkle).
+  only ever moves as a whole, together with the disk, when the mouse rotates the
+  scene around Y (`Shade.sceneYaw`, see below). `shade.wgsl` hands you the
+  already-rotated `rayDirection`, so `stars.wgsl` needs no changes and must not
+  add a rotation of its own — a second, different rate would slide the sky
+  against the disk. Apart from that, `time` is the only thing that may move
+  (e.g. twinkle).
 - Returns linear HDR color.
 - Star emission is `brightness * mix(brightnessMin, brightnessMax, hash)`: the
   global `brightness` scales the complete field, while `brightnessMin` and
@@ -274,8 +279,9 @@ fade in `shade.wgsl`.
 | `@group(0) @binding(5)` | `disk` | `DiskLook` uniform | `settings.disk` (verbatim) |
 | `@group(0) @binding(6)` | `stars` | `StarLook` uniform | `settings.stars` (verbatim) |
 
-`Shade` carries `resolution`, `time`, `diskOuter`, `debugView` and `diskLayers` —
-nothing camera-related, the bake froze it. G-buffer textures are read with
+`Shade` carries `resolution`, `time`, `diskOuter`, `debugView`, `diskLayers` and
+`sceneYaw` — nothing camera-related, the bake froze it (`sceneYaw` rotates the
+*scene*, not the camera; see below). G-buffer textures are read with
 `textureLoad` (no sampler): the 32-bit float formats are not filterable, and
 interpolating G-buffer values across silhouettes would be wrong anyway.
 
@@ -335,27 +341,31 @@ image as the page.
 
 | Geometry (re-bakes) | | Disk (per frame) | | Stars (per frame) | |
 |---|---|---|---|---|---|
-| `cameraY` | `0.135` | `brightness` | `0.05` | `brightness` (global) | `0.79` |
-| `distance` | `16.5` | `speed` | `0.26` | `brightnessMin` | `0.05` |
-| `diskRadius` | `15.5` | `stretch` | `4.5` | `brightnessMax` | `1.1` |
-| `fov` | `2.65` | `detail` | `3` | `density` | `2.92` |
-| `centerY` | `0` | `turbulence` | `3` | `twinkle` | `0` |
-| | | `density` | `1` | | |
-| | | `doppler` | `1` | | |
-| | | `spare0..3` | `-0.04`, `-0.77`, `-0.15`, `-0.51` | | |
+| `cameraY` | `0.085` | `brightness` | `0.098` | `brightness` (global) | `0.82` |
+| `distance` | `13.5` | `speed` | `0.75` | `brightnessMin` | `1` |
+| `diskRadius` | `10.8` | `stretch` | `5.75` | `brightnessMax` | `2.93` |
+| `fov` | `2.67` | `detail` | `3.44` | `density` | `2.92` |
+| `centerY` | `0` | `turbulence` | `4.46` | `twinkle` | `0` |
+| | | `density` | `1.38` | | |
+| | | `doppler` | `1.21` | | |
+| | | `spare0..3` | `0.43`, `-0.25`, `-0.67`, `0.69` | | |
 
-Plus `debugView: 0` and `diskLayers: 2`.
+Plus `debugView: 0`, `diskLayers: 2` and `mouseYaw: 0.15` (the mouse rotation
+amplitude, ~8.6 deg each way; slider `0..0.4`, `0` disables the interaction).
 
 Two things to know about these values:
 
-- **`disk.brightness = 0.05` is not a typo.** `disk.wgsl` carries a large
+- **`disk.brightness = 0.098` is not a typo.** `disk.wgsl` carries a large
   internal gain, so the useful range of this knob is near zero; its slider is
   `0..0.6` with a `0.002` step for that reason. If `disk.wgsl` ever rebalances
   its gain, this default has to be re-picked with it.
-- Slider ranges in `hero-black-hole.tsx` were widened so **every** default sits
-  with headroom on both sides (`detail` and `turbulence` were previously pinned
-  at their maximum, and `diskRadius 15.5` / `fov 2.65` were within a hair of
-  theirs). When you change a default, check its slider still has room.
+- Slider ranges in `hero-black-hole.tsx` are kept wide enough that **every**
+  default sits with headroom on both sides. Each defaults revision has needed
+  one: `detail`/`turbulence` were once pinned at their maximum, and the star
+  `brightnessMin`/`brightnessMax` sliders were widened from `0..1` / `0..3` to a
+  shared `0..4` when the current `1` / `2.93` landed on their old tops. When you
+  change a default, check its slider still has room — a default pinned at the
+  end of its range means the next person cannot tune past it.
 
 ## Bake invalidation
 
@@ -365,6 +375,7 @@ Two things to know about these values:
 | canvas resize / dpr change | **yes** (immediate) |
 | `re-bake` button / `renderer.rebake()` | **yes** (immediate) |
 | everything under `disk`, `stars`, `debugView` and `diskLayers` | no — per-frame |
+| `mouseYaw` / moving the mouse (scene rotation) | **no, by design** — one uniform per frame |
 
 ### How invalidation is detected
 
@@ -390,11 +401,94 @@ throttle.
 
 ## Camera, orientation and framing
 
-There is **no camera parallax and no pointer input at all**. The bake freezes
-the camera, the G-buffer is sampled 1:1 (`uv` -> texel, no offset), and the sky
-is not rotated. The only motion in the scene is `time` inside `disk.wgsl`
-(and `stars.wgsl` if it uses twinkle). `renderer.ts` registers no
-`pointermove` listener.
+There is **no camera parallax**: the bake freezes the camera and the G-buffer is
+sampled 1:1 (`uv` -> texel, no offset). The camera never moves, not even for the
+mouse — what the mouse moves is the **scene**, see the next section.
+
+## Mouse rotation — `Shade.sceneYaw` (no re-bake)
+
+The pointer rotates the whole scene around the **Y axis**, and that reuses the
+baked G-buffer *exactly*, so a mouse move costs one uniform write and never a
+bake.
+
+**Why it is exact.** The scene is invariant under rotation about Y: Schwarzschild
+gravity is spherically symmetric and the disk is an axisymmetric annulus on
+`y = 0`. So rotating the scene by `theta` and re-baking would produce the same
+photons as rotating the *baked result* by `theta`.
+
+> **Precondition — read before adding geometry.** This stops being exact the
+> moment the Y symmetry breaks: a warped or tilted disk, an occluder, a
+> non-spherical metric, or any world-space lighting that does not rotate with the
+> scene. Anything like that means the mouse has to go back to a real re-bake.
+
+**Sign.** `Shade.sceneYaw` is an **active rotation of the scene**;
+`Bake.yaw` is a **camera** yaw. They are opposite:
+
+```
+scene sceneYaw = +theta   ==   camera Bake.yaw = -theta
+```
+
+so the frame pass evaluates the baked samples in the inverse frame,
+`R_y(-sceneYaw)`, with
+
+```
+R_y(a)(x, y, z) = (cos(a)x + sin(a)z, y, -sin(a)x + cos(a)z)
+```
+
+Mouse to the **right** => `sceneYaw > 0`. If the UX ever wants the opposite
+feel, flip the *mouse mapping* in `renderer.ts`, never the shader formula.
+
+**What gets transformed.** `shade.wgsl` decodes the G-buffer normally and then
+runs `rotateSample()` on **both** layers, front and back:
+
+| Quantity | Under `sceneYaw = theta` |
+|---|---|
+| `position` (`y = 0`) | `R_y(-theta) position` |
+| `viewDirection` | `R_y(-theta) viewDirection` |
+| `rayDirection` | `R_y(-theta) rayDirection` |
+| `diskPolar.y`, `diskUv.y` | `azimuth + theta`, wrapped to `(-PI, PI]` |
+| `diskPolar.x`, `diskUv.x`, `normal`, `side`, `isHit`, flags | unchanged — invariant |
+
+Position, view direction and ray direction have to rotate **together**. The
+matrix is orthogonal, so every dot product survives: Doppler beaming
+(`dot(tangent, -viewDirection)`) and the edge-on term (`abs(viewDirection.y)`)
+come out bit-for-bit the same as in the unrotated scene. Rotating only the disk
+azimuth would be a phase scrub, not a rotation — it would leave the sky behind
+and slide the bright Doppler lobe. Likewise, disk and stars must rotate at the
+**same** rate.
+
+**Footprints are measured BEFORE the rotation.** `diskFootprint` and
+`skyFootprint` take a per-component `max` of `fwidth` — an L-inf norm, which is
+*not* rotation invariant, even though a rigid rotation preserves the true
+derivative magnitude. Measuring after the rotation would make the LOD breathe by
+up to ~sqrt(2) while the mouse moves. So `fs_main` measures on `baked` and only
+then builds the rotated layers.
+
+**Renderer side** (`renderer.ts`): a passive `window` `pointermove` listener
+(the canvas is `pointer-events-none`, events bubble up from the hero copy)
+stores `pointerXNormalized` in `-1..1`; nothing else. Per frame the loop
+computes `target = pointerXNormalized * settings.mouseYaw` and smooths it
+frame-rate independently with `k = 1 - exp(-dt / 0.325s)` (`dt` clamped to
+0..0.1 s), which reproduces the classic `lerp(..., 0.05)` feel at 60 fps without
+doubling the speed at 120 Hz. Touch and pen are ignored (`pointerType`), and
+`pointerout` off the window, `blur` and a hidden tab all send the target back to
+0 so the scene drifts home instead of freezing off-center. The first frame is
+always exactly 0. All four listeners are removed in `dispose()`.
+
+**Verified equivalence** (harness, `960x540`, `t=2.5`, RMSE on the 8-bit PNGs):
+
+| Comparison | `final` | `diskuv` | `raydir` |
+|---|---|---|---|
+| `sceneYaw = 0` vs the pre-feature shader | **0** (bit-identical) | **0** | **0** |
+| `--yaw 0.15` vs `--bakeYaw -0.15` (real re-bake) | 0.0050 | 0.0014 | 0.0004 |
+| `--yaw 0.15` vs `--bakeYaw +0.15` (wrong sign) | 0.0289 | 0.0435 | — |
+
+The residual in the matching pair is silhouette-edge and geodesic-integration
+noise (it lives on one-pixel outlines in the diff), and it is 6x to 30x smaller
+than the wrong-sign pair — which is how the sign was pinned down.
+
+The only other motion in the scene is `time` inside `disk.wgsl` (and
+`stars.wgsl` if it uses twinkle).
 
 ### uv orientation — read this before touching `bake.wgsl`
 
@@ -503,6 +597,8 @@ node apps/docs/components/hero/debug-render.mjs --diskRadius 12 --cameraY 0.3
 node apps/docs/components/hero/debug-render.mjs --set '{"disk":{"brightness":2}}' --json
 node apps/docs/components/hero/debug-render.mjs --views final,hit2                 # second-hit check
 node apps/docs/components/hero/debug-render.mjs --views final --diskLayers 1 --out /tmp/before
+node apps/docs/components/hero/debug-render.mjs --views final,raydir --yaw 0.15        # scene rotation
+node apps/docs/components/hero/debug-render.mjs --views final,raydir --bakeYaw -0.15   # its ground truth
 ```
 
 - Output directory: `--out` (default `/home/user/reports/hero-debug/`), one PNG
@@ -513,14 +609,15 @@ node apps/docs/components/hero/debug-render.mjs --views final --diskLayers 1 --o
 - The script resolves the WGSL import graph with `resolveShader`, exactly like
   the webpack/turbopack loader, so an import mistake fails here first.
 - Reference numbers at `960x540`, **current** default settings, `t=2.5`:
-  `final mean≈0.023 std≈0.049`, `normals mean≈0.744`, `diskuv mean≈0.388`,
-  `flags mean≈0.267`, `raydir mean≈0.429`, `density mean≈0.146`,
-  `skylod mean≈0.687`, `hit2 mean≈0.018`.
-  (`final` is much darker than the pre-`brightness=0.05` numbers purely because
-  of the new default — see *Shipped defaults*.)
-- A/B for the second disk hit at these defaults: `--diskLayers 1` gives
-  `final mean=0.0214`, `--diskLayers 2` gives `0.0225` (**+5.1%** light, RMSE
-  0.0081), all of it in the crescent under the shadow.
+  `final mean≈0.037 std≈0.088`, `normals mean≈0.708`, `diskuv mean≈0.352`,
+  `flags mean≈0.273`, `raydir mean≈0.448`, `density mean≈0.136`,
+  `skylod mean≈0.650`, `hit2 mean≈0.023`.
+  These move with every defaults revision — re-measure them when you change one
+  rather than treating a mismatch as a regression. (`final` roughly doubled from
+  the previous set purely because `disk.brightness` went `0.05 -> 0.098`.)
+- A/B for the second disk hit, measured at the *previous* defaults:
+  `--diskLayers 1` gives `final mean=0.0214`, `--diskLayers 2` gives `0.0225`
+  (**+5.1%** light, RMSE 0.0081), all of it in the crescent under the shadow.
 - Useful analysis helpers live in `/home/user/reports/tools/`:
   `center.mjs` (shadow circle + centering offset from a `flags` PNG),
   `profile.mjs` (radial star-cells-per-pixel profile from a `skylod` PNG),
