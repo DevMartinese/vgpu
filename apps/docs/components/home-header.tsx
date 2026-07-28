@@ -1,8 +1,9 @@
 import Link from 'next/link';
 
 const navLinks = [
+  // No "Docs" entry: /docs redirects to /docs/get-started, so it landed on the
+  // exact same page as "Get started".
   { href: '/docs/get-started', label: 'Get started' },
-  { href: '/docs', label: 'Docs' },
   { href: '/examples', label: 'Examples' },
   { href: 'https://github.com/vercel-labs/vgpu', label: 'Github', external: true },
 ];
