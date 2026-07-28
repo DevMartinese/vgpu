@@ -4,6 +4,10 @@ import { referenceGroups, recordHref } from '@/lib/manifest';
 
 const featuredSymbols = ['init', 'Gpu', 'Effect', 'Draw', 'Compute', 'Frame', 'Bundle', 'Target', 'SharedUniforms', 'PingPongStorage'];
 
+function docsHref(href: string) {
+  return `/docs${href}`;
+}
+
 export default function ReferencePage() {
   const allRecords = referenceGroups.flatMap((group) => group.records);
   const featuredRecords = featuredSymbols
@@ -26,7 +30,7 @@ export default function ReferencePage() {
           {featuredRecords.map((record) => (
             <Link
               key={record.symbol}
-              href={recordHref(record)}
+              href={docsHref(recordHref(record))}
               className="group rounded-lg border border-gray-4 bg-gray-1 p-5 transition-all hover:border-gray-5 hover:bg-gray-2/50"
             >
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -76,7 +80,7 @@ export default function ReferencePage() {
                 {group.topics.map((topic) => (
                   <Link
                     key={topic.href}
-                    href={topic.href}
+                    href={docsHref(topic.href)}
                     className="group rounded-md border border-gray-4 bg-black/30 px-3 py-2 text-sm transition-colors hover:border-gray-5 hover:bg-gray-2/50"
                   >
                     <div className="flex items-center justify-between gap-2">

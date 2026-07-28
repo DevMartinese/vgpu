@@ -1,11 +1,8 @@
 import Link from 'next/link';
-import { Breadcrumbs } from '@/components/breadcrumbs';
-import { PageNavigation } from '@/components/page-navigation';
 import { notFound } from 'next/navigation';
 import { CodeViewer } from '@/components/code-viewer';
 import { ExamplePreview } from '@/components/example-preview';
 import { examples, getExample } from '@/lib/examples-registry';
-import { getBreadcrumbs, getPrevNext } from '@/lib/nav';
 
 interface ExampleDetailPageProps {
   params: Promise<{ slug: string }>;
@@ -22,13 +19,10 @@ export default async function ExampleDetailPage({ params, searchParams }: Exampl
   const example = getExample(slug);
   if (!example) notFound();
 
-  const pathname = `/examples/${example.meta.slug}`;
-  const { prev, next } = getPrevNext(pathname);
 
   return (
     <div className="px-6 py-8 lg:px-8 xl:px-12">
       <div className="mx-auto max-w-3xl">
-        <Breadcrumbs items={getBreadcrumbs(pathname)} />
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-gray-12 md:text-4xl">
@@ -50,7 +44,6 @@ export default async function ExampleDetailPage({ params, searchParams }: Exampl
           <ExamplePreview slug={example.meta.slug} title={example.meta.title} poster={example.meta.hero} />
           <CodeViewer files={example.sources} activeFile={activeFile} />
         </div>
-        <PageNavigation prev={prev} next={next} />
       </div>
     </div>
   );

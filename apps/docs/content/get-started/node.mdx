@@ -8,15 +8,15 @@ relatedSymbols:
 prevNext:
   prev:
     title: Web
-    href: /get-started/web
+    href: /docs/get-started/web
   next:
     title: Context
-    href: /concepts/context
+    href: /docs/concepts/context
 ---
 
 # Node.js
 
-In Node.js, vgpu renders headless through Dawn — the same API, no canvas, no browser. Import `init` from `vgpu/node`, render into an offscreen [`Target`](/reference/vgpu/target#target), and read the pixels back.
+In Node.js, vgpu renders headless through Dawn — the same API, no canvas, no browser. Import `init` from `vgpu/node`, render into an offscreen [`Target`](/docs/reference/vgpu/target#target), and read the pixels back.
 
 ## Install
 
@@ -45,7 +45,7 @@ prints the exact fix as JSON. Run it once before debugging anything else.
 Air-gapped or custom environments can point `VGPU_DAWN_BINARY` at a local
 binary. When no binary can be resolved, `init()` throws a structured
 `VGPU-NODE-PREBUILD-MISSING` error that names the exact reason and fix. See
-[`createNodeAdapter`](/reference/vgpu-adapter-node/create-node-adapter) for the
+[`createNodeAdapter`](/docs/reference/vgpu-adapter-node/create-node-adapter) for the
 full resolution order.
 
 ## Choose an environment
@@ -105,7 +105,7 @@ try {
 ```
 
 For loader resolution, distro-specific dependencies, Docker, and lifecycle
-details, see [`createNodeDevice`](/reference/vgpu-adapter-node/create-node-device).
+details, see [`createNodeDevice`](/docs/reference/vgpu-adapter-node/create-node-device).
 
 ## Save a PNG
 

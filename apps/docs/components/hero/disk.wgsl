@@ -1,0 +1,357 @@
+// ACCRETION DISK SHADER — this file is meant to be iterated on.
+//
+// Owned by the "disk" workstream. You can rewrite everything below `shadeDisk`
+// freely; just keep the exported signatures stable:
+//
+//   struct DiskLook { ... }                                  <- uniform payload, see GBUFFER.md
+//   struct DiskSample { color: vec3f, alpha: f32, density: f32 }
+//   fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32) -> DiskSample
+//
+// WGSL modules must stay pure: never declare @group/@binding here. The entry
+// shader (shade.wgsl) owns the bindings and passes `look` in by value.
+
+import { GBufferSample, HORIZON, ISCO } from "./gbuffer.wgsl";
+
+/**
+ * Per-frame disk tuning, uploaded as `disk` uniform by renderer.ts.
+ * Every field must exist in `HeroSettings.disk` on the TS side, same names.
+ * `spare0..spare3` are pre-wired free knobs (default 0) so new parameters can
+ * be prototyped without touching renderer.ts / hero-black-hole.tsx.
+ */
+export struct DiskLook {
+  /** Overall emission gain. */
+  brightness: f32,
+  /** Keplerian rotation speed multiplier. */
+  speed: f32,
+  /** Angular noise scale: lower = smoke stretched over a wider arc. */
+  stretch: f32,
+  /** Radial noise frequency: higher = thinner, more numerous filaments. */
+  detail: f32,
+  /** Chaos gain; grows toward the outer rim. */
+  turbulence: f32,
+  /** Opacity of the smoke (how much of the baked background it hides). */
+  density: f32,
+  /** Relativistic beaming strength. */
+  doppler: f32,
+  /** spare0: lensed-arc lift. Extra emission for face-on (lensed) disk pixels. Offset around +0. */
+  spare0: f32,
+  /** spare1: spiral pitch offset. Logarithmic winding of the filaments. Offset around +0. */
+  spare1: f32,
+  /** spare2: filament contrast offset. Higher = darker lanes / harder streaks. */
+  spare2: f32,
+  /** spare3: outer fray offset. Extra raggedness + shortening of the outer filaments. */
+  spare3: f32,
+}
+
+export struct DiskSample {
+  /** Linear HDR emission, already premultiplied by its own coverage. */
+  color: vec3f,
+  /** 0..1 coverage used to occlude the baked background behind the disk. */
+  alpha: f32,
+  /** Raw coverage, exposed for the "disk density" debug view. */
+  density: f32,
+}
+
+fn hash31(p: vec3f) -> f32 {
+  var q = fract(p * vec3f(0.1031, 0.1030, 0.0973));
+  q += vec3f(dot(q, q.yzx + vec3f(33.33)));
+  return fract((q.x + q.y) * q.z);
+}
+
+// Value noise in 3D. The disk samples it through a cylindrical embedding
+// (cos/sin of the azimuth on XY, radius on Z), which is exactly periodic in the
+// azimuth — no atan2 branch cut, so no radial seam across the disk.
+fn noise3(p: vec3f) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let c000 = hash31(i);
+  let c100 = hash31(i + vec3f(1.0, 0.0, 0.0));
+  let c010 = hash31(i + vec3f(0.0, 1.0, 0.0));
+  let c110 = hash31(i + vec3f(1.0, 1.0, 0.0));
+  let c001 = hash31(i + vec3f(0.0, 0.0, 1.0));
+  let c101 = hash31(i + vec3f(1.0, 0.0, 1.0));
+  let c011 = hash31(i + vec3f(0.0, 1.0, 1.0));
+  let c111 = hash31(i + vec3f(1.0, 1.0, 1.0));
+  let x00 = mix(c000, c100, u.x);
+  let x10 = mix(c010, c110, u.x);
+  let x01 = mix(c001, c101, u.x);
+  let x11 = mix(c011, c111, u.x);
+  return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+/**
+ * Anisotropic cylindrical fBm — the core of the "stretched smoke" look.
+ *
+ * Every octave doubles (or more) the RADIAL frequency but only barely raises
+ * the ANGULAR one (`lacAng` ~ 1.4 vs `lacRad` ~ 2.3). Detail therefore piles up
+ * across the flow and almost none along it: features come out as very long
+ * tangential filaments instead of round puffs. That anisotropy is the whole
+ * trick — an isotropic fBm can never look like Interstellar's disk.
+ *
+ * `dAngle` / `dRadius` are the screen footprints of one pixel along the angular
+ * and the radial axis (derived in `shadeDisk` from the projected pixel
+ * ellipse); octaves finer than a pixel fade to the mean, otherwise the edge-on
+ * band aliases into moire.
+ */
+fn streakFbm(
+  angle: f32,
+  radius: f32,
+  angScale: f32,
+  radScale: f32,
+  octaves: i32,
+  /** radians of azimuth covered by one pixel (see `pixelEllipse` in shadeDisk). */
+  dAngle: f32,
+  /** world radius covered by one pixel. */
+  dRadius: f32,
+  lacAng: f32,
+  lacRad: f32,
+  seed: f32,
+) -> f32 {
+  var value = 0.0;
+  var total = 0.0;
+  var amplitude = 0.5;
+  var a = angScale;
+  var r = radScale;
+  var offset = seed;
+  for (var i = 0; i < octaves; i++) {
+    // Per-axis Nyquist fade. `dAngle * a` is how much the cos/sin pair moves
+    // across one pixel, `dRadius * r` the same for the radial axis.
+    let visible = clamp(1.0 - 1.7 * max(dAngle * a, dRadius * r), 0.0, 1.0);
+    // Skipping the hash when the octave is invisible is a real win: the edge-on
+    // band (where the radial frequency explodes) is a large share of the pixels.
+    var sampleValue = 0.5;
+    if (visible > 0.004) {
+      sampleValue = mix(0.5, noise3(vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset)), visible);
+    }
+    value += amplitude * sampleValue;
+    total += amplitude;
+    a *= lacAng;
+    r *= lacRad;
+    offset += 23.7;
+    amplitude *= 0.55;
+  }
+  return value / max(total, 0.0001);
+}
+
+/**
+ * Ridged variant of `streakFbm`: every octave is folded through
+ * `1 - |2n - 1|`, so its crests become thin, sharp lines instead of soft blobs.
+ * With a radial-dominant scale (high `radScale`, low `angScale`) those crests
+ * are level sets of nearly constant radius — i.e. long tangential filaments,
+ * which is precisely the Interstellar thread look. Plain value fBm can only
+ * ever give soft clouds because its lowest octave carries half the energy.
+ */
+fn ridgeFbm(
+  angle: f32,
+  radius: f32,
+  angScale: f32,
+  radScale: f32,
+  octaves: i32,
+  dAngle: f32,
+  dRadius: f32,
+  lacAng: f32,
+  lacRad: f32,
+  seed: f32,
+) -> f32 {
+  var value = 0.0;
+  var total = 0.0;
+  var amplitude = 0.5;
+  var a = angScale;
+  var r = radScale;
+  var offset = seed;
+  for (var i = 0; i < octaves; i++) {
+    let visible = clamp(1.0 - 1.7 * max(dAngle * a, dRadius * r), 0.0, 1.0);
+    var crest = 0.42;
+    if (visible > 0.004) {
+      let n = noise3(vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset));
+      // 0.42 is the mean of the folded noise, so an invisible octave decays to
+      // the same average the visible one would have produced.
+      crest = mix(0.42, pow(1.0 - abs(n * 2.0 - 1.0), 1.35), visible);
+    }
+    value += amplitude * crest;
+    total += amplitude;
+    a *= lacAng;
+    r *= lacRad;
+    offset += 41.9;
+    amplitude *= 0.62;
+  }
+  return value / max(total, 0.0001);
+}
+
+/**
+ * Shades one disk pixel from the baked G-buffer sample.
+ * `g.isHit` is guaranteed true when the entry shader calls this.
+ */
+export fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32) -> DiskSample {
+  let plane = vec2f(g.position.x, g.position.z);
+  let radius = g.diskPolar.x;
+  let azimuth = g.diskPolar.y;
+  let radiusNorm = clamp(g.diskUv.x, 0.0, 1.0);
+  let viewDirection = g.viewDirection;
+
+  // --- viewing geometry --------------------------------------------------
+  // How edge-on this pixel is. `grazing` is the slab path length multiplier,
+  // and it also tells us how badly the radial axis is compressed on screen.
+  let slant = max(abs(viewDirection.y), 0.022);
+  let grazing = min(1.0 / slant, 34.0);
+
+  // shade.wgsl can only hand us ONE footprint: the max over the angular and the
+  // radial axis. That is catastrophic for this look — near edge-on the radial
+  // axis is compressed by ~`grazing` while the tangential one stays perfectly
+  // resolved, so the max blurs away exactly the long streaks we want in the
+  // bright band. Recover the anisotropy analytically instead.
+  //
+  // One pixel projects onto the disk plane as an ellipse whose long axis lies
+  // along the projected view direction and is `grazing` times the short one.
+  // Decompose that ellipse onto the radial and tangential axes:
+  let viewPlane = normalize(vec2f(viewDirection.x, viewDirection.z) + vec2f(1e-6, 0.0));
+  let radialDir = normalize(plane + vec2f(1e-6, 0.0));
+  let alignR = clamp(abs(dot(radialDir, viewPlane)), 0.0, 1.0);
+  let alignT = sqrt(max(1.0 - alignR * alignR, 0.0));
+  let stretchSq = grazing * grazing - 1.0;
+  let kR = sqrt(1.0 + stretchSq * alignR * alignR);   // radial elongation
+  let kT = sqrt(1.0 + stretchSq * alignT * alignT);   // tangential elongation
+  // Invert shade.wgsl's `footprint = max(detail * dR, stretch * dTheta)` for the
+  // isotropic pixel size, then redistribute it over the two axes.
+  let baseScaleR = max(look.detail, 0.05);
+  let baseScaleA = max(look.stretch, 0.05);
+  let pixelWorld = footprint / max(baseScaleR * kR, baseScaleA * kT / max(radius, ISCO));
+  let dRadius = pixelWorld * kR;
+  let dAngle = pixelWorld * kT / max(radius, ISCO);
+
+  // --- flow coordinates --------------------------------------------------
+  // Keplerian differential rotation: inner shells shear past outer ones, which
+  // is what winds the filaments up into ever tighter spirals over time.
+  let omega = look.speed * 0.55 / pow(radius, 1.5);
+  // A static logarithmic-spiral twist on top, so the streaks read as arms and
+  // not as perfectly concentric vinyl grooves.
+  let swirl = max(0.0, 0.85 + look.spare1);
+  let angle = azimuth - time * omega + swirl * log(radius / ISCO);
+
+  // Turbulence budget: laminar and bright inside, curdled and frayed outside.
+  let outward = smoothstep(0.0, 0.92, radiusNorm);
+  let fray = max(0.0, 1.0 + look.spare3);
+  let chaos = look.turbulence * (0.08 + 2.10 * outward * outward) * fray;
+
+  // Angular scale: the inner disk is stretched over a much wider arc than the
+  // rim (shear dominates there), the rim breaks into shorter tufts.
+  let angBase = max(look.stretch, 0.05) * 0.45 * (0.80 + 1.45 * outward * fray);
+  let radBase = max(look.detail, 0.05) * 2.35;
+  // Radial scale of the "flow" layer. It is deliberately ~20x coarser than the
+  // filament layer: a coordinate that barely changes with radius is the only
+  // thing that survives the Nyquist fade in the edge-on band, and it is what
+  // paints the long bright/dark streaks ALONG the band.
+  let flowRad = max(look.detail, 0.05) * 0.105;
+
+  // --- advection ----------------------------------------------------------
+  // Two low-frequency layers displace the sampling point mostly RADIALLY: that
+  // makes the filaments meander across the flow while staying tangential, i.e.
+  // frayed rather than blobby. Amplitude follows `chaos`, so the rim shreds.
+  let warpA = streakFbm(angle, radius, angBase * 0.55, flowRad * 1.6, 2, dAngle, dRadius, 1.6, 2.0, 3.7) - 0.5;
+  // warpB is deliberately short-wavelength in AZIMUTH: a warp that is smooth all
+  // the way around only slides the threads sideways and keeps the silky-ring
+  // look. This is the layer that actually shreds the rim.
+  let warpB = streakFbm(angle + 2.4, radius * 1.13, angBase * 2.8, radBase * 0.45, 3, dAngle, dRadius, 1.7, 2.0, 61.3) - 0.5;
+  let radiusW = radius + (warpA * 1.9 + warpB * 1.25 * outward) * chaos;
+  let angleW = angle + (warpB * 0.9 - warpA * 0.35) * chaos * 0.55 / max(radius * 0.22, 0.35);
+
+  // --- the smoke field ----------------------------------------------------
+  // `flow`: angular-dominant, nearly flat radially. Its level sets run ACROSS
+  // the flow, so it must stay low frequency — it is the slow bright/dark
+  // modulation along the band, the only structure that survives edge-on.
+  let flow = streakFbm(angleW, radiusW, angBase, flowRad, 3, dAngle, dRadius, 2.0, 1.12, 131.7);
+  // `threads`: ridged and radial-dominant -> the long tangential filaments.
+  // Level sets of a radius-dominated field are curves of nearly constant
+  // radius, which is what "stretched along the rotation" means geometrically.
+  let threads = ridgeFbm(angleW, radiusW, angBase * 0.85, radBase, 5, dAngle, dRadius, 1.26, 2.05, 0.0);
+
+  // How much of the thread layer this pixel can actually resolve. Blending with
+  // `mix` instead of a fixed sum matters: an unresolved fBm decays to a flat
+  // constant and would otherwise wash the contrast out of the whole band.
+  let fineVis = clamp(1.0 - 1.7 * max(dAngle * angBase * 0.85, dRadius * radBase), 0.0, 1.0);
+  var field = mix(flow, flow * 0.22 + threads * 1.05, fineVis);
+
+  // --- density / emissivity split ------------------------------------------
+  // Ragged rim: the outer cutoff radius itself is noisy, so the disk dissolves
+  // into wisps instead of ending on a clean circle.
+  let rimNoise = (warpA + warpB * 0.5) * 0.9;
+  let innerEdge = smoothstep(0.0, 0.055, radiusNorm);
+  let outerEdge = 1.0 - smoothstep(0.42 + rimNoise * 0.30 * fray, 1.0, radiusNorm);
+  let envelope = innerEdge * outerEdge * mix(1.0, 0.62, outward);
+
+  let contrast = max(0.2, 1.0 + look.spare2);
+  let lo = 0.50 - 0.16 / contrast;
+  let hi = 0.50 + 0.21 / contrast;
+  // A gamma on top of the remap, not just a narrower window: it is what opens
+  // real black lanes between the threads instead of a uniform gray sheet.
+  var smoke = clamp(pow(smoothstep(lo, hi, field), 1.0 + 0.9 * contrast) * envelope, 0.0, 1.0);
+
+  // A softer, wider remap of the same field drives the SURFACE BRIGHTNESS.
+  // This is the piece that makes the streaks readable: where the slab is
+  // optically thick (the whole edge-on band) opacity is pinned at 1 and can no
+  // longer show anything, so the bright/dark lanes have to live in the emission.
+  let fieldN = clamp((field - (lo - 0.10)) / max(hi - lo + 0.26, 0.02), 0.0, 1.0);
+  // The crest term is what turns a gray sheet into glowing threads: the top of
+  // the ridge overshoots well past 1 and blows out, the flanks stay mid-gray.
+  let emissivity = (mix(0.05, 1.0, pow(fieldN, 1.35)) + 2.2 * pow(fieldN, 5.0)) * envelope;
+
+  // --- radiative transfer --------------------------------------------------
+  // The G-buffer stores a hard surface, but the disk must read as a thin slab:
+  // the matter a ray traverses grows as 1/|dir.y|. The exponent compresses that
+  // 20:1 edge-on/face-on ratio — with the raw 1/|dir.y| the front band is
+  // opaque while the lensed arc over the shadow stays a ghost, which is exactly
+  // the failure mode this shader is meant to fix.
+  let path = pow(grazing, 0.62);
+  let thickness = mix(0.30, 0.85, radiusNorm);
+  let opticalDepth = smoke * thickness * path * look.density * 0.95;
+  let coverage = 1.0 - exp(-opticalDepth);
+
+  // Thermal gradient: white-hot at ISCO, deep orange at the rim. Only the
+  // luminance matters — composite.wgsl desaturates to 0.
+  let heat = pow(1.0 - radiusNorm, 1.25);
+  var thermal = mix(vec3f(0.52, 0.14, 0.03), vec3f(1.0, 0.56, 0.17), smoothstep(0.03, 0.5, heat));
+  thermal = mix(thermal, vec3f(1.0, 0.94, 0.83), pow(heat, 2.2));
+
+  // Relativistic beaming, deliberately gentle (Interstellar tones it down so the
+  // disk stays nearly symmetric instead of one side being ~200x brighter).
+  let tangent = normalize(vec3f(-plane.y, 0.0, plane.x));
+  let orbitalSpeed = min(0.64, 0.94 / sqrt(max(radius - HORIZON, 0.25)));
+  let towardObserver = dot(tangent, -normalize(viewDirection));
+  let beaming = pow(clamp(1.0 / (1.0 - orbitalSpeed * towardObserver), 0.72, 1.55), 1.5 * look.doppler);
+  let redshift = sqrt(max(1.0 - HORIZON / radius, 0.025));
+
+  // The underside of the disk reads slightly dimmer than the top face.
+  let facing = mix(0.82, 1.0, step(0.0, g.side));
+
+  // Thin-disk flux profile: emission per unit area collapses with radius.
+  let flux = pow(clamp(ISCO / radius, 0.0, 1.0), 1.7);
+  // Incandescent core: the last few gravitational radii before the ISCO carry
+  // most of the luminosity and should clip to white.
+  let core = 1.0 + 2.6 * pow(1.0 - radiusNorm, 5.0);
+
+  // Source function = surface brightness of the slab. shade.wgsl multiplies our
+  // color by `alpha`, so the emergent intensity is S * (1 - exp(-tau)): it
+  // SATURATES instead of growing with path length. That is what stops the
+  // edge-on front band from out-shining everything and lets the lensed arc over
+  // the shadow read as an equal partner.
+  //
+  // `arcLift` then deliberately over-weights the face-on pixels — the arc is the
+  // signature Interstellar shape and we want it to lead, not to survive.
+  let arcLift = max(0.0, 1.0 + look.spare0);
+  let faceOn = smoothstep(0.16, 0.75, abs(viewDirection.y));
+  let lift = 1.0 + 1.55 * arcLift * faceOn;
+  // A small, bounded edge-on boost keeps the razor-thin incandescent silhouette.
+  let edgeGlow = 1.0 + 0.55 * smoothstep(6.0, 26.0, grazing);
+
+  let source = thermal * beaming * redshift * facing * flux * lift * edgeGlow * core * emissivity;
+  let emission = source * look.brightness * 1.35;
+
+  var sample: DiskSample;
+  sample.color = emission;
+  // Wispy edges: coverage never quite reaches 1 at the fringes, so the baked
+  // background (stars / horizon) bleeds through the smoke.
+  sample.alpha = coverage;
+  sample.density = coverage;
+  return sample;
+}

@@ -2,6 +2,10 @@ import Link from 'next/link';
 import { DocsPageShell } from '@/components/docs-page-shell';
 import { guideRecords, recordHref, titleForRecord } from '@/lib/manifest';
 
+function docsHref(href: string) {
+  return `/docs${href}`;
+}
+
 export default function GuidesPage() {
   return (
     <DocsPageShell pathname="/guides" articleClassName="min-w-0 max-w-5xl">
@@ -17,7 +21,7 @@ export default function GuidesPage() {
         {guideRecords.map((record) => (
           <Link
             key={record.symbol}
-            href={recordHref(record)}
+            href={docsHref(recordHref(record))}
             className="group rounded-lg border border-gray-4 bg-gray-1 p-5 transition-all hover:border-gray-5 hover:bg-gray-2/50"
           >
             <h2 className="font-semibold text-gray-12 group-hover:text-blue-9 transition-colors">

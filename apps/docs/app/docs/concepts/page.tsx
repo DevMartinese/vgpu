@@ -24,7 +24,7 @@ export default function ConceptsPage() {
         {pages.map(({ slug, page }) => (
           <Link
             key={slug}
-            href={`/concepts/${slug}`}
+            href={`/docs/concepts/${slug}`}
             className="flex flex-col gap-1 rounded-lg border border-gray-4 bg-gray-1 p-4 transition-colors hover:border-gray-5 hover:bg-gray-2 sm:flex-row sm:items-baseline sm:gap-3"
           >
             <span className="font-medium text-gray-12">{page.frontmatter.title}</span>

@@ -22,6 +22,10 @@ export async function generateMetadata({ params }: ConceptPageProps) {
   };
 }
 
+function docsHref(href: string) {
+  return `/docs${href}`;
+}
+
 export default async function ConceptPage({ params }: ConceptPageProps) {
   const { slug } = await params;
   const concept = getConceptPage(slug);
@@ -37,7 +41,7 @@ export default async function ConceptPage({ params }: ConceptPageProps) {
   return (
     <article className="px-4 py-8 lg:px-8 lg:py-12 max-w-6xl mx-auto">
       <nav className="mb-8 flex flex-wrap items-center gap-2 text-sm text-gray-9">
-        <Link href="/concepts" className="hover:text-blue-9 transition-colors">Concepts</Link>
+        <Link href="/docs/concepts" className="hover:text-blue-9 transition-colors">Concepts</Link>
         <span>/</span>
         <span className="text-gray-11">{frontmatter.title}</span>
       </nav>
@@ -53,7 +57,7 @@ export default async function ConceptPage({ params }: ConceptPageProps) {
                 {relatedApi.map(({ symbol, record }) => record ? (
                   <Link
                     key={symbol}
-                    href={recordHref(record)}
+                    href={docsHref(recordHref(record))}
                     className="rounded-full border border-gray-4 bg-black/30 px-3 py-1 text-sm text-gray-10 transition-colors hover:border-gray-5 hover:text-blue-9"
                   >
                     <code>{symbol}</code>
@@ -70,13 +74,13 @@ export default async function ConceptPage({ params }: ConceptPageProps) {
           {frontmatter.prevNext?.prev || frontmatter.prevNext?.next ? (
             <nav className="mt-10 grid gap-3 sm:grid-cols-2" aria-label="Concept navigation">
               {frontmatter.prevNext.prev ? (
-                <Link href={frontmatter.prevNext.prev.href} className="rounded-lg border border-gray-4 bg-gray-1 p-4 transition-colors hover:border-gray-5 hover:bg-gray-2">
+                <Link href={docsHref(frontmatter.prevNext.prev.href)} className="rounded-lg border border-gray-4 bg-gray-1 p-4 transition-colors hover:border-gray-5 hover:bg-gray-2">
                   <span className="block text-xs uppercase tracking-wider text-gray-8">Previous</span>
                   <span className="mt-1 block text-gray-12">{frontmatter.prevNext.prev.title}</span>
                 </Link>
               ) : <div />}
               {frontmatter.prevNext.next ? (
-                <Link href={frontmatter.prevNext.next.href} className="rounded-lg border border-gray-4 bg-gray-1 p-4 text-right transition-colors hover:border-gray-5 hover:bg-gray-2">
+                <Link href={docsHref(frontmatter.prevNext.next.href)} className="rounded-lg border border-gray-4 bg-gray-1 p-4 text-right transition-colors hover:border-gray-5 hover:bg-gray-2">
                   <span className="block text-xs uppercase tracking-wider text-gray-8">Next</span>
                   <span className="mt-1 block text-gray-12">{frontmatter.prevNext.next.title}</span>
                 </Link>

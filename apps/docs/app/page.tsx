@@ -1,8 +1,16 @@
 import Link from 'next/link';
+import localFont from 'next/font/local';
 import { Card } from '@/components/card';
 import { ExampleCard } from '@/components/example-card';
+import { HomeHeader } from '@/components/home-header';
 import { HeroTabs } from '@/components/hero-tabs';
+import { HeroBlackHole } from '@/components/hero/hero-black-hole';
 import { exampleMetadataBySlug } from '@/lib/examples-metadata';
+
+const geistSerif = localFont({
+  src: './fonts/GeistSerifV0.2-Regular.otf',
+  display: 'swap',
+});
 
 const featuredExamples = [
   exampleMetadataBySlug['black-hole'],
@@ -31,27 +39,25 @@ const pillars = [
 
 export default function HomePage() {
   return (
-    <div className="px-6 pb-16 lg:px-12 lg:pb-20">
-      <section className="min-h-[90svh] max-w-6xl mx-auto flex flex-col justify-center mb-16">
-        <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-          <div className="text-left">
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-gray-12 mb-6 tracking-tight">vgpu</h1>
-            <p className="text-balance text-lg md:text-xl text-gray-10 mb-4 max-w-2xl leading-relaxed">The low-level WebGPU library, designed for agents.</p>
-            <div className="mb-8 flex flex-wrap gap-2 text-sm text-gray-9">
-              {['WGSL modules', 'Agent-ready', 'Web + Node.js'].map((pillar) => (
-                <span key={pillar} className="rounded-full border border-gray-4 px-3 py-1">{pillar}</span>
-              ))}
-            </div>
-            <div className="flex gap-5">
-              <Link href="/get-started" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Get started →</Link>
-              <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">Examples →</Link>
-            </div>
+    <>
+      <HomeHeader />
+      <main className="pb-16 lg:pb-20">
+      <section className="relative flex min-h-svh items-center justify-center overflow-hidden text-center">
+        <HeroBlackHole />
+        {/* data-hero-overlay: hidden by the panel's "hide UI" toggle (globals.css). */}
+        <div data-hero-overlay className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.36),rgba(0,0,0,0.1)_55%,rgba(0,0,0,0.5))]" />
+        <div data-hero-overlay className="relative z-10 mx-auto w-full max-w-4xl px-6">
+          <h1 style={{ WebkitTextStroke: '1px white' }} className={`${geistSerif.className} mb-6 text-5xl font-normal tracking-tight text-black md:text-6xl lg:text-7xl`}>vgpu</h1>
+          <p className="mx-auto mb-8 max-w-2xl text-balance text-lg leading-relaxed text-gray-10 [text-shadow:0_1px_12px_rgb(0_0_0_/_0.9)] md:text-xl">The low-level WebGPU library, designed for agents.</p>
+          <div className="mb-8 flex justify-center gap-5">
+            <Link href="/docs/get-started" className="text-sm text-gray-9 transition-colors hover:text-gray-12 [text-shadow:0_1px_12px_rgb(0_0_0_/_0.9)]">Get started →</Link>
+            <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12 [text-shadow:0_1px_12px_rgb(0_0_0_/_0.9)]">Examples →</Link>
           </div>
-          <HeroTabs />
+          <div className="mx-auto max-w-xl"><HeroTabs /></div>
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto mb-24">
+      <section className="mx-auto mb-24 max-w-6xl px-6 lg:px-12">
         <div className="flex items-center justify-between gap-4 mb-6">
           <h2 className="text-2xl font-semibold text-gray-12">Examples</h2>
           <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">View all →</Link>
@@ -63,7 +69,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="max-w-4xl mx-auto mb-24">
+      <section className="mx-auto mb-24 max-w-4xl px-6 lg:px-12">
         <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-10">Why vgpu</h2>
         <div className="grid md:grid-cols-3 gap-4">
           {pillars.map((pillar) => (
@@ -82,13 +88,13 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="max-w-4xl mx-auto">
+      <section className="mx-auto max-w-4xl px-6 lg:px-12">
         <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-12">Explore the Docs</h2>
         <div className="grid md:grid-cols-2 gap-4">
           {[
-            ['/get-started', 'Getting Started', 'Install `vgpu` and render with `init()`.'],
-            ['/concepts', 'Core Concepts', 'Learn Gpu, set(), targets, frames, bundles, and adapters.'],
-            ['/reference', 'API Reference', 'Package map and generated topic pages.'],
+            ['/docs/get-started', 'Getting Started', 'Install `vgpu` and render with `init()`.'],
+            ['/docs/concepts', 'Core Concepts', 'Learn Gpu, set(), targets, frames, bundles, and adapters.'],
+            ['/docs/reference', 'API Reference', 'Package map and generated topic pages.'],
             ['/examples', 'Examples', 'Live WebGPU demos with read-only source views.'],
           ].map(([href, title, description]) => (
             <Link key={href} href={href} className="group p-6 rounded-lg bg-gray-1 border border-gray-4 hover:border-gray-5 transition-all">
@@ -98,6 +104,7 @@ export default function HomePage() {
           ))}
         </div>
       </section>
-    </div>
+      </main>
+    </>
   );
 }

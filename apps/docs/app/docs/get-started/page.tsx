@@ -8,12 +8,12 @@ export const metadata = {
 const platforms = [
   {
     title: 'Web',
-    href: '/get-started/web',
+    href: '/docs/get-started/web',
     description: 'Render to a canvas with WebGPU, and set up the .wgsl loader for Next.js or Vite.',
   },
   {
     title: 'Node.js',
-    href: '/get-started/node',
+    href: '/docs/get-started/node',
     description: 'Render headless through Dawn — save a PNG or assert on pixels in a test.',
   },
 ];
@@ -28,7 +28,7 @@ export default function GetStartedPage() {
       </p>
 
       <Link
-        href="/get-started/agents"
+        href="/docs/get-started/agents"
         className="mt-8 block rounded-lg border border-gray-4 bg-gray-1 p-6 transition-colors hover:border-gray-5 hover:bg-gray-2"
       >
         <h2 className="text-lg font-semibold text-gray-12">Agents</h2>
@@ -56,7 +56,7 @@ export default function GetStartedPage() {
       </p>
 
       <Link
-        href="/concepts"
+        href="/docs/concepts"
         className="mt-6 block rounded-lg border border-gray-4 bg-gray-1 p-4 transition-colors hover:border-gray-5 hover:bg-gray-2"
       >
         <span className="font-medium text-gray-12">Concepts</span>

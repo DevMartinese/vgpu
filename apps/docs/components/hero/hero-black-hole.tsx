@@ -1,0 +1,154 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { BAKE_KEYS, createRenderer, defaultHeroSettings, type HeroRenderer } from './renderer';
+
+/**
+ * Set on <html> by the panel's "hide UI" toggle. The matching rule lives in
+ * app/globals.css and hides every `[data-hero-overlay]` element, so the hero is
+ * nothing but the shader (the lil-gui panel is outside the hero and stays).
+ */
+const HERO_SOLO_CLASS = 'hero-solo';
+
+export function HeroBlackHole() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const settingsRef = useRef(defaultHeroSettings());
+  const rendererRef = useRef<HeroRenderer | null>(null);
+  const [hasWebGpu, setHasWebGpu] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let dispose: (() => void) | undefined;
+
+    async function initialize() {
+      try {
+        const adapter = await navigator.gpu?.requestAdapter();
+        const canvas = canvasRef.current;
+        if (cancelled || !adapter || !canvas) return;
+        const renderer = createRenderer({
+          canvas,
+          settings: settingsRef.current,
+          onError: (error) => {
+            console.warn('[hero-black-hole] renderer failed, falling back to static image:', error);
+            if (!cancelled) setHasWebGpu(false);
+          },
+        });
+        rendererRef.current = renderer;
+        dispose = renderer.dispose;
+        setHasWebGpu(true);
+        await renderer.ready;
+      } catch {
+        if (!cancelled) setHasWebGpu(false);
+      }
+    }
+
+    void initialize();
+    return () => { cancelled = true; rendererRef.current = null; dispose?.(); };
+  }, []);
+
+  // Dev tuning panel. Geometry sliders re-run the one-shot bake; the disk-look
+  // sliders are read every frame and need no bake.
+  useEffect(() => {
+    if (!hasWebGpu) return;
+    let cancelled = false;
+    let gui: { destroy(): void } | undefined;
+
+    // "hide UI": drops the hero copy (header, H1, tagline, CTAs, tabs, the
+    // legibility gradient) so the shader can be judged on its own. It is only a
+    // class on <html> — see `.hero-solo` in globals.css — so it is instantly
+    // reversible and never unmounts anything. Default ON for now.
+    const ui = { hideUi: true };
+    const applyHideUi = () => document.documentElement.classList.toggle(HERO_SOLO_CLASS, ui.hideUi);
+    applyHideUi();
+
+    void import('lil-gui').then(({ default: GUI }) => {
+      if (cancelled) return;
+      const settings = settingsRef.current;
+      const rebake = () => rendererRef.current?.rebake();
+      const panel = new GUI({ title: 'black hole' });
+      panel.domElement.style.top = '72px';
+
+      // Geometry invalidates the baked G-buffer. No onChange wiring needed: the
+      // renderer polls BAKE_KEYS every frame and re-bakes on a throttle with a
+      // trailing edge, so dragging a slider stays smooth and the released value
+      // always gets baked. That also makes it impossible to forget a key here.
+      const geometry = panel.addFolder(`geometry (auto re-bakes: ${BAKE_KEYS.join(', ')})`);
+      // Slider ranges are sized to leave headroom on BOTH sides of the shipped
+      // default, so every knob stays tunable from the panel without editing code.
+      geometry.add(settings, 'cameraY', -0.4, 0.6, 0.005).name('camera Y (rad)');
+      geometry.add(settings, 'distance', 6, 40, 0.5).name('size (camera dist)');
+      geometry.add(settings, 'diskRadius', 3.5, 30, 0.1).name('disk radius');
+      geometry.add(settings, 'fov', 0.6, 5, 0.01).name('fov (focal len)');
+      geometry.add(settings, 'centerY', -1, 1, 0.01).name('center Y (ndc, + = up)');
+
+      // --- disk.wgsl owns this block (DiskLook) ---
+      const disk = panel.addFolder('disk look (per frame)');
+      // brightness lives near 0.05 now that disk.wgsl carries a much larger
+      // internal gain, so this slider is deliberately fine-grained.
+      disk.add(settings.disk, 'brightness', 0, 0.6, 0.002).name('brightness');
+      disk.add(settings.disk, 'speed', 0, 2, 0.005).name('rotation speed');
+      disk.add(settings.disk, 'stretch', 0.2, 12, 0.05).name('tangential stretch');
+      disk.add(settings.disk, 'detail', 0.1, 8, 0.01).name('radial detail');
+      disk.add(settings.disk, 'turbulence', 0, 8, 0.01).name('turbulence');
+      disk.add(settings.disk, 'density', 0, 3, 0.01).name('smoke density');
+      disk.add(settings.disk, 'doppler', 0, 2, 0.01).name('doppler');
+      const diskSpares = disk.addFolder('spare knobs').close();
+      diskSpares.add(settings.disk, 'spare0', -2, 2, 0.01).name('disk spare 0');
+      diskSpares.add(settings.disk, 'spare1', -2, 2, 0.01).name('disk spare 1');
+      diskSpares.add(settings.disk, 'spare2', -2, 2, 0.01).name('disk spare 2');
+      diskSpares.add(settings.disk, 'spare3', -2, 2, 0.01).name('disk spare 3');
+
+      // --- stars.wgsl owns this block (StarLook) ---
+      const stars = panel.addFolder('stars (per frame)').close();
+      // Per-star emission is `brightness * mix(brightness min, brightness max, hash)`.
+      stars.add(settings.stars, 'brightness', 0, 3, 0.01).name('brightness (global)');
+      stars.add(settings.stars, 'brightnessMin', 0, 1, 0.01).name('brightness min');
+      stars.add(settings.stars, 'brightnessMax', 0, 3, 0.01).name('brightness max');
+      stars.add(settings.stars, 'density', 0, 6, 0.01).name('density');
+      stars.add(settings.stars, 'twinkle', 0, 1, 0.01).name('twinkle');
+
+      const debug = panel.addFolder('debug');
+      debug.add(ui, 'hideUi').name('hide UI (hero copy)').onChange(applyHideUi);
+      debug.add(settings, 'debugView', {
+        off: 0,
+        'normals / side': 1,
+        'disk coords': 2,
+        'flags (hit/hole/sky)': 3,
+        'lensed ray dir': 4,
+        'disk density': 5,
+        'sky footprint / star LOD': 6,
+        'second disk hit': 7,
+      }).name('g-buffer view');
+      // A/B for the second baked disk crossing: 1 shows what the renderer looked
+      // like when a ray stopped at its first hit, 2 is the intended result.
+      debug.add(settings, 'diskLayers', {
+        'front hit only': 1,
+        'front + hidden hit': 2,
+      }).name('disk layers');
+
+      const actions = {
+        'copy JSON': () => {
+          void navigator.clipboard?.writeText(JSON.stringify(settings, null, 2));
+        },
+        're-bake': rebake,
+      };
+      panel.add(actions, 'copy JSON');
+      panel.add(actions, 're-bake');
+      gui = panel;
+    });
+
+    return () => {
+      cancelled = true;
+      gui?.destroy();
+      document.documentElement.classList.remove(HERO_SOLO_CLASS);
+    };
+  }, [hasWebGpu]);
+
+  // Full-bleed: the canvas covers the entire hero section, with no gradient mask.
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-black">
+      <img src="/examples/black-hole.card.png" alt="" className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${hasWebGpu ? 'opacity-0' : 'opacity-100 saturate-[0.35]'}`} />
+      <canvas ref={canvasRef} className={`pointer-events-none absolute inset-0 h-full w-full transition-opacity duration-500 ${hasWebGpu ? 'opacity-100' : 'opacity-0'}`} />
+    </div>
+  );
+}

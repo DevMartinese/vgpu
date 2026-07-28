@@ -4,6 +4,10 @@ import Link from 'next/link';
 import { useState } from 'react';
 import type { NavGroup, NavItem } from '@/lib/nav';
 
+function docsHref(href: string) {
+  return href === '/examples' ? href : `/docs${href}`;
+}
+
 interface PackageNavProps {
   groups: NavGroup[];
   pathname: string;
@@ -83,7 +87,7 @@ function NavItemEntry({ item, pathname, onNavigate, depth }: NavItemEntryProps) 
     <li>
       {hasChildren ? (
         <div className="flex items-center gap-0.5">
-          <Link href={item.href} onClick={onNavigate} className={`min-w-0 flex-1 ${linkClassName}`} title={item.title}>
+          <Link href={docsHref(item.href)} onClick={onNavigate} className={`min-w-0 flex-1 ${linkClassName}`} title={item.title}>
             {item.title}
             {item.badge ? <span className="ml-2 text-[10px] uppercase text-yellow-10">{item.badge}</span> : null}
           </Link>
@@ -108,7 +112,7 @@ function NavItemEntry({ item, pathname, onNavigate, depth }: NavItemEntryProps) 
           </button>
         </div>
       ) : (
-        <Link href={item.href} onClick={onNavigate} className={linkClassName} title={item.title}>
+        <Link href={docsHref(item.href)} onClick={onNavigate} className={linkClassName} title={item.title}>
           {item.title}
           {item.badge ? <span className="ml-2 text-[10px] uppercase text-yellow-10">{item.badge}</span> : null}
         </Link>
@@ -120,7 +124,7 @@ function NavItemEntry({ item, pathname, onNavigate, depth }: NavItemEntryProps) 
             return (
               <li key={child.href}>
                 <Link
-                  href={child.href}
+                  href={docsHref(child.href)}
                   onClick={onNavigate}
                   className={`block truncate rounded-md py-1.5 pr-3 text-sm transition-colors ${depth > 0 ? 'pl-9' : 'pl-6'} ${
                     childActive

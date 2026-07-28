@@ -192,3 +192,12 @@ pre [data-highlighted-chars] {
 .link-animated:hover::after {
   @apply w-full;
 }
+
+/* Hero "solo shader" mode.
+   Toggled from the black-hole tuning panel ("hide UI"); see HERO_SOLO_CLASS in
+   components/hero/hero-black-hole.tsx. Hides every hero overlay so the shader
+   can be judged on its own, without unmounting anything. `visibility` keeps the
+   layout intact, so turning it back off restores the page exactly. */
+html.hero-solo [data-hero-overlay] {
+  visibility: hidden;
+}

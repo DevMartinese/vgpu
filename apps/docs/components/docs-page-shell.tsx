@@ -26,9 +26,9 @@ export function DocsPageShell({
     <div className={`px-4 py-8 lg:px-8 lg:py-12 ${className}`}>
       <div className={`mx-auto grid max-w-7xl gap-10 ${hasToc ? 'xl:grid-cols-[minmax(0,1fr)_16rem]' : ''}`}>
         <article className={articleClassName}>
-          <Breadcrumbs items={breadcrumbs} />
+          <Breadcrumbs items={breadcrumbs} docs />
           {children}
-          <PageNavigation prev={prev} next={next} />
+          <PageNavigation prev={prev} next={next} docs />
         </article>
         {hasToc ? <TableOfContents items={toc} /> : null}
       </div>

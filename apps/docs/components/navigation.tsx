@@ -6,8 +6,13 @@ import { useState } from 'react';
 import { navSections, type NavGroup, type NavItem, type NavSection } from '@/lib/nav';
 import { PackageNav } from './package-nav';
 
+function docsHref(href: string) {
+  return href === '/examples' ? href : `/docs${href}`;
+}
+
 export function Navigation() {
   const pathname = usePathname();
+  const navPathname = pathname.startsWith('/docs') ? pathname.slice('/docs'.length) || '/' : pathname;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -40,7 +45,7 @@ export function Navigation() {
               className="flex items-center gap-3 group"
               onClick={() => setMobileMenuOpen(false)}
             >
-              <svg className="w-5 h-5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
                 <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
               </svg>
               <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
@@ -53,7 +58,7 @@ export function Navigation() {
               <NavSectionBlock
                 key={section.title}
                 section={section}
-                pathname={pathname}
+                pathname={navPathname}
                 onNavigate={() => setMobileMenuOpen(false)}
                 className={idx > 0 ? 'mt-4' : ''}
               />
@@ -102,11 +107,11 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
     section.href && pathname === section.href ? 'text-gray-12' : 'text-gray-9'
   }`;
 
-  if (section.href && section.groups.length === 0) {
+  if (section.href === '/examples' || (section.href && section.groups.length === 0)) {
     return (
       <div className={className}>
         <Link
-          href={section.href}
+          href={docsHref(section.href)}
           onClick={onNavigate}
           aria-current={pathname === section.href ? 'page' : undefined}
           className={`${titleClassName} block px-3 py-1 hover:text-gray-12`}
@@ -121,7 +126,7 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
     <div className={className}>
       <div className="mb-1 flex items-center justify-between pl-3 pr-1">
         {section.href ? (
-          <Link href={section.href} onClick={onNavigate} className={`${titleClassName} hover:text-gray-12`}>
+          <Link href={docsHref(section.href)} onClick={onNavigate} className={`${titleClassName} hover:text-gray-12`}>
             {section.title}
           </Link>
         ) : (
