@@ -13,7 +13,7 @@
 // See GBUFFER.md for the full contract.
 
 import { GBufferSample, GBufferLayers, decodeGBuffer, ISCO, PI_CONST, TAU } from "./gbuffer.wgsl";
-import { DiskLook, DiskSample, shadeDisk } from "./disk.wgsl";
+import { DiskLook, DiskSample, shadeDisk, SHEAR_PERIOD } from "./disk.wgsl";
 import { StarLook, shadeStars } from "./stars.wgsl";
 
 struct Shade {
@@ -75,7 +75,7 @@ const DISK_GAIN: f32 = 1.35;
  */
 fn diskFootprint(g: GBufferSample) -> f32 {
   let angular = max(disk.stretch, 0.05);
-  let noiseAngle = g.diskPolar.y - shade.time * (disk.speed * 0.55 / pow(g.diskPolar.x, 1.5));
+  let noiseAngle = g.diskPolar.y - min(shade.time, SHEAR_PERIOD * 0.5) * (disk.speed * 0.55 / pow(g.diskPolar.x, 1.5));
   let noiseCoords = vec3f(
     cos(noiseAngle) * angular,
     sin(noiseAngle) * angular,

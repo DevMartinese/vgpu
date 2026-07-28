@@ -179,6 +179,71 @@ fn ridgeFbm(
   return value / max(total, 0.0001);
 }
 
+/** Everything the smoke field needs besides the sheared flow coordinate. */
+struct FieldParams {
+  angBase: f32,
+  radBase: f32,
+  flowRad: f32,
+  chaos: f32,
+  outward: f32,
+  dAngle: f32,
+  dRadius: f32,
+}
+
+/**
+ * The whole smoke field for ONE value of the flow coordinate.
+ *
+ * Split out of `shadeDisk` because the shear-recycling scheme below has to
+ * evaluate it twice, at two different advection phases. Returns
+ * `vec2f(field, rimNoise)` — the rim wobble is a by-product of the warp layers
+ * and must come from the same phase as the field it frays.
+ */
+fn smokeField(angle: f32, radius: f32, p: FieldParams) -> vec2f {
+  // --- advection ----------------------------------------------------------
+  // Two low-frequency layers displace the sampling point mostly RADIALLY: that
+  // makes the filaments meander across the flow while staying tangential, i.e.
+  // frayed rather than blobby. Amplitude follows `chaos`, so the rim shreds.
+  let warpA = streakFbm(angle, radius, p.angBase * 0.55, p.flowRad * 1.6, 2, p.dAngle, p.dRadius, 1.6, 2.0, 3.7) - 0.5;
+  // warpB is deliberately short-wavelength in AZIMUTH: a warp that is smooth all
+  // the way around only slides the threads sideways and keeps the silky-ring
+  // look. This is the layer that actually shreds the rim.
+  let warpB = streakFbm(angle + 2.4, radius * 1.13, p.angBase * 2.8, p.radBase * 0.45, 3, p.dAngle, p.dRadius, 1.7, 2.0, 61.3) - 0.5;
+  let radiusW = radius + (warpA * 1.9 + warpB * 1.25 * p.outward) * p.chaos;
+  let angleW = angle + (warpB * 0.9 - warpA * 0.35) * p.chaos * 0.55 / max(radius * 0.22, 0.35);
+
+  // --- the smoke field ----------------------------------------------------
+  // `flow`: angular-dominant, nearly flat radially. Its level sets run ACROSS
+  // the flow, so it must stay low frequency — it is the slow bright/dark
+  // modulation along the band, the only structure that survives edge-on.
+  let flow = streakFbm(angleW, radiusW, p.angBase, p.flowRad, 3, p.dAngle, p.dRadius, 2.0, 1.12, 131.7);
+  // `threads`: ridged and radial-dominant -> the long tangential filaments.
+  // Level sets of a radius-dominated field are curves of nearly constant
+  // radius, which is what "stretched along the rotation" means geometrically.
+  let threads = ridgeFbm(angleW, radiusW, p.angBase * 0.85, p.radBase, 5, p.dAngle, p.dRadius, 1.26, 2.05, 0.0);
+
+  // How much of the thread layer this pixel can actually resolve. Blending with
+  // `mix` instead of a fixed sum matters: an unresolved fBm decays to a flat
+  // constant and would otherwise wash the contrast out of the whole band.
+  let fineVis = clamp(1.0 - 1.7 * max(p.dAngle * p.angBase * 0.85, p.dRadius * p.radBase), 0.0, 1.0);
+  let field = mix(flow, flow * 0.22 + threads * 1.05, fineVis);
+  // Ragged rim: feeds a noisy outer cutoff radius so the disk dissolves into
+  // wisps instead of ending on a clean circle.
+  let rim = (warpA + warpB * 0.5) * 0.9;
+  return vec2f(field, rim);
+}
+
+/** Mean of `smokeField().x`. Only used as the pivot of the contrast rescale. */
+const FIELD_MEAN = 0.52;
+/**
+ * Radius whose orbit defines the RIGID part of the rotation. Picked so the
+ * residual differential rate, weighted by the local angular noise scale, is
+ * balanced between the ISCO and the rim (see the shear notes in `shadeDisk`).
+ */
+const SHEAR_REF_RADIUS = 6.5;
+/** Seconds after which each shear lobe recycles. Max stored shear is half this. */
+export const SHEAR_PERIOD: f32 = 10.0;
+const TWO_PI = 6.283185307;
+
 /**
  * Shades one disk pixel from the baked G-buffer sample.
  * `g.isHit` is guaranteed true when the entry shader calls this.
@@ -220,14 +285,53 @@ export fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32)
   let dRadius = pixelWorld * kR;
   let dAngle = pixelWorld * kT / max(radius, ISCO);
 
-  // --- flow coordinates --------------------------------------------------
-  // Keplerian differential rotation: inner shells shear past outer ones, which
-  // is what winds the filaments up into ever tighter spirals over time.
+  // --- flow coordinates: Keplerian rotation with RECYCLED shear ------------
+  // Keplerian differential rotation winds the filaments up: the accumulated
+  // phase is `t * omega(r)`, so the shear the field sees is its radial
+  // derivative, `t * omega'(r)`, which grows WITHOUT BOUND. After ~90 s it
+  // dominates the radial frequency of the thread layer, the threads stop being
+  // tangential, collapse below the pixel footprint and the disk degrades into a
+  // gray smear. That is the "it keeps stretching" bug, and no amount of tuning
+  // fixes it — the fix has to be structural.
+  //
+  // Split the rotation in two parts:
+  //
+  //   phase(r, t) = t * omegaRef            <- RIGID: same for every annulus
+  //               + (omega(r) - omegaRef) * shear(t)   <- DIFFERENTIAL
+  //
+  // The rigid part costs nothing to run forever: the field is sampled through
+  // `cos/sin(angle)`, i.e. it is EXACTLY 2*pi-periodic in the angle, so the
+  // rigid phase can be wrapped with zero error and a rigid rotation never
+  // shears anything. Only the differential residual deforms the field, and it
+  // is the one we bound, by advecting it with a sawtooth clock instead of `t`.
+  //
+  // A sawtooth alone would pop when it resets, so run TWO lobes half a period
+  // out of phase and cross-dissolve with triangular weights that vanish exactly
+  // at each lobe's own reset (classic flow-map recycling). Every lobe always
+  // advects at the true local rate d(phase)/dt = omega(r) — the motion stays
+  // physically right at every radius, forever — while the stored shear never
+  // exceeds half a period.
   let omega = look.speed * 0.55 / pow(radius, 1.5);
+  let omegaRef = look.speed * 0.55 / pow(SHEAR_REF_RADIUS, 1.5);
+  let dOmega = omega - omegaRef;
+  // Wrapped: exact (2*pi-periodic field) and it keeps f32 precision at t -> inf.
+  let rigid = fract(time * omegaRef / TWO_PI) * TWO_PI;
   // A static logarithmic-spiral twist on top, so the streaks read as arms and
   // not as perfectly concentric vinyl grooves.
   let swirl = max(0.0, 0.85 + look.spare1);
-  let angle = azimuth - time * omega + swirl * log(radius / ISCO);
+  let flowBase = azimuth - rigid + swirl * log(radius / ISCO);
+
+  // Two shear clocks, half a period apart. `shear` is in seconds and stays in
+  // [-T/2, +T/2]; `w` is the triangular weight, zero at the lobe's own reset.
+  let cycle = time / SHEAR_PERIOD;
+  let u0 = fract(cycle);
+  let u1 = fract(cycle + 0.5);
+  let shear0 = (u0 - 0.5) * SHEAR_PERIOD;
+  let shear1 = (u1 - 0.5) * SHEAR_PERIOD;
+  let w0 = 1.0 - abs(2.0 * u0 - 1.0);
+  let w1 = 1.0 - w0;
+  let angle0 = flowBase - dOmega * shear0;
+  let angle1 = flowBase - dOmega * shear1;
 
   // Turbulence budget: laminar and bright inside, curdled and frayed outside.
   let outward = smoothstep(0.0, 0.92, radiusNorm);
@@ -244,38 +348,32 @@ export fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32)
   // paints the long bright/dark streaks ALONG the band.
   let flowRad = max(look.detail, 0.05) * 0.105;
 
-  // --- advection ----------------------------------------------------------
-  // Two low-frequency layers displace the sampling point mostly RADIALLY: that
-  // makes the filaments meander across the flow while staying tangential, i.e.
-  // frayed rather than blobby. Amplitude follows `chaos`, so the rim shreds.
-  let warpA = streakFbm(angle, radius, angBase * 0.55, flowRad * 1.6, 2, dAngle, dRadius, 1.6, 2.0, 3.7) - 0.5;
-  // warpB is deliberately short-wavelength in AZIMUTH: a warp that is smooth all
-  // the way around only slides the threads sideways and keeps the silky-ring
-  // look. This is the layer that actually shreds the rim.
-  let warpB = streakFbm(angle + 2.4, radius * 1.13, angBase * 2.8, radBase * 0.45, 3, dAngle, dRadius, 1.7, 2.0, 61.3) - 0.5;
-  let radiusW = radius + (warpA * 1.9 + warpB * 1.25 * outward) * chaos;
-  let angleW = angle + (warpB * 0.9 - warpA * 0.35) * chaos * 0.55 / max(radius * 0.22, 0.35);
+  // --- the smoke field, evaluated once per shear lobe ----------------------
+  var params: FieldParams;
+  params.angBase = angBase;
+  params.radBase = radBase;
+  params.flowRad = flowRad;
+  params.chaos = chaos;
+  params.outward = outward;
+  params.dAngle = dAngle;
+  params.dRadius = dRadius;
+  let lobe0 = smokeField(angle0, radius, params);
+  let lobe1 = smokeField(angle1, radius, params);
+  let blended = mix(lobe1, lobe0, w0);
 
-  // --- the smoke field ----------------------------------------------------
-  // `flow`: angular-dominant, nearly flat radially. Its level sets run ACROSS
-  // the flow, so it must stay low frequency — it is the slow bright/dark
-  // modulation along the band, the only structure that survives edge-on.
-  let flow = streakFbm(angleW, radiusW, angBase, flowRad, 3, dAngle, dRadius, 2.0, 1.12, 131.7);
-  // `threads`: ridged and radial-dominant -> the long tangential filaments.
-  // Level sets of a radius-dominated field are curves of nearly constant
-  // radius, which is what "stretched along the rotation" means geometrically.
-  let threads = ridgeFbm(angleW, radiusW, angBase * 0.85, radBase, 5, dAngle, dRadius, 1.26, 2.05, 0.0);
-
-  // How much of the thread layer this pixel can actually resolve. Blending with
-  // `mix` instead of a fixed sum matters: an unresolved fBm decays to a flat
-  // constant and would otherwise wash the contrast out of the whole band.
-  let fineVis = clamp(1.0 - 1.7 * max(dAngle * angBase * 0.85, dRadius * radBase), 0.0, 1.0);
-  var field = mix(flow, flow * 0.22 + threads * 1.05, fineVis);
+  // A plain cross-dissolve of two decorrelated fields loses contrast exactly at
+  // the 50/50 point (var of w0*A + w1*B is (w0^2 + w1^2) * var), which would
+  // show up as the disk breathing every T/2 seconds. Rescale around the field
+  // mean by the variance the blend actually destroyed. How decorrelated the two
+  // lobes are is known analytically: they sit `dOmega * T/2` radians apart, and
+  // the field decorrelates over ~1/angBase radians — near SHEAR_REF_RADIUS they
+  // are the same field and the rescale correctly does nothing.
+  let lobeShift = abs(dOmega) * SHEAR_PERIOD * 0.5 * angBase * 0.85;
+  let rho = 1.0 - smoothstep(0.12, 1.1, lobeShift);
+  var field = FIELD_MEAN + (blended.x - FIELD_MEAN) / sqrt(max(w0 * w0 + w1 * w1 + 2.0 * rho * w0 * w1, 0.25));
 
   // --- density / emissivity split ------------------------------------------
-  // Ragged rim: the outer cutoff radius itself is noisy, so the disk dissolves
-  // into wisps instead of ending on a clean circle.
-  let rimNoise = (warpA + warpB * 0.5) * 0.9;
+  let rimNoise = blended.y;
   let innerEdge = smoothstep(0.0, 0.055, radiusNorm);
   let outerEdge = 1.0 - smoothstep(0.42 + rimNoise * 0.30 * fray, 1.0, radiusNorm);
   let envelope = innerEdge * outerEdge * mix(1.0, 0.62, outward);

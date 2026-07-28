@@ -190,6 +190,35 @@ export fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32)
   only valid in uniform control flow — you cannot call `fwidth` inside
   `shadeDisk`. Use it to fade octaves smaller than a pixel, otherwise the disk
   turns into moiré rings where it is seen edge-on.
+
+#### `shade.wgsl` imports `SHEAR_PERIOD` from `disk.wgsl` (do not drop it)
+
+`diskFootprint` has to measure the *same* coordinate the disk actually samples,
+so it replicates the disk's Keplerian flow angle:
+
+```wgsl
+let noiseAngle = g.diskPolar.y - min(shade.time, SHEAR_PERIOD * 0.5) * (disk.speed * 0.55 / pow(g.diskPolar.x, 1.5));
+```
+
+The `min` is load-bearing. Keplerian rotation is differential, so the accumulated
+phase `t * omega(r)` has a radial derivative `t * omega'(r)` that grows **without
+bound**: with a raw `shade.time` the measured `fwidth` grows linearly with the
+clock, saturates the `min(..., 4.0)` clamp after a couple of minutes, and from
+then on every noise octave fades to its mean — the disk slowly melts into a gray
+smear during a long session. That is a footprint bug, not a look bug: it happens
+even with a completely frozen noise field.
+
+`disk.wgsl` bounds its own shear by advecting the differential part of the
+rotation with a recycled sawtooth clock (two lobes half a period out of phase,
+cross-dissolved), so the coordinate it samples never accumulates more than
+`SHEAR_PERIOD / 2` seconds of shear. Clamping the time here makes the estimator
+agree with that, and keeps the whole thing stable as `t -> infinity`.
+
+`SHEAR_PERIOD` is exported by `disk.wgsl` (same pattern as `HORIZON` / `ISCO`
+from `gbuffer.wgsl`) because the disk owns the flow model. If the disk workstream
+changes its recycling period, this estimator follows automatically — that is the
+point of importing it instead of hard-coding a number here. **Do not replace it
+with a literal, and do not put the raw `shade.time` back.**
 - `shade.wgsl` composites as
   `mix(background, color, alpha) + color * alpha * 0.35` (a small additive
   glow term), then the composite pass applies exposure 1.15, ACES, vignette,
