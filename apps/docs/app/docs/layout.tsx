@@ -1,4 +1,13 @@
+import type { Metadata } from 'next';
 import { Navigation } from '@/components/navigation';
+
+export const metadata: Metadata = {
+  title: {
+    default: 'docs',
+    template: 'vgpu | %s',
+  },
+  description: 'Documentation for vgpu, the WebGPU library designed for agents.',
+};
 
 export default function NavLayout({
   children,

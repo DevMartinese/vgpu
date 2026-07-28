@@ -1,46 +1,102 @@
 'use client';
 
-import { useState } from 'react';
-import { Card } from './card';
-import { CopyButton } from './copy-button';
+import { Fragment, useState } from 'react';
+import { Check, Copy } from 'lucide-react';
+import { InlineCode, stripBackticks } from './inline-code';
 
+/** `backtick` spans render mono; the rest stays in the page serif. */
 const tabContent = {
-  Prompt: 'Add vgpu to my project, run npx vgpu docs to get started',
-  Skill: 'npx skills add vercel-labs/vgpu',
+  Prompt: 'Setup vgpu on my project, run `npx vgpu docs`',
+  Skill: '`npx skills add vercel-labs/vgpu`',
 } as const;
 
 type Tab = keyof typeof tabContent;
 
+const tabs = Object.keys(tabContent) as Tab[];
+
+/**
+ * Hero setup snippet: a text-only tab switcher over a hairline rule.
+ *
+ * Deliberately not a card — it sits directly on the shader, so the only chrome
+ * is the divider. Copy is the whole line rather than a button: the icon is just
+ * an affordance that fades in on hover, and confirmation is a swap to a check.
+ */
 export function HeroTabs() {
   const [activeTab, setActiveTab] = useState<Tab>('Prompt');
+  const [copied, setCopied] = useState(false);
   const content = tabContent[activeTab];
 
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(stripBackticks(content));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard can be blocked (insecure origin, denied permission). The
+      // snippet is on screen and selectable, so failing silently is fine.
+    }
+  };
+
   return (
-    <Card className="w-full max-w-xl mx-auto text-left rounded-lg border border-gray-4 bg-gray-1 overflow-hidden">
-      <Card.Header className="border-gray-4 bg-gray-2">
-        <div className="flex gap-1" role="tablist" aria-label="Installation option">
-          {(Object.keys(tabContent) as Tab[]).map((tab) => (
+    <div className="flex w-full flex-col gap-3">
+      <div
+        role="tablist"
+        aria-label="Setup option"
+        className="flex items-center justify-center text-[15px] leading-none lg:text-[16px]"
+      >
+        {tabs.map((tab, index) => (
+          <Fragment key={tab}>
+            {index > 0 && (
+              <span aria-hidden className="px-2 text-white/30">
+                ·
+              </span>
+            )}
             <button
-              key={tab}
               type="button"
               role="tab"
               aria-selected={activeTab === tab}
               onClick={() => setActiveTab(tab)}
-              className={`h-7 rounded-md px-2 text-sm font-medium leading-5 transition-colors ${
-                activeTab === tab
-                  ? 'bg-gray-1 text-gray-12 shadow-sm'
-                  : 'text-gray-9 hover:text-gray-12'
-              }`}
+              className={
+                activeTab === tab ? 'text-white' : 'text-white/50 hover:text-white/80'
+              }
             >
               {tab}
             </button>
-          ))}
-        </div>
-        <CopyButton code={content} />
-      </Card.Header>
-      <Card.Body className="px-4 py-3 font-mono text-sm leading-6 text-gray-12">
-        <code>{content}</code>
-      </Card.Body>
-    </Card>
+          </Fragment>
+        ))}
+      </div>
+
+      {/*
+        Hairline rule that dissolves at both ends. A hard-edged 1px line reads as
+        a UI seam pinned over the shader; fading the ends lets it sit in the
+        image instead. Gradient rather than a border since a border can't taper.
+
+        No flat middle on purpose: sampling the rule in the Figma reference gives
+        a symmetric triangle (alpha .57/.98/.56 at 25/50/75%), i.e. it peaks at
+        #4D4D4D dead centre and ramps straight down to both ends. A solid centre
+        band reads noticeably heavier than the reference.
+      */}
+      <div
+        aria-hidden
+        className="h-px w-full bg-[linear-gradient(to_right,transparent,#4D4D4D,transparent)]"
+      />
+
+      <button
+        type="button"
+        onClick={copy}
+        aria-label={copied ? 'Copied' : `Copy: ${stripBackticks(content)}`}
+        className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
+      >
+        <InlineCode text={content} />
+        <span
+          aria-hidden
+          className={`absolute right-0 top-1/2 -translate-y-1/2 transition-opacity ${
+            copied ? 'opacity-90' : 'opacity-0 group-hover:opacity-50'
+          }`}
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </span>
+      </button>
+    </div>
   );
 }

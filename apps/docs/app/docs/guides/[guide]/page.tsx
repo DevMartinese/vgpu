@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: GuidePageProps) {
   if (!record) return {};
   return {
     title: titleForRecord(record),
-    description: `Guide: ${record.symbol}`,
+    description: record.summary || 'Task-oriented guidance for using vgpu.',
   };
 }
 

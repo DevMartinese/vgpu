@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: ReferenceTopicPageProps) {
   const topic = getReferenceTopic(packageSlug, topicSlug);
   if (!topic) return {};
   return {
-    title: `${topic.topicTitle} - ${topic.title} reference`,
+    title: topic.topicTitle,
     description: topic.records[0]?.summary ?? topic.description,
   };
 }

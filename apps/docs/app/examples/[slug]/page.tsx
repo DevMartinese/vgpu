@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { CodeViewer } from '@/components/code-viewer';
@@ -11,6 +12,17 @@ interface ExampleDetailPageProps {
 
 export function generateStaticParams() {
   return examples.map((example) => ({ slug: example.meta.slug }));
+}
+
+export async function generateMetadata({ params }: ExampleDetailPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const example = getExample(slug);
+  if (!example) return {};
+
+  return {
+    title: example.meta.title,
+    description: example.meta.description,
+  };
 }
 
 export default async function ExampleDetailPage({ params, searchParams }: ExampleDetailPageProps) {

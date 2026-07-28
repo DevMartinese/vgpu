@@ -1,16 +1,12 @@
 import Link from 'next/link';
-import localFont from 'next/font/local';
 import { Card } from '@/components/card';
 import { ExampleCard } from '@/components/example-card';
 import { HomeHeader } from '@/components/home-header';
 import { HeroTabs } from '@/components/hero-tabs';
 import { HeroBlackHole } from '@/components/hero/hero-black-hole';
+import { InlineCode } from '@/components/inline-code';
 import { exampleMetadataBySlug } from '@/lib/examples-metadata';
-
-const geistSerif = localFont({
-  src: './fonts/GeistSerifV0.2-Regular.otf',
-  display: 'swap',
-});
+import { geistSerif } from './fonts';
 
 const featuredExamples = [
   exampleMetadataBySlug['black-hole'],
@@ -37,74 +33,132 @@ const pillars = [
   },
 ];
 
+const docLinks = [
+  ['/docs/get-started', 'Getting Started', 'Install `vgpu` and render with `init()`.'],
+  ['/docs/concepts', 'Core Concepts', 'Learn Gpu, set(), targets, frames, bundles, and adapters.'],
+  ['/docs/reference', 'API Reference', 'Package map and generated topic pages.'],
+  ['/examples', 'Examples', 'Live WebGPU demos with read-only source views.'],
+];
+
 export default function HomePage() {
   return (
-    <>
+    // Geist Serif for the whole homepage; code fragments opt out with font-mono.
+    <div className={`${geistSerif.variable} font-serif`}>
       <HomeHeader />
       <main className="pb-16 lg:pb-20">
-      <section className="relative flex min-h-svh items-center justify-center overflow-hidden text-center">
-        <HeroBlackHole />
-        {/* data-hero-overlay: hidden by the panel's "hide UI" toggle (globals.css). */}
-        <div data-hero-overlay className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.36),rgba(0,0,0,0.1)_55%,rgba(0,0,0,0.5))]" />
-        <div data-hero-overlay className="relative z-10 mx-auto w-full max-w-4xl px-6">
-          <h1 style={{ WebkitTextStroke: '1px white' }} className={`${geistSerif.className} mb-6 text-5xl font-normal tracking-tight text-black md:text-6xl lg:text-7xl`}>vgpu</h1>
-          <p className="mx-auto mb-8 max-w-2xl text-balance text-lg leading-relaxed text-gray-10 [text-shadow:0_1px_12px_rgb(0_0_0_/_0.9)] md:text-xl">The low-level WebGPU library, designed for agents.</p>
-          <div className="mb-8 flex justify-center gap-5">
-            <Link href="/docs/get-started" className="text-sm text-gray-9 transition-colors hover:text-gray-12 [text-shadow:0_1px_12px_rgb(0_0_0_/_0.9)]">Get started →</Link>
-            <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12 [text-shadow:0_1px_12px_rgb(0_0_0_/_0.9)]">Examples →</Link>
+        {/* Hero: the shader is the full section and the copy is positioned on
+            top of it — the tagline centred so it tracks the shadow at any
+            height, the setup snippet pinned to the bottom edge. Everything
+            overlaid is `data-hero-overlay` so the tuning panel's "hide UI"
+            toggle can strip it back to the bare shader. */}
+        <section className="relative min-h-svh overflow-hidden">
+          <HeroBlackHole />
+
+          {/* Legibility scrim. Matches the Figma ellipse: a band centred on the
+              hero, opaque black through the core and fully transparent at the
+              edges, so the disk still burns through at the left and right. */}
+          <div
+            data-hero-overlay
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-1/2 z-[1] h-[62%] -translate-y-1/2"
+            style={{
+              background:
+                'radial-gradient(ellipse 50% 50% at 50% 50%, #000 31%, rgba(0,0,0,0) 100%)',
+            }}
+          />
+
+          {/* Second scrim, for the setup snippet now that it sits at the foot of
+              the hero, off the centre ellipse and over open disk and starfield.
+
+              Multi-stop rather than a plain two-stop fade: alpha interpolates
+              linearly while perceived luminance does not, so `black -> transparent`
+              leaves a visible ledge around its midpoint. These stops approximate
+              an ease-out curve, which reads as haze instead of a band. It bottoms
+              out at 0.82 rather than 1 so the disk still shows through, and the
+              hero's foot meets the black page below without a seam. */}
+          <div
+            data-hero-overlay
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[45%]"
+            style={{
+              background:
+                'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.72) 18%, rgba(0,0,0,0.5) 38%, rgba(0,0,0,0.28) 58%, rgba(0,0,0,0.12) 76%, rgba(0,0,0,0) 100%)',
+            }}
+          />
+
+          {/* Tagline, dead centre — it sits inside the shadow. */}
+          <div
+            data-hero-overlay
+            className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 px-6"
+          >
+            <h1
+              className="mx-auto max-w-[798px] text-center font-normal leading-[1.2] text-white"
+              style={{ fontSize: 'clamp(1.6rem, 2.85vw, 2.6875rem)' }}
+            >
+              The WebGPU library,
+              {/* Forces the two-line break of the design on wide viewports; on
+                  narrow ones it collapses and the line wraps on its own. */}
+              <br className="hidden sm:block" /> designed for agents.
+            </h1>
           </div>
-          <div className="mx-auto max-w-xl"><HeroTabs /></div>
-        </div>
-      </section>
 
-      <section className="mx-auto mb-24 max-w-6xl px-6 lg:px-12">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <h2 className="text-2xl font-semibold text-gray-12">Examples</h2>
-          <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">View all →</Link>
-        </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {featuredExamples.map((example) => (
-            <ExampleCard key={example.slug} example={example} />
-          ))}
-        </div>
-      </section>
+          {/* Setup snippet, anchored to the foot of the hero as in the design.
+              Pinned to the bottom rather than a top percentage so it keeps a
+              constant breathing space on short viewports instead of drifting up
+              into the tagline (at 73% of an 844px phone it nearly collided). */}
+          <div
+            data-hero-overlay
+            className="absolute bottom-10 left-1/2 z-10 w-[450px] max-w-[calc(100%-3rem)] -translate-x-1/2 lg:bottom-14"
+          >
+            <HeroTabs />
+          </div>
+        </section>
 
-      <section className="mx-auto mb-24 max-w-4xl px-6 lg:px-12">
-        <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-10">Why vgpu</h2>
-        <div className="grid md:grid-cols-3 gap-4">
-          {pillars.map((pillar) => (
-            <Card key={pillar.title} className="rounded-lg bg-gray-1 border border-gray-4 overflow-hidden">
-              <Card.Header className="border-gray-4 bg-gray-2">
-                <h3 className="text-sm font-semibold text-gray-12">{pillar.title}</h3>
-              </Card.Header>
-              <Card.Body className="p-5">
-                <p className="text-sm text-gray-9 leading-relaxed">{pillar.description}</p>
-                <div className="mt-5 break-words rounded-md border border-gray-4 bg-black px-3 py-2 font-mono text-sm text-gray-10 whitespace-normal">
-                  {pillar.code}
+        <section className="mx-auto mb-24 mt-24 max-w-6xl px-6 lg:px-12">
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <h2 className="text-2xl text-gray-12">Examples</h2>
+            <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">View all →</Link>
+          </div>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {featuredExamples.map((example) => (
+              <ExampleCard key={example.slug} example={example} />
+            ))}
+          </div>
+        </section>
+
+        <section className="mx-auto mb-24 max-w-4xl px-6 lg:px-12">
+          <h2 className="mb-10 text-center text-2xl text-gray-12 md:text-3xl">Why vgpu</h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {pillars.map((pillar) => (
+              <Card key={pillar.title} className="overflow-hidden rounded-lg border border-gray-4 bg-gray-1">
+                <Card.Header className="border-gray-4 bg-gray-2">
+                  <h3 className="text-sm text-gray-12">{pillar.title}</h3>
+                </Card.Header>
+                <Card.Body className="p-5">
+                  <p className="text-sm leading-relaxed text-gray-9">{pillar.description}</p>
+                  <div className="mt-5 whitespace-normal break-words rounded-md border border-gray-4 bg-black px-3 py-2 font-mono text-sm text-gray-10">
+                    {pillar.code}
+                  </div>
+                </Card.Body>
+              </Card>
+            ))}
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-4xl px-6 lg:px-12">
+          <h2 className="mb-12 text-center text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {docLinks.map(([href, title, description]) => (
+              <Link key={href} href={href} className="group rounded-lg border border-gray-4 bg-gray-1 p-6 transition-all hover:border-gray-5">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-gray-12 transition-colors group-hover:text-blue-9">{title} →</h3>
                 </div>
-              </Card.Body>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-4xl px-6 lg:px-12">
-        <h2 className="text-2xl md:text-3xl font-semibold text-gray-12 text-center mb-12">Explore the Docs</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          {[
-            ['/docs/get-started', 'Getting Started', 'Install `vgpu` and render with `init()`.'],
-            ['/docs/concepts', 'Core Concepts', 'Learn Gpu, set(), targets, frames, bundles, and adapters.'],
-            ['/docs/reference', 'API Reference', 'Package map and generated topic pages.'],
-            ['/examples', 'Examples', 'Live WebGPU demos with read-only source views.'],
-          ].map(([href, title, description]) => (
-            <Link key={href} href={href} className="group p-6 rounded-lg bg-gray-1 border border-gray-4 hover:border-gray-5 transition-all">
-              <div className="flex items-center justify-between mb-2"><h3 className="font-semibold text-gray-12 group-hover:text-blue-9 transition-colors">{title} →</h3></div>
-              <p className="text-sm text-gray-9">{description}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
+                <p className="text-sm text-gray-9"><InlineCode text={description} /></p>
+              </Link>
+            ))}
+          </div>
+        </section>
       </main>
-    </>
+    </div>
   );
 }

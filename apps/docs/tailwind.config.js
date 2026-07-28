@@ -136,6 +136,9 @@ module.exports = {
       fontFamily: {
         sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
         mono: ['var(--font-geist-mono)', 'Menlo', 'Monaco', 'monospace'],
+        // Homepage display face. Declared as a CSS variable in app/fonts.ts and
+        // applied on the homepage wrapper, so it only loads for that route.
+        serif: ['var(--font-geist-serif)', 'Georgia', 'Times New Roman', 'serif'],
       },
       fontSize: {
         'xs': ['0.75rem', { lineHeight: '1rem' }],

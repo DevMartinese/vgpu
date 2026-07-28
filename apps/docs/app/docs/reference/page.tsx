@@ -1,6 +1,12 @@
 import Link from 'next/link';
 import { DocsPageShell } from '@/components/docs-page-shell';
+import type { Metadata } from 'next';
 import { referenceGroups, recordHref } from '@/lib/manifest';
+
+export const metadata: Metadata = {
+  title: 'Reference',
+  description: 'API reference for vgpu packages, generated from the documentation manifest.',
+};
 
 const featuredSymbols = ['init', 'Gpu', 'Effect', 'Draw', 'Compute', 'Frame', 'Bundle', 'Target', 'SharedUniforms', 'PingPongStorage'];
 
