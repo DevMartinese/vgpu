@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { BAKE_KEYS, createRenderer, defaultHeroSettings, type HeroRenderer } from './renderer';
+import {
+  BAKE_KEYS,
+  createRenderer,
+  defaultHeroSettings,
+  type DiskNoiseVariant,
+  type HeroRenderer,
+  type MeasureResult,
+} from './renderer';
 
 /**
  * Set on <html> by the panel's "hide UI" toggle. The matching rule lives in
@@ -9,6 +16,30 @@ import { BAKE_KEYS, createRenderer, defaultHeroSettings, type HeroRenderer } fro
  * nothing but the shader (the lil-gui panel is outside the hero and stays).
  */
 const HERO_SOLO_CLASS = 'hero-solo';
+
+/** One-line headline for the panel's read-only field. Detail goes to the console. */
+function formatMeasurement(r: MeasureResult): string {
+  const gpu = r.gpuMedianMs === undefined ? '' : ` · gpu ${r.gpuMedianMs.toFixed(2)}ms`;
+  const capped = r.vsyncCapped ? ' · VSYNC-CAPPED, use gpu' : '';
+  return `${r.variant} ${r.medianMs.toFixed(2)}ms (${r.fps.toFixed(0)} fps)${gpu} n=${r.samples}${capped}`;
+}
+
+/**
+ * The A/B verdict.
+ *
+ * Reports the GPU number whenever both arms have one: wall-clock cannot separate
+ * two variants that are both faster than the display, and reporting a "1.00x"
+ * that only means "both hit vsync" would be worse than reporting nothing.
+ */
+function formatComparison(analytic: MeasureResult, tiled: MeasureResult): string {
+  const useGpu = analytic.gpuMedianMs !== undefined && tiled.gpuMedianMs !== undefined;
+  const a = useGpu ? analytic.gpuMedianMs! : analytic.medianMs;
+  const t = useGpu ? tiled.gpuMedianMs! : tiled.medianMs;
+  const ratio = a / t;
+  const verdict = ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1 / ratio).toFixed(2)}x SLOWER`;
+  const caveat = !useGpu && (analytic.vsyncCapped || tiled.vsyncCapped) ? ' (vsync-capped, unreliable)' : '';
+  return `analytic ${a.toFixed(2)}ms → tiled ${t.toFixed(2)}ms = tiled is ${verdict} [${useGpu ? 'gpu' : 'wall'}]${caveat}`;
+}
 
 export function HeroBlackHole() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -28,6 +59,12 @@ export function HeroBlackHole() {
         const renderer = createRenderer({
           canvas,
           settings: settingsRef.current,
+          // Only the tuning panel measures anything, and the feature has to be
+          // requested at device creation — so the shipped hero keeps asking for
+          // exactly the device it always did. Same `?debug` test as the panel
+          // effect below; duplicated rather than lifted to state because this one
+          // has to be known BEFORE the device exists.
+          profiling: new URLSearchParams(window.location.search).has('debug'),
           onError: (error) => {
             console.warn('[hero-black-hole] renderer failed, falling back to static image:', error);
             if (!cancelled) setHasWebGpu(false);
@@ -141,6 +178,83 @@ export function HeroBlackHole() {
         'front hit only': 1,
         'front + hidden hit': 2,
       }).name('disk layers');
+
+      // --- perf A/B ---------------------------------------------------------
+      // Two independently compiled shade pipelines (see DISK_NOISE_SWITCH in
+      // renderer.ts). Switching is a pipeline swap, not a re-bake: the G-buffer
+      // is pure geometry and knows nothing about the disk's noise.
+      const perf = panel.addFolder('perf A/B (disk noise)');
+      const readout = { result: 'press "measure frame time"' };
+      let busy = false;
+
+      /**
+       * Runs one measurement of whatever variant is currently selected.
+       *
+       * The panel field only ever shows the headline; the full result (both
+       * medians, both means, sample count, method, resolution) goes to the
+       * console, because that is what you actually want to paste somewhere.
+       */
+      const runMeasure = async (label?: string): Promise<MeasureResult | undefined> => {
+        const renderer = rendererRef.current;
+        if (!renderer || busy) return undefined;
+        busy = true;
+        readout.result = `measuring ${label ?? settings.diskNoise}…`;
+        try {
+          const result = await renderer.measure();
+          readout.result = formatMeasurement(result);
+          console.log(`[hero] ${result.variant}: ${formatMeasurement(result)}`, result);
+          if (result.vsyncCapped) {
+            console.warn(
+              '[hero] wall-clock is vsync-capped — the frame is waiting for the display, so ms/frame ' +
+              'cannot separate the two variants. Compare the GPU number instead.',
+            );
+          }
+          return result;
+        } catch (error) {
+          readout.result = 'failed — see console';
+          console.error('[hero] measure failed', error);
+          return undefined;
+        } finally {
+          busy = false;
+        }
+      };
+
+      const perfActions = {
+        'measure frame time': () => { void runMeasure(); },
+        /**
+         * Measures both arms back to back and prints the ratio.
+         *
+         * Worth having over "switch, measure, write it down, switch back": it
+         * removes the transcription step and, more importantly, it measures both
+         * arms seconds apart on the same thermal state, which is the main way a
+         * hand-run A/B goes wrong.
+         */
+        'A/B both variants': () => {
+          void (async () => {
+            const restore = settings.diskNoise;
+            const results: Partial<Record<DiskNoiseVariant, MeasureResult>> = {};
+            for (const variant of ['analytic', 'tiled'] as const) {
+              settings.diskNoise = variant;
+              const result = await runMeasure(variant);
+              if (!result) { settings.diskNoise = restore; panel.controllersRecursive().forEach((c) => c.updateDisplay()); return; }
+              results[variant] = result;
+            }
+            settings.diskNoise = restore;
+            panel.controllersRecursive().forEach((c) => c.updateDisplay());
+            readout.result = formatComparison(results.analytic!, results.tiled!);
+            console.log(`[hero] A/B ${formatComparison(results.analytic!, results.tiled!)}`, results);
+          })();
+        },
+      };
+      perf.add(settings, 'diskNoise', {
+        'analytic (control)': 'analytic',
+        'tiled volume': 'tiled',
+      }).name('disk noise');
+      perf.add(perfActions, 'measure frame time');
+      perf.add(perfActions, 'A/B both variants');
+      // Disabled = read-only text field. `.listen()` polls the object, so the
+      // async handlers above can just assign to `readout.result`.
+      perf.add(readout, 'result').name('last measurement').disable().listen();
 
       const actions = {
         'copy JSON': () => {

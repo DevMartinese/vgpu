@@ -288,6 +288,50 @@ it was not selected on. If you ever regenerate the volume, expect to re-pick it,
 and expect the filaments to be *arranged* differently — that is realization
 noise, not a regression.
 
+##### Measuring it yourself — the runtime A/B
+
+The tiled volume was landed WITHOUT a real-GPU measurement (the machine it was
+developed on has no GPU: everything ran on lavapipe, where a trilinear fetch is
+eight dependent scalar loads and the tiled path is ~28% *slower*). So the two
+implementations both live in `disk.wgsl` and the `?debug` panel can switch and
+time them, under **perf A/B (disk noise)**:
+
+| Control | What it does |
+|---|---|
+| `disk noise` | `analytic (control)` = eight inline hashes (the pre-optimization code, verbatim); `tiled volume` = one trilinear fetch. Instant, no re-bake. |
+| `measure frame time` | Times ~180 frames of the real loop and writes the headline to `last measurement`; the full result goes to the console. |
+| `A/B both variants` | Measures both arms back to back and prints the ratio. Prefer this — it removes the transcription step and keeps both arms on the same thermal state. |
+
+Two things make the numbers trustworthy, and both are easy to break:
+
+- **Two separately compiled pipelines, not one branching shader.** `disk.wgsl`
+  gates on `const DISK_NOISE_ANALYTIC`, and `renderer.ts` builds the second
+  variant by rewriting that one literal (`DISK_NOISE_SWITCH`). Because the
+  condition is a `const`, the untaken arm is dead-code eliminated *before*
+  register allocation, so neither variant is billed for the other's live values.
+  A uniform `if` would have kept both arms resident and quietly flattened the
+  difference. The substitution throws if it stops matching exactly once — a
+  silent no-op would compare the tiled arm against itself and report a dead heat.
+- **Prefer the GPU number when it is there.** With `timestamp-query` available
+  (requested only under `?debug`) the result includes the shade pass's own GPU
+  time, which excludes the bake, the present and all CPU submit cost. Wall-clock
+  ms/frame is capped by the display: if both arms are faster than vsync, both
+  read ~16.7 ms and the comparison is meaningless. The panel detects that case,
+  flags it as `VSYNC-CAPPED`, and the A/B verdict switches to the GPU number.
+
+`measure()` renders 30 warmup frames first (absorbing the pipeline switch and any
+pending re-bake), then suppresses the bake entirely while sampling, so a geodesic
+re-bake can never land inside a sample. It also forces the loop to run even when
+the hero is scrolled out of view — but it cannot beat a hidden tab, where the
+browser stops `requestAnimationFrame` outright, so it rejects after 6 s of no
+frames instead of hanging.
+
+Headless equivalent: `--diskNoise analytic|tiled` in `debug-render.mjs`. That one
+is for comparing *images*, not times.
+
+Expect the filaments to REARRANGE when you flip the switch: the two arms draw
+different realizations of the same noise (see above). Judge cost, not layout.
+
 ### `stars.wgsl`
 
 ```wgsl
@@ -711,6 +755,10 @@ Views 1–5 describe the **front** crossing. Next to the dropdown, **disk layers
 switches between `front hit only` (what the renderer did before the second hit
 existed) and `front + hidden hit` (the default) — the quickest way to see what
 the second layer contributes.
+
+A separate **perf A/B (disk noise)** folder switches and times the two disk-noise
+implementations — see
+[Measuring it yourself](#measuring-it-yourself--the-runtime-ab).
 
 While a debug view is active `shade.wgsl` **returns before `tonemap`**, so the
 channels are the raw values — no exposure, no ACES, no vignette, no gamma, no

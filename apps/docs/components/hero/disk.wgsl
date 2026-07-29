@@ -123,7 +123,7 @@ struct NoiseLattice {
  * branch cut, so no radial seam across the disk. Tiling does not disturb that:
  * the embedding closes on itself geometrically, whatever the field underneath.
  */
-fn noise3(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> f32 {
+fn noise3Tiled(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> f32 {
   let i = floor(p);
   let f = p - i;
   let u = f * f * (3.0 - 2.0 * f);
@@ -131,6 +131,71 @@ fn noise3(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) 
   // inside `if (visible > ...)`, which is non-uniform control flow, where the
   // implicit-derivative sample is illegal. The lattice has one mip anyway.
   return textureSampleLevel(tex, samp, (i + u + vec3f(0.5)) * lattice.invSize, 0.0).r;
+}
+
+/**
+ * The PRE-OPTIMIZATION implementation, kept verbatim from c36eb33 as the
+ * control arm of the runtime A/B (see `DISK_NOISE_ANALYTIC`).
+ *
+ * This is dead weight in the shipped shader and that is fine: it is compiled
+ * out (see the gate below), and its only job is to let the debug panel measure
+ * "before" and "after" on the same machine, in the same session, against the
+ * same G-buffer. Keeping the real code beats trusting a remembered number.
+ *
+ * Do not "clean this up" by simplifying it — it has to stay bit-for-bit the old
+ * implementation or the comparison is meaningless. Note `fract(p)` here vs
+ * `p - i` in the tiled path: identical for the inputs the disk feeds it, and
+ * left as-is for exactly that reason.
+ */
+fn hash31(p: vec3f) -> f32 {
+  var q = fract(p * vec3f(0.1031, 0.1030, 0.0973));
+  q += vec3f(dot(q, q.yzx + vec3f(33.33)));
+  return fract((q.x + q.y) * q.z);
+}
+
+fn noise3Analytic(p: vec3f) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let c000 = hash31(i);
+  let c100 = hash31(i + vec3f(1.0, 0.0, 0.0));
+  let c010 = hash31(i + vec3f(0.0, 1.0, 0.0));
+  let c110 = hash31(i + vec3f(1.0, 1.0, 0.0));
+  let c001 = hash31(i + vec3f(0.0, 0.0, 1.0));
+  let c101 = hash31(i + vec3f(1.0, 0.0, 1.0));
+  let c011 = hash31(i + vec3f(0.0, 1.0, 1.0));
+  let c111 = hash31(i + vec3f(1.0, 1.0, 1.0));
+  let x00 = mix(c000, c100, u.x);
+  let x10 = mix(c010, c110, u.x);
+  let x01 = mix(c001, c101, u.x);
+  let x11 = mix(c011, c111, u.x);
+  return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+/**
+ * Which noise implementation this MODULE COMPILES TO. `false` ships.
+ *
+ * `renderer.ts` builds a second `Effect` from the same source with this literal
+ * flipped to `true`, giving the debug panel two independently compiled
+ * pipelines to measure (`DISK_NOISE_SWITCH` over there is the exact string it
+ * looks for, and it throws if it stops matching — a silently failed
+ * substitution would measure the same shader twice and report a dead heat).
+ *
+ * A `const` and not a uniform, and two pipelines and not one branch, because
+ * the point is to measure. A uniform `if` would keep BOTH implementations in
+ * the compiled program: the register allocator has to satisfy the worse of the
+ * two, and some drivers predicate rather than jump, so the tiled arm would be
+ * billed for the analytic arm's live values. Gating on a `const` folds the
+ * condition at compile time, so Tint (and then the driver's own compiler) drops
+ * the untaken call and everything only it reaches BEFORE register allocation.
+ * Each variant therefore contains exactly one implementation, which is the only
+ * way the two numbers mean anything.
+ */
+const DISK_NOISE_ANALYTIC: bool = false;
+
+fn noise3(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> f32 {
+  if (DISK_NOISE_ANALYTIC) { return noise3Analytic(p); }
+  return noise3Tiled(tex, samp, lattice, p);
 }
 
 /**

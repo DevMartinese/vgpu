@@ -33,6 +33,11 @@
 //   --stars.<key> <v>    any StarLook field (brightness, density, twinkle, ...)
 //   --noiseSize <n>      edge of the tiled 3D noise lattice (default 64; try 128 to
 //                        A/B whether the tiling repeats visibly)
+//   --diskNoise <which>  disk noise implementation: `tiled` (default, one trilinear
+//                        fetch) or `analytic` (the pre-optimization control, eight
+//                        inline hashes). Same A/B the ?debug panel exposes; note the
+//                        two arms draw DIFFERENT realizations, so the filaments
+//                        rearrange between them (see GBUFFER.md).
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
 //   --json               print the resolved settings and per-image stats as JSON
 //
@@ -103,7 +108,7 @@ const VIEWS = {
 const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
 
 function parseArgs(argv) {
-  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE };
+  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE, diskNoise: 'tiled' };
   const patch = {};
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -122,6 +127,11 @@ function parseArgs(argv) {
     }
     if (key === 'time') { options.time = Number(value); continue; }
     if (key === 'noiseSize') { options.noiseSize = Math.max(2, Number(value) | 0); continue; }
+    if (key === 'diskNoise') {
+      if (value !== 'tiled' && value !== 'analytic') throw new Error(`--diskNoise must be 'tiled' or 'analytic', got '${value}'`);
+      options.diskNoise = value;
+      continue;
+    }
     // Scene yaw vs camera yaw: `--yaw t` rotates the scene in the frame pass and
     // must produce the same image as `--bakeYaw -t`, which rotates the camera and
     // re-bakes. That equivalence is the whole justification for the feature.
@@ -157,6 +167,23 @@ function deepMerge(base, patch) {
 async function loadShader(name) {
   const resolved = await resolveShader({ entry: resolve(HERE, name), rootDir: HERE, validate: false });
   return resolved.wgsl;
+}
+
+/**
+ * disk.wgsl's `DISK_NOISE_ANALYTIC` gate, matched around the bundler's hash
+ * prefix (`_vgsl_<hash>__`), which changes whenever disk.wgsl is edited.
+ *
+ * Mirrors DISK_NOISE_SWITCH in renderer.ts — keep the two in sync.
+ */
+const DISK_NOISE_SWITCH = /(const\s+[A-Za-z0-9_]*DISK_NOISE_ANALYTIC\s*:\s*bool\s*=\s*)false(\s*;)/g;
+
+/** Flips the gate, throwing rather than silently rendering the tiled arm twice. */
+function toAnalyticShade(source) {
+  const matches = source.match(DISK_NOISE_SWITCH);
+  if (matches?.length !== 1) {
+    throw new Error(`expected exactly 1 DISK_NOISE_ANALYTIC gate, found ${matches?.length ?? 0} — the disk.wgsl A/B switch is broken`);
+  }
+  return source.replace(DISK_NOISE_SWITCH, '$1true$2');
 }
 
 function writePng(path, width, height, rgba) {
@@ -212,7 +239,12 @@ async function main() {
   const output = gpu.target({ size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
 
   const bake = gpu.effect(bakeWgsl, { label: 'hero-debug-bake' });
-  const shade = gpu.effect(shadeWgsl, { label: 'hero-debug-shade' });
+  // Same one-line gate rewrite the browser renderer does, kept here so the
+  // headless harness can render either arm. Asserting the match matters as much
+  // as it does there: a silent no-op would render `tiled` twice and label one of
+  // them `analytic`.
+  const shadeSource = options.diskNoise === 'analytic' ? toAnalyticShade(shadeWgsl) : shadeWgsl;
+  const shade = gpu.effect(shadeSource, { label: `hero-debug-shade-${options.diskNoise}` });
 
   // Same lattice bytes the browser uploads (shared module, not a copy), so the
   // harness renders the disk the page renders. Node/Dawn takes the 3D texture
@@ -275,10 +307,10 @@ async function main() {
   gpu.dispose();
 
   if (options.json) {
-    console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, settings, images: results }, null, 2));
+    console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, diskNoise: options.diskNoise, settings, images: results }, null, 2));
     return;
   }
-  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
+  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.diskNoise === 'analytic' ? 'analytic' : `${options.noiseSize}^3`} -> ${options.out}`);
   for (const result of results) {
     console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
   }

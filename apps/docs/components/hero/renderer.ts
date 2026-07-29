@@ -1,8 +1,51 @@
-import type { Effect, Frame, Gpu, Surface, Target } from 'vgpu';
+import type { Effect, Frame, Gpu, Surface, Target, Timer, TimerSpan } from 'vgpu';
 
 import bakeWgsl from './bake.wgsl';
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
 import shadeWgsl from './shade.wgsl';
+
+/**
+ * Rewrites disk.wgsl's `DISK_NOISE_ANALYTIC` gate to build the control variant.
+ *
+ * The WGSL bundler namespaces every module-level symbol with a content hash
+ * (`_vgsl_<hash>__DISK_NOISE_ANALYTIC`) that changes whenever disk.wgsl is
+ * edited, so this matches the declaration around whatever prefix it was given
+ * instead of hardcoding the mangled name.
+ */
+const DISK_NOISE_SWITCH = /(const\s+[A-Za-z0-9_]*DISK_NOISE_ANALYTIC\s*:\s*bool\s*=\s*)false(\s*;)/g;
+
+/**
+ * What a `*.wgsl` import actually is.
+ *
+ * The webpack/turbopack loader emits the `{ version, wgsl }` artifact, while the
+ * Node resolver (`debug-render.mjs`) hands back a bare string — and `gpu.effect`
+ * takes either, which is why the difference normally goes unnoticed. It stops
+ * being invisible the moment you want to READ the source, so both shapes are
+ * handled here rather than assumed.
+ */
+type ShaderModule = string | { readonly version: 1; readonly wgsl: string };
+
+/**
+ * The shade source with the analytic (pre-optimization) noise compiled in,
+ * returned in the same shape it came in.
+ *
+ * Throws rather than returning the input unchanged if the gate stops matching,
+ * which is the entire point of the check: a silently failed substitution would
+ * hand the panel two identical pipelines, the A/B would report a dead heat, and
+ * the conclusion drawn from it would be false. Fail loudly at init instead.
+ */
+function analyticShadeSource(source: ShaderModule): ShaderModule {
+  const text = typeof source === 'string' ? source : source.wgsl;
+  const matches = text.match(DISK_NOISE_SWITCH);
+  if (matches?.length !== 1) {
+    throw new Error(
+      `[hero] expected exactly 1 DISK_NOISE_ANALYTIC gate in the shade source, found ${matches?.length ?? 0}. ` +
+        'The disk.wgsl A/B switch is broken — see DISK_NOISE_SWITCH in renderer.ts.',
+    );
+  }
+  const rewritten = text.replace(DISK_NOISE_SWITCH, '$1true$2');
+  return typeof source === 'string' ? rewritten : { ...source, wgsl: rewritten };
+}
 
 /**
  * Disk look, uploaded verbatim as the `disk` uniform (see disk.wgsl `DiskLook`).
@@ -76,11 +119,33 @@ export interface HeroSettings {
    * shade.wgsl for the sign convention and the symmetry precondition.
    */
   mouseYaw: number;
+  /**
+   * Which `noise3` implementation the disk compiles to. Perf A/B only — see
+   * `DISK_NOISE_SWITCH` and `measure()`.
+   *
+   * NOT a look setting, but it is not neutral either: the two arms draw the same
+   * noise from different realizations, so the filaments rearrange when you flip
+   * it. That is expected (GBUFFER.md, "Why the lattice has a seed").
+   */
+  diskNoise: DiskNoiseVariant;
   /** Owned by disk.wgsl. */
   disk: DiskLook;
   /** Owned by stars.wgsl. */
   stars: StarLook;
 }
+
+/**
+ * The two disk-noise implementations the shader can be built with.
+ *
+ * `tiled` is what ships (one trilinear fetch into the baked lattice);
+ * `analytic` is the pre-optimization control, eight inline hashes per sample,
+ * kept verbatim in disk.wgsl so "before" can be measured on the reader's own
+ * machine instead of taken on faith.
+ */
+export type DiskNoiseVariant = 'analytic' | 'tiled';
+
+/** Panel order: control first, so the A/B reads left to right. */
+export const DISK_NOISE_VARIANTS: readonly DiskNoiseVariant[] = ['analytic', 'tiled'];
 
 /**
  * Defaults picked by the user in the panel (via "copy JSON"). Keep them in sync
@@ -97,6 +162,7 @@ export function defaultHeroSettings(): HeroSettings {
     centerY: 0,
     debugView: 0,
     diskLayers: 2,
+    diskNoise: 'tiled',
     // ~8.6 degrees each way: enough to read as a living, turnable scene without
     // ever swinging the disk far enough to look like a camera cut.
     mouseYaw: 0.15,
@@ -154,18 +220,134 @@ const SCENE_YAW_TAU_S = 0.325;
 /** Upper bound on the smoothing timestep, so a backgrounded tab cannot snap. */
 const MAX_FRAME_DT_S = 0.1;
 
+// --- measure() tuning ---------------------------------------------------------
+/** Frame intervals collected per measurement, unless `maxMs` cuts it short. */
+const MEASURE_FRAMES = 180;
+/**
+ * Frames rendered and thrown away before sampling starts.
+ *
+ * Covers the pipeline switch, any pending re-bake, and the first-frame cost of a
+ * freshly bound variant. It is also why `measure()` can be pressed immediately
+ * after moving a geometry slider without the bake landing in the samples.
+ */
+const MEASURE_WARMUP = 30;
+/** Hard cap on one measurement, so a slow machine still answers promptly. */
+const MEASURE_MAX_MS = 4000;
+/** Grace period for in-flight timestamp resolves (they land 1-2 frames late). */
+const MEASURE_DRAIN_MS = 120;
+/**
+ * How long to wait for ANY frame before giving up.
+ *
+ * `measure()` forces the render loop on, but it cannot force `requestAnimationFrame`
+ * to tick: a browser stops rAF entirely in a hidden tab. Without this the promise
+ * would simply never settle if the reader switched tabs mid-measurement.
+ */
+const MEASURE_STALL_MS = 6000;
+/** Name of the timed span; one per frame, so a constant is enough. */
+const MEASURE_SPAN = 'shade';
+/**
+ * Plausible display refresh intervals, used to flag a vsync-capped result.
+ *
+ * A present-limited frame time says nothing about how expensive the shader is,
+ * which is exactly the trap this whole tool exists to avoid.
+ */
+const REFRESH_INTERVALS_MS = [1000 / 240, 1000 / 165, 1000 / 144, 1000 / 120, 1000 / 90, 1000 / 75, 1000 / 60, 1000 / 30];
+
 export interface HeroRendererOptions {
   canvas: HTMLCanvasElement;
   /** Mutable object read every frame; tweak its fields to adjust the scene live. */
   settings?: HeroSettings;
   onError?: (error: unknown) => void;
+  /**
+   * Opt in to GPU profiling: requests the `timestamp-query` device feature so
+   * `measure()` can report the shade pass's GPU time on top of wall-clock.
+   *
+   * Off by default and set only by the `?debug` panel, so the shipped hero
+   * requests exactly the same device it always did. Requesting a feature the
+   * adapter lacks makes `init` throw, so this is best-effort: the renderer
+   * checks adapter support first and silently falls back to wall-clock.
+   */
+  profiling?: boolean;
+}
+
+/** Knobs for `HeroRenderer.measure`. Defaults are the MEASURE_* constants. */
+export interface MeasureOptions {
+  /** Frame intervals to collect after warmup. */
+  frames?: number;
+  /** Frames to render and discard first. */
+  warmupFrames?: number;
+  /** Hard time cap; the measurement resolves with whatever it has. */
+  maxMs?: number;
+}
+
+/** One `measure()` result. Times are milliseconds. */
+export interface MeasureResult {
+  /** Which pipeline was actually timed — read from settings, not requested. */
+  variant: DiskNoiseVariant;
+  /** Frame intervals behind the stats. */
+  samples: number;
+  /** Median wall-clock interval between presented frames. The headline number. */
+  medianMs: number;
+  meanMs: number;
+  /** `1000 / medianMs`. */
+  fps: number;
+  /**
+   * GPU time of the shade pass alone, when `timestamp-query` was available.
+   *
+   * This is the number that survives a vsync cap, and it excludes the bake, the
+   * present and all CPU-side submit cost — so it is also the one that isolates
+   * what the noise change actually did.
+   */
+  gpuMedianMs?: number;
+  gpuMeanMs?: number;
+  method: 'wall-clock' | 'wall-clock + timestamp-query';
+  /**
+   * Wall-clock median sits on a display refresh interval while the GPU number is
+   * comfortably below it: the frame is waiting for the display, so the wall-clock
+   * comparison between variants is meaningless. Trust `gpuMedianMs` instead.
+   */
+  vsyncCapped: boolean;
+  /** Physical pixels actually shaded, for the record. */
+  resolution: readonly [number, number];
 }
 
 export interface HeroRenderer {
   ready: Promise<void>;
   /** Re-runs the one-shot geodesic bake with the current settings. */
   rebake(): void;
+  /**
+   * Times the REAL frame loop for a few hundred frames and resolves with the
+   * stats. Used by the `?debug` panel to A/B `settings.diskNoise`.
+   *
+   * Measures whatever is currently selected — it never changes settings itself,
+   * so the caller stays in control of what is being compared. Rejects if a
+   * measurement is already running, or if no frame arrives at all (a hidden tab
+   * stops `requestAnimationFrame`, which no flag here can override).
+   */
+  measure(options?: MeasureOptions): Promise<MeasureResult>;
   dispose(): void;
+}
+
+/**
+ * Live measurement state. Exists only between `measure()` and its resolution,
+ * and its mere existence forces the render loop to run (see `reconcileLoop`).
+ */
+interface Measurement {
+  readonly variant: DiskNoiseVariant;
+  readonly targetFrames: number;
+  readonly warmupFrames: number;
+  readonly maxMs: number;
+  readonly startedAt: number;
+  readonly frameSamples: number[];
+  readonly gpuSamples: number[];
+  /** Frames seen since the measurement began, warmup included. */
+  seen: number;
+  /** Timestamp of the previous SAMPLED frame, for the interval. */
+  lastAt?: number;
+  /** Sampling is over; we are only draining in-flight timestamp results. */
+  done: boolean;
+  resolve(result: MeasureResult): void;
+  reject(error: Error): void;
 }
 
 type RenderSize = { width: number; height: number; dpr: number };
@@ -174,7 +356,15 @@ type Output = Surface | Target;
 
 interface Effects {
   bake: Effect;
-  shade: Effect;
+  /**
+   * One compiled shade pipeline PER disk-noise variant, both built and warmed at
+   * init so switching in the panel is instant and the first measured frame never
+   * pays for a shader compile.
+   *
+   * Two pipelines rather than one branching pipeline is what makes the A/B
+   * honest — see `DISK_NOISE_SWITCH` here and the `const` gate in disk.wgsl.
+   */
+  shade: Record<DiskNoiseVariant, Effect>;
   /**
    * Tiled 3D value-noise lattice for disk.wgsl, plus its sampler.
    *
@@ -234,6 +424,14 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
   let intersection: IntersectionObserver | undefined;
+  // --- measure() --------------------------------------------------------------
+  // `timestampsAvailable` is decided at init from the adapter's feature list;
+  // `timer` is created lazily on the first measurement and owned until dispose.
+  let timestampsAvailable = false;
+  let timer: Timer | undefined;
+  let unsubscribeTimer: (() => void) | undefined;
+  let measurement: Measurement | undefined;
+  let measureStall: ReturnType<typeof setTimeout> | undefined;
   // --- Visibility state machine (see `reconcileLoop`) -------------------------
   // Two independent reasons to be off screen, one derived answer. Both default
   // to "visible" so a browser without IntersectionObserver, or an SSR-ish
@@ -331,7 +529,11 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
    */
   function reconcileLoop(): void {
     if (!started || !gpu) return;
-    const shouldRun = !disposed && documentVisible && canvasIntersecting;
+    // A running measurement overrides both visibility reasons: the hero is
+    // routinely scrolled out of view while the panel is being used, and pausing
+    // mid-measurement would either hang the promise or, worse, silently report
+    // the frame time of a loop that had stopped.
+    const shouldRun = !disposed && (measurement !== undefined || (documentVisible && canvasIntersecting));
     if (shouldRun === Boolean(loop)) return;
     if (shouldRun) {
       lastFrameAt = undefined;
@@ -366,12 +568,120 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     // them, so a missed invalidation would silently do nothing. A rebake
     // requested while paused just leaves `forceBake` set and runs on resume.
     const now = clockMs();
-    const runBake = resolveBake(now);
+    // While a measurement is SAMPLING the bake is suppressed: re-baking mid
+    // measurement would bill the geodesic integrator to the frame we are
+    // attributing to the shade pass. Warmup frames still bake, so a geometry
+    // edit made just before pressing the button is flushed rather than deferred
+    // into the samples.
+    const sampling = measurement !== undefined && !measurement.done && measurement.seen >= measurement.warmupFrames;
+    const runBake = sampling ? false : resolveBake(now);
     if (runBake) setBakeUniforms(effects, targets, settings);
     // The mouse rotation is a uniform, never a bake: the scene is axisymmetric
     // so the baked G-buffer is still exact in the rotated frame.
     setShadeUniforms(effects, targets, settings, advanceAnimationTime(now), advanceSceneYaw(now));
-    renderChain(frame, effects, targets, surface, runBake);
+    renderChain(frame, effects, targets, surface, settings, runBake, sampling ? timer?.span(MEASURE_SPAN) : undefined);
+    if (measurement) recordMeasurementFrame(measurement, now, sampling);
+  };
+
+  /**
+   * Folds one rendered frame into the running measurement.
+   *
+   * Intervals, not timestamps: the first sampled frame only arms `lastAt`, so N
+   * sampled frames yield N-1 intervals and none of them straddles the boundary
+   * with the warmup phase.
+   */
+  function recordMeasurementFrame(m: Measurement, now: number, sampling: boolean): void {
+    m.seen += 1;
+    if (m.done) return;
+    if (sampling) {
+      if (m.lastAt !== undefined) m.frameSamples.push(now - m.lastAt);
+      m.lastAt = now;
+    }
+    armMeasureStall();
+    if (m.frameSamples.length >= m.targetFrames || now - m.startedAt >= m.maxMs) finishMeasurement(m);
+  }
+
+  /**
+   * Restarts the "no frames are arriving" watchdog.
+   *
+   * Rearmed per frame rather than set once for the whole run, so it fires only
+   * on an actual stall (tab hidden, GPU hung) and never just because the machine
+   * is slow enough to need the full `maxMs`.
+   */
+  function armMeasureStall(): void {
+    if (measureStall !== undefined) clearTimeout(measureStall);
+    measureStall = setTimeout(() => {
+      measureStall = undefined;
+      const m = measurement;
+      if (!m || m.done) return;
+      // Partial data still answers the question; nothing at all does not.
+      if (m.frameSamples.length >= 2) finishMeasurement(m);
+      else failMeasurement(m, new Error('[hero] measure() saw no frames — is the tab in the background? requestAnimationFrame does not run there.'));
+    }, MEASURE_STALL_MS);
+  }
+
+  /** Stops sampling and resolves once in-flight timestamp results have landed. */
+  function finishMeasurement(m: Measurement): void {
+    if (m.done) return;
+    m.done = true;
+    setTimeout(() => {
+      if (measurement !== m) return;
+      const result = summarizeMeasurement(m, targets?.gbuffer.size ?? [0, 0]);
+      teardownMeasurement();
+      m.resolve(result);
+    }, MEASURE_DRAIN_MS);
+  }
+
+  function failMeasurement(m: Measurement, error: Error): void {
+    m.done = true;
+    if (measurement === m) teardownMeasurement();
+    m.reject(error);
+  }
+
+  /** Drops the measurement and lets the loop go back to obeying visibility. */
+  function teardownMeasurement(): void {
+    measurement = undefined;
+    unsubscribeTimer?.();
+    unsubscribeTimer = undefined;
+    if (measureStall !== undefined) { clearTimeout(measureStall); measureStall = undefined; }
+    reconcileLoop();
+  }
+
+  const measureFrameTime = (measureOptions?: MeasureOptions): Promise<MeasureResult> => {
+    if (disposed) return Promise.reject(new Error('[hero] measure() on a disposed renderer'));
+    if (!started || !gpu || !effects || !targets || !surface) {
+      return Promise.reject(new Error('[hero] measure() before the renderer was ready — await renderer.ready first'));
+    }
+    if (measurement) return Promise.reject(new Error('[hero] a measurement is already running'));
+    // Created on first use, not at init: a timer holds a query set plus staging
+    // buffers, and the shipped hero never measures anything.
+    if (timestampsAvailable && !timer) {
+      try { timer = gpu.timer(); } catch { timer = undefined; }
+    }
+    return new Promise<MeasureResult>((resolve, reject) => {
+      const m: Measurement = {
+        variant: settings.diskNoise,
+        targetFrames: Math.max(8, Math.round(measureOptions?.frames ?? MEASURE_FRAMES)),
+        warmupFrames: Math.max(0, Math.round(measureOptions?.warmupFrames ?? MEASURE_WARMUP)),
+        maxMs: Math.max(200, measureOptions?.maxMs ?? MEASURE_MAX_MS),
+        startedAt: clockMs(),
+        frameSamples: [],
+        gpuSamples: [],
+        seen: 0,
+        done: false,
+        resolve,
+        reject,
+      };
+      measurement = m;
+      // Kept subscribed through the drain window on purpose: the last few
+      // results arrive after sampling has already stopped.
+      unsubscribeTimer = timer?.onResults((spans) => {
+        const ms = spans[MEASURE_SPAN];
+        if (ms !== undefined && measurement === m) m.gpuSamples.push(ms);
+      });
+      armMeasureStall();
+      reconcileLoop();
+    });
   };
 
   /**
@@ -431,6 +741,11 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    // Settle a measurement in flight before the GPU goes away, or its promise
+    // would never resolve and the panel would wait forever.
+    if (measurement) failMeasurement(measurement, new Error('[hero] renderer disposed while measuring'));
+    timer?.dispose();
+    timer = undefined;
     loop?.stop();
     loop = undefined;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
@@ -467,7 +782,18 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   const initialize = async () => {
     const { init } = await import('vgpu');
     if (disposed) return;
-    const nextGpu = await init();
+    // `timestamp-query` has to be requested at device creation, and requesting a
+    // feature the adapter lacks makes init() throw — so ask the adapter first.
+    // Only the ?debug panel sets `profiling`, which keeps the shipped hero on
+    // exactly the device it has always created.
+    if (options.profiling) {
+      try {
+        const probe = await navigator.gpu?.requestAdapter();
+        timestampsAvailable = probe?.features.has('timestamp-query') ?? false;
+      } catch { timestampsAvailable = false; }
+    }
+    if (disposed) return;
+    const nextGpu = await init(timestampsAvailable ? { requiredFeatures: ['timestamp-query'] } : {});
     if (disposed) { nextGpu.dispose(); return; }
     gpu = nextGpu;
     surface = gpu.surface(options.canvas, { dpr: [1, MAX_DPR] });
@@ -520,13 +846,16 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     throw error;
   });
 
-  return { ready, rebake, dispose };
+  return { ready, rebake, measure: measureFrameTime, dispose };
 }
 
 function createEffects(gpu: Gpu, label: string): Effects {
   return {
     bake: gpu.effect(bakeWgsl, { label: `${label}-bake` }),
-    shade: gpu.effect(shadeWgsl, { label: `${label}-shade` }),
+    shade: {
+      tiled: gpu.effect(shadeWgsl, { label: `${label}-shade-tiled` }),
+      analytic: gpu.effect(analyticShadeSource(shadeWgsl), { label: `${label}-shade-analytic` }),
+    },
     // Built and uploaded here, synchronously, before the first bind: the
     // lattice is a pure function of its size, so there is nothing to await and
     // nothing that can change later.
@@ -557,20 +886,30 @@ function destroyTarget(target: Target | undefined): void {
 function setBindings(effects: Effects, targets: Targets): void {
   const [hit1, hit2, sky, view] = targets.gbuffer.colors;
   effects.bake.set({ bake: { resolution: targets.gbuffer.size } });
-  effects.shade.set({
-    gHit1: hit1,
-    gHit2: hit2,
-    gSky: sky,
-    gView: view,
-    // Resize-invariant, but re-bound with the rest: `setBindings` rebuilds the
-    // whole shade bind group when the G-buffer is recreated, and a bind group
-    // is all-or-nothing.
-    noiseVolume: effects.noiseVolume,
-    noiseSampler: effects.noiseSampler,
-    // The shade pass draws at G-buffer resolution: it is a 1:1 textureLoad, and
-    // the swap chain is created from the same clamped physical size.
-    shade: { resolution: targets.gbuffer.size },
-  });
+  // BOTH variants get the same bind group: each pipeline owns its own, and the
+  // one that is not currently drawing still has to be ready to draw instantly.
+  //
+  // The analytic variant never reads `noiseVolume`, and binding it anyway is
+  // deliberate: reflection is built from the shader's DECLARATIONS, not from its
+  // uses, so the binding survives the dead-code elimination of the tiled path
+  // and `set` would throw on an unknown name if we skipped it. Verified on both
+  // variants — do not "optimize" this into a conditional.
+  for (const shade of Object.values(effects.shade)) {
+    shade.set({
+      gHit1: hit1,
+      gHit2: hit2,
+      gSky: sky,
+      gView: view,
+      // Resize-invariant, but re-bound with the rest: `setBindings` rebuilds the
+      // whole shade bind group when the G-buffer is recreated, and a bind group
+      // is all-or-nothing.
+      noiseVolume: effects.noiseVolume,
+      noiseSampler: effects.noiseSampler,
+      // The shade pass draws at G-buffer resolution: it is a 1:1 textureLoad, and
+      // the swap chain is created from the same clamped physical size.
+      shade: { resolution: targets.gbuffer.size },
+    });
+  }
 }
 
 function setBakeUniforms(effects: Effects, targets: Targets, settings: HeroSettings): void {
@@ -592,7 +931,11 @@ function setShadeUniforms(
   time: number,
   sceneYaw: number,
 ): void {
-  effects.shade.set({
+  // Only the variant that is about to draw. The other one is re-armed on the
+  // frame after a switch, which is soon enough: `renderFrame` always sets
+  // uniforms before it draws, so the newly selected pipeline can never draw with
+  // a stale clock.
+  activeShade(effects, settings).set({
     shade: {
       resolution: targets.gbuffer.size,
       time,
@@ -612,19 +955,81 @@ function setShadeUniforms(
   // early (raw) for every debug view, so the bypass is a branch in the shader.
 }
 
+/** Median of an unsorted sample set; `NaN` for an empty one. */
+function median(samples: readonly number[]): number {
+  if (samples.length === 0) return Number.NaN;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const middle = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function mean(samples: readonly number[]): number {
+  if (samples.length === 0) return Number.NaN;
+  return samples.reduce((total, value) => total + value, 0) / samples.length;
+}
+
+/**
+ * Turns the collected samples into the reported result.
+ *
+ * Median leads rather than mean because a frame loop's outliers are one-sided:
+ * a GC pause or a compositor hiccup can only ever make a frame longer, so the
+ * mean drifts up with the length of the run while the median does not. Both are
+ * reported so a large gap between them is visible as the warning it is.
+ */
+function summarizeMeasurement(m: Measurement, resolution: readonly [number, number]): MeasureResult {
+  const medianMs = median(m.frameSamples);
+  const hasGpu = m.gpuSamples.length > 0;
+  const gpuMedianMs = hasGpu ? median(m.gpuSamples) : undefined;
+  return {
+    variant: m.variant,
+    samples: m.frameSamples.length,
+    medianMs,
+    meanMs: mean(m.frameSamples),
+    fps: 1000 / medianMs,
+    gpuMedianMs,
+    gpuMeanMs: hasGpu ? mean(m.gpuSamples) : undefined,
+    method: hasGpu ? 'wall-clock + timestamp-query' : 'wall-clock',
+    // Two conditions, because either alone gives a false positive: a shader that
+    // genuinely costs 16.7 ms sits on a refresh interval by coincidence, and a
+    // cheap GPU pass is normal when the frame is not present-limited at all.
+    vsyncCapped:
+      REFRESH_INTERVALS_MS.some((interval) => Math.abs(medianMs - interval) < 1) &&
+      gpuMedianMs !== undefined && gpuMedianMs < medianMs - 2,
+    resolution,
+  };
+}
+
+/** The shade pipeline the current settings select. */
+function activeShade(effects: Effects, settings: HeroSettings): Effect {
+  return effects.shade[settings.diskNoise] ?? effects.shade.tiled;
+}
+
 async function prewarm(effects: Effects, targets: Targets, output: Output): Promise<void> {
   await Promise.all([
     effects.bake.compile(targets.gbuffer),
-    // Compiled against the OUTPUT format (the swap chain), not an HDR target:
-    // shade is the last pass and writes display-referred unorm.
-    effects.shade.compile({ colors: [output.format] }),
+    // BOTH shade variants, compiled against the OUTPUT format (the swap chain),
+    // not an HDR target: shade is the last pass and writes display-referred
+    // unorm. Warming the variant that is not selected costs one extra compile at
+    // init and buys two things: flipping the panel switch never stutters, and a
+    // measurement started right after a flip is not timing a compile.
+    ...Object.values(effects.shade).map((shade) => shade.compile({ colors: [output.format] })),
   ]);
 }
 
-function renderChain(frame: Frame, effects: Effects, targets: Targets, output: Output, bake: boolean): void {
+function renderChain(
+  frame: Frame,
+  effects: Effects,
+  targets: Targets,
+  output: Output,
+  settings: HeroSettings,
+  bake: boolean,
+  /** Set only while `measure()` is sampling; otherwise the pass is untimed. */
+  timer?: TimerSpan,
+): void {
   if (bake) frame.pass({ target: targets.gbuffer, clear: CLEAR }, (pass) => pass.draw(effects.bake));
   // Two passes, not three: shade reads the G-buffer and writes the swap chain.
-  frame.pass({ target: output, clear: CLEAR }, (pass) => pass.draw(effects.shade));
+  const shade = activeShade(effects, settings);
+  frame.pass({ target: output, clear: CLEAR, timer }, (pass) => pass.draw(shade));
 }
 
 /** Wall clock for the bake throttle; independent of the animation clock. */
