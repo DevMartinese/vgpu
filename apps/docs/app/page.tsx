@@ -96,13 +96,13 @@ export default function HomePage() {
             className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 px-6"
           >
             <h1
-              className="pointer-events-auto mx-auto max-w-[798px] text-center font-normal leading-[1.2] text-white"
+              className="pointer-events-auto mx-auto max-w-[798px] text-center font-normal leading-[1.4] text-white"
               /* Sized off the viewport HEIGHT, not the width: the tagline has
                  to stay inside the black hole's shadow, and the shadow is a
                  circle scaled by the shorter axis. 2.4svh = 21.6px at 900px
                  tall. The clamp floor keeps it readable on short landscape
                  phones and the ceiling stops it ballooning on tall monitors. */
-              style={{ fontSize: 'clamp(1rem, 2.4svh, 1.75rem)' }}
+              style={{ fontSize: 'clamp(1rem, 4svh, 10.75rem)' }}
             >
               The WebGPU library,
               {/* Forces the two-line break of the design on wide viewports; on
