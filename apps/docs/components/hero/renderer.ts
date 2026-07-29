@@ -2,17 +2,8 @@ import type { Effect, Frame, Gpu, Surface, Target, Timer, TimerSpan } from 'vgpu
 
 import bakeWgsl from './bake.wgsl';
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
+import { shadeVariantSource, variantNeedsF16 } from './precision.mjs';
 import shadeWgsl from './shade.wgsl';
-
-/**
- * Rewrites disk.wgsl's `DISK_NOISE_ANALYTIC` gate to build the control variant.
- *
- * The WGSL bundler namespaces every module-level symbol with a content hash
- * (`_vgsl_<hash>__DISK_NOISE_ANALYTIC`) that changes whenever disk.wgsl is
- * edited, so this matches the declaration around whatever prefix it was given
- * instead of hardcoding the mangled name.
- */
-const DISK_NOISE_SWITCH = /(const\s+[A-Za-z0-9_]*DISK_NOISE_ANALYTIC\s*:\s*bool\s*=\s*)false(\s*;)/g;
 
 /**
  * What a `*.wgsl` import actually is.
@@ -26,24 +17,14 @@ const DISK_NOISE_SWITCH = /(const\s+[A-Za-z0-9_]*DISK_NOISE_ANALYTIC\s*:\s*bool\
 type ShaderModule = string | { readonly version: 1; readonly wgsl: string };
 
 /**
- * The shade source with the analytic (pre-optimization) noise compiled in,
- * returned in the same shape it came in.
+ * One variant's shade source, returned in the same shape it came in.
  *
- * Throws rather than returning the input unchanged if the gate stops matching,
- * which is the entire point of the check: a silently failed substitution would
- * hand the panel two identical pipelines, the A/B would report a dead heat, and
- * the conclusion drawn from it would be false. Fail loudly at init instead.
+ * The rewrites themselves live in `precision.mjs` so the headless harness runs
+ * the exact same specialization; everything they can get wrong throws there.
  */
-function analyticShadeSource(source: ShaderModule): ShaderModule {
+function variantSource(source: ShaderModule, variant: DiskNoiseVariant): ShaderModule {
   const text = typeof source === 'string' ? source : source.wgsl;
-  const matches = text.match(DISK_NOISE_SWITCH);
-  if (matches?.length !== 1) {
-    throw new Error(
-      `[hero] expected exactly 1 DISK_NOISE_ANALYTIC gate in the shade source, found ${matches?.length ?? 0}. ` +
-        'The disk.wgsl A/B switch is broken — see DISK_NOISE_SWITCH in renderer.ts.',
-    );
-  }
-  const rewritten = text.replace(DISK_NOISE_SWITCH, '$1true$2');
+  const rewritten = shadeVariantSource(text, variant);
   return typeof source === 'string' ? rewritten : { ...source, wgsl: rewritten };
 }
 
@@ -120,12 +101,14 @@ export interface HeroSettings {
    */
   mouseYaw: number;
   /**
-   * Which `noise3` implementation the disk compiles to. Perf A/B only — see
-   * `DISK_NOISE_SWITCH` and `measure()`.
+   * Which shade variant is compiled and drawn. Perf A/B only — see
+   * `precision.mjs` and `measure()`.
    *
-   * NOT a look setting, but it is not neutral either: the two arms draw the same
-   * noise from different realizations, so the filaments rearrange when you flip
-   * it. That is expected (GBUFFER.md, "Why the lattice has a seed").
+   * NOT a look setting, and not neutral either: `analytic` vs `tiled` draw the
+   * same noise from different realizations, so the filaments rearrange when you
+   * flip between them (GBUFFER.md, "Why the lattice has a seed"), while
+   * `tiled-f16` draws the SAME realization at half precision. A variant the
+   * device cannot provide falls back to `tiled` (see `resolveVariant`).
    */
   diskNoise: DiskNoiseVariant;
   /** Owned by disk.wgsl. */
@@ -135,17 +118,27 @@ export interface HeroSettings {
 }
 
 /**
- * The two disk-noise implementations the shader can be built with.
+ * The shade variants the ONE shade source can be specialized into.
  *
  * `tiled` is what ships (one trilinear fetch into the baked lattice);
  * `analytic` is the pre-optimization control, eight inline hashes per sample,
  * kept verbatim in disk.wgsl so "before" can be measured on the reader's own
- * machine instead of taken on faith.
+ * machine instead of taken on faith; `tiled-f16` is `tiled` with the noise and
+ * emission arithmetic narrowed to half precision (disk.wgsl's alias block).
+ *
+ * All three are rewrites of the same file — never separate shaders. See
+ * `precision.mjs`.
  */
-export type DiskNoiseVariant = 'analytic' | 'tiled';
+export type DiskNoiseVariant = 'analytic' | 'tiled' | 'tiled-f16';
 
-/** Panel order: control first, so the A/B reads left to right. */
-export const DISK_NOISE_VARIANTS: readonly DiskNoiseVariant[] = ['analytic', 'tiled'];
+/**
+ * Panel order: control, shipped, spike — so the A/B reads left to right.
+ *
+ * This is what CAN exist. What a given device can actually run is
+ * `HeroRenderer.availableVariants()`, which drops `tiled-f16` when the adapter
+ * lacks `shader-f16`.
+ */
+export const DISK_NOISE_VARIANTS: readonly DiskNoiseVariant[] = ['analytic', 'tiled', 'tiled-f16'];
 
 /**
  * Defaults picked by the user in the panel (via "copy JSON"). Keep them in sync
@@ -266,6 +259,11 @@ export interface HeroRendererOptions {
    * requests exactly the same device it always did. Requesting a feature the
    * adapter lacks makes `init` throw, so this is best-effort: the renderer
    * checks adapter support first and silently falls back to wall-clock.
+   *
+   * It also gates `shader-f16`, and therefore the existence of the `tiled-f16`
+   * variant, for the same reason: half precision is a SPIKE being measured, not
+   * something the shipped hero has decided to use, so production must not even
+   * request the feature. Flip the default only after the numbers say to.
    */
   profiling?: boolean;
 }
@@ -282,7 +280,13 @@ export interface MeasureOptions {
 
 /** One `measure()` result. Times are milliseconds. */
 export interface MeasureResult {
-  /** Which pipeline was actually timed — read from settings, not requested. */
+  /**
+   * Which pipeline was actually timed.
+   *
+   * Resolved against the pipelines that EXIST, not copied from the settings: on
+   * a device without `shader-f16` selecting `tiled-f16` draws `tiled`, and a
+   * result labelled with the variant that was merely requested would be a lie.
+   */
   variant: DiskNoiseVariant;
   /** Frame intervals behind the stats. */
   samples: number;
@@ -315,6 +319,15 @@ export interface HeroRenderer {
   ready: Promise<void>;
   /** Re-runs the one-shot geodesic bake with the current settings. */
   rebake(): void;
+  /**
+   * The variants this device actually compiled, in `DISK_NOISE_VARIANTS` order.
+   *
+   * Only meaningful after `ready` resolves — before that the pipelines do not
+   * exist yet and it returns an empty array. The panel builds its dropdown from
+   * this, which is what keeps `tiled-f16` off machines that cannot run it
+   * instead of offering an option that silently draws something else.
+   */
+  availableVariants(): readonly DiskNoiseVariant[];
   /**
    * Times the REAL frame loop for a few hundred frames and resolves with the
    * stats. Used by the `?debug` panel to A/B `settings.diskNoise`.
@@ -357,14 +370,19 @@ type Output = Surface | Target;
 interface Effects {
   bake: Effect;
   /**
-   * One compiled shade pipeline PER disk-noise variant, both built and warmed at
+   * One compiled shade pipeline per AVAILABLE variant, all built and warmed at
    * init so switching in the panel is instant and the first measured frame never
    * pays for a shader compile.
    *
-   * Two pipelines rather than one branching pipeline is what makes the A/B
-   * honest — see `DISK_NOISE_SWITCH` here and the `const` gate in disk.wgsl.
+   * Independently compiled pipelines rather than one branching pipeline is what
+   * makes the A/B honest — see `precision.mjs` and the `const` gate in disk.wgsl.
+   *
+   * Partial because `tiled-f16` only exists when the adapter offers
+   * `shader-f16` and the renderer was created with `profiling`. `tiled` is
+   * always present and is the fallback for a variant that is not: nothing in the
+   * frame path may assume a key exists (see `resolveVariant`).
    */
-  shade: Record<DiskNoiseVariant, Effect>;
+  shade: Partial<Record<DiskNoiseVariant, Effect>>;
   /**
    * Tiled 3D value-noise lattice for disk.wgsl, plus its sampler.
    *
@@ -428,6 +446,12 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   // `timestampsAvailable` is decided at init from the adapter's feature list;
   // `timer` is created lazily on the first measurement and owned until dispose.
   let timestampsAvailable = false;
+  /**
+   * Whether `shader-f16` was requested AND granted, i.e. whether the `tiled-f16`
+   * pipeline exists. Decided at init from the adapter's feature list, exactly
+   * like `timestampsAvailable`, and only ever true under `profiling`.
+   */
+  let f16Available = false;
   let timer: Timer | undefined;
   let unsubscribeTimer: (() => void) | undefined;
   let measurement: Measurement | undefined;
@@ -660,7 +684,9 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     }
     return new Promise<MeasureResult>((resolve, reject) => {
       const m: Measurement = {
-        variant: settings.diskNoise,
+        // The variant that will actually DRAW, not the one selected: they differ
+        // when the settings ask for a pipeline this device could not build.
+        variant: resolveVariant(effects!, settings),
         targetFrames: Math.max(8, Math.round(measureOptions?.frames ?? MEASURE_FRAMES)),
         warmupFrames: Math.max(0, Math.round(measureOptions?.warmupFrames ?? MEASURE_WARMUP)),
         maxMs: Math.max(200, measureOptions?.maxMs ?? MEASURE_MAX_MS),
@@ -782,22 +808,34 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   const initialize = async () => {
     const { init } = await import('vgpu');
     if (disposed) return;
-    // `timestamp-query` has to be requested at device creation, and requesting a
-    // feature the adapter lacks makes init() throw — so ask the adapter first.
-    // Only the ?debug panel sets `profiling`, which keeps the shipped hero on
-    // exactly the device it has always created.
+    // Device features have to be requested at device creation, and requesting one
+    // the adapter lacks makes init() throw — so ask the adapter first. Only the
+    // ?debug panel sets `profiling`, which keeps the shipped hero on exactly the
+    // device it has always created: no timestamps, no f16, no `tiled-f16`.
     if (options.profiling) {
       try {
         const probe = await navigator.gpu?.requestAdapter();
         timestampsAvailable = probe?.features.has('timestamp-query') ?? false;
-      } catch { timestampsAvailable = false; }
+        f16Available = probe?.features.has('shader-f16') ?? false;
+      } catch { timestampsAvailable = false; f16Available = false; }
     }
     if (disposed) return;
-    const nextGpu = await init(timestampsAvailable ? { requiredFeatures: ['timestamp-query'] } : {});
+    // Probed rather than try/catch-and-retry: one adapter query answers both, and
+    // an init() that throws would already have logged a device-creation failure.
+    const requiredFeatures: GPUFeatureName[] = [];
+    if (timestampsAvailable) requiredFeatures.push('timestamp-query');
+    if (f16Available) requiredFeatures.push('shader-f16');
+    const nextGpu = await init(requiredFeatures.length > 0 ? { requiredFeatures } : {});
     if (disposed) { nextGpu.dispose(); return; }
     gpu = nextGpu;
     surface = gpu.surface(options.canvas, { dpr: [1, MAX_DPR] });
-    effects = createEffects(gpu, 'black-hole-live');
+    // The adapter can offer a feature the DEVICE then declines, so the pipeline
+    // list is built from what the device actually reports — asking the device is
+    // the only claim that cannot be wrong when `gpu.effect` compiles the f16
+    // source. Without it the variant is simply not built, and the panel never
+    // offers it (`availableVariants`).
+    f16Available = f16Available && gpu.device.features.has('shader-f16');
+    effects = createEffects(gpu, 'black-hole-live', f16Available ? DISK_NOISE_VARIANTS : DISK_NOISE_VARIANTS.filter((variant) => !variantNeedsF16(variant)));
     targets = createTargets(gpu, surface.size, 'black-hole-live');
     setBindings(effects, targets);
     await prewarm(effects, targets, surface);
@@ -846,16 +884,28 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     throw error;
   });
 
-  return { ready, rebake, measure: measureFrameTime, dispose };
+  const availableVariants = (): readonly DiskNoiseVariant[] =>
+    effects === undefined ? [] : DISK_NOISE_VARIANTS.filter((variant) => effects!.shade[variant] !== undefined);
+
+  return { ready, rebake, availableVariants, measure: measureFrameTime, dispose };
 }
 
-function createEffects(gpu: Gpu, label: string): Effects {
+/**
+ * @param variants which shade variants to compile. Always contains `tiled`; the
+ * caller drops the ones this device cannot build (see `initialize`).
+ */
+function createEffects(gpu: Gpu, label: string, variants: readonly DiskNoiseVariant[]): Effects {
+  const shade: Partial<Record<DiskNoiseVariant, Effect>> = {};
+  for (const variant of variants) {
+    // One `gpu.effect` per variant, each from its own rewritten source. The
+    // rewrite throws instead of returning the input unchanged, so a broken
+    // substitution fails HERE, at init, rather than producing two pipelines that
+    // measure the same program (see precision.mjs).
+    shade[variant] = gpu.effect(variantSource(shadeWgsl, variant), { label: `${label}-shade-${variant}` });
+  }
   return {
     bake: gpu.effect(bakeWgsl, { label: `${label}-bake` }),
-    shade: {
-      tiled: gpu.effect(shadeWgsl, { label: `${label}-shade-tiled` }),
-      analytic: gpu.effect(analyticShadeSource(shadeWgsl), { label: `${label}-shade-analytic` }),
-    },
+    shade,
     // Built and uploaded here, synchronously, before the first bind: the
     // lattice is a pure function of its size, so there is nothing to await and
     // nothing that can change later.
@@ -886,14 +936,18 @@ function destroyTarget(target: Target | undefined): void {
 function setBindings(effects: Effects, targets: Targets): void {
   const [hit1, hit2, sky, view] = targets.gbuffer.colors;
   effects.bake.set({ bake: { resolution: targets.gbuffer.size } });
-  // BOTH variants get the same bind group: each pipeline owns its own, and the
-  // one that is not currently drawing still has to be ready to draw instantly.
+  // EVERY variant gets the same bind group: each pipeline owns its own, and the
+  // ones that are not currently drawing still have to be ready to draw instantly.
   //
   // The analytic variant never reads `noiseVolume`, and binding it anyway is
   // deliberate: reflection is built from the shader's DECLARATIONS, not from its
   // uses, so the binding survives the dead-code elimination of the tiled path
-  // and `set` would throw on an unknown name if we skipped it. Verified on both
-  // variants — do not "optimize" this into a conditional.
+  // and `set` would throw on an unknown name if we skipped it. Verified on every
+  // variant — do not "optimize" this into a conditional.
+  //
+  // The uniform layouts are identical across variants by construction: f16 stops
+  // at the module boundary, so `Shade`, `DiskLook` and `StarLook` stay f32 in all
+  // three (see disk.wgsl's alias block).
   for (const shade of Object.values(effects.shade)) {
     shade.set({
       gHit1: hit1,
@@ -999,15 +1053,27 @@ function summarizeMeasurement(m: Measurement, resolution: readonly [number, numb
   };
 }
 
+/**
+ * The variant that will actually be drawn.
+ *
+ * Selecting a variant this device could not compile (`tiled-f16` without
+ * `shader-f16`) draws `tiled` instead of throwing — but everything that REPORTS
+ * a variant goes through here, so a measurement is never labelled with a
+ * pipeline that did not run.
+ */
+function resolveVariant(effects: Effects, settings: HeroSettings): DiskNoiseVariant {
+  return effects.shade[settings.diskNoise] ? settings.diskNoise : 'tiled';
+}
+
 /** The shade pipeline the current settings select. */
 function activeShade(effects: Effects, settings: HeroSettings): Effect {
-  return effects.shade[settings.diskNoise] ?? effects.shade.tiled;
+  return effects.shade[resolveVariant(effects, settings)]!;
 }
 
 async function prewarm(effects: Effects, targets: Targets, output: Output): Promise<void> {
   await Promise.all([
     effects.bake.compile(targets.gbuffer),
-    // BOTH shade variants, compiled against the OUTPUT format (the swap chain),
+    // EVERY shade variant, compiled against the OUTPUT format (the swap chain),
     // not an HDR target: shade is the last pass and writes display-referred
     // unorm. Warming the variant that is not selected costs one extra compile at
     // init and buys two things: flipping the panel switch never stutters, and a

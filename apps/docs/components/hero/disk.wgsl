@@ -15,6 +15,42 @@
 import { GBufferSample, HORIZON, ISCO } from "./gbuffer.wgsl";
 
 /**
+ * PRECISION ALIASES — the ONE knob that builds the f16 variant of this shader.
+ *
+ * `hreal`/`hreal3` mean "a real number whose precision is not load-bearing".
+ * They resolve to `f32`/`vec3f` in the shipped shader, and `precision.mjs`
+ * rewrites exactly these two declarations to `f16`/`vec3h` (plus an `enable f16`
+ * directive) to produce the half-precision variant the `?debug` panel measures.
+ * That is the whole mechanism: ONE source of truth, no hand-maintained
+ * `disk-f16.wgsl` to drift out of sync, and a rewrite that cannot half-apply —
+ * `precision.mjs` throws if an alias it does not recognise survives.
+ *
+ * Aliases rather than a regex over `f32`: a blind type substitution would also
+ * hit the values that MUST stay 32-bit, and there is no way to review a regex.
+ * Here the choice is visible at every declaration, which is also the only honest
+ * way to document it. What may be half:
+ *
+ *   - the noise/fBm value chain (lattice fetch, octave accumulation, ridge fold)
+ *   - the smoke remap, emissivity and the thermal color/emission product
+ *
+ * What may NOT, and why (a wrong choice here is a rendering bug, not a rounding
+ * difference):
+ *
+ *   - NOISE COORDINATES. `cos(angle) * a`, `radius * r + offset`: the finest
+ *     octaves reach ~2e3 noise units, where f16 (11-bit mantissa) resolves ~1
+ *     unit — a whole lattice cell. The filaments would quantize into blocks.
+ *   - THE WIND-UP CLOCK. `time`, `fract(time * omegaRef / TWO_PI)`, the sawtooth
+ *     lobes and their triangular weights. f16 tops out at 65504 and resolves
+ *     ~0.03 s at t = 60 s: the phase would stutter and the crossfade would pop.
+ *   - THE PIXEL FOOTPRINT. `dAngle`/`dRadius` and the `visible` fades derived
+ *     from them decide which octaves are skipped; quantizing them makes the LOD
+ *     breathe. They stay f32 so BOTH variants skip exactly the same octaves.
+ *   - G-BUFFER GEOMETRY. Positions, radius, azimuth (see GBUFFER.md).
+ */
+alias hreal = f32;
+alias hreal3 = vec3f;
+
+/**
  * Per-frame disk tuning, uploaded as `disk` uniform by renderer.ts.
  * Every field must exist in `HeroSettings.disk` on the TS side, same names.
  * `spare0..spare3` are pre-wired free knobs (default 0) so new parameters can
@@ -123,14 +159,20 @@ struct NoiseLattice {
  * branch cut, so no radial seam across the disk. Tiling does not disturb that:
  * the embedding closes on itself geometrically, whatever the field underneath.
  */
-fn noise3Tiled(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> f32 {
+fn noise3Tiled(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> hreal {
   let i = floor(p);
   let f = p - i;
   let u = f * f * (3.0 - 2.0 * f);
+  // The COORDINATE stays f32 in both variants (see the alias block): `p.z`
+  // reaches ~2e3 in the finest octaves, and the texture unit needs f32 there to
+  // land inside the right texel at all — the sampler's own filter weights are
+  // quantized to ~1/256 of a texel, which is the precision that actually
+  // bounds the result. Only the VALUE it returns is allowed to be half.
+  //
   // textureSampleLevel, not textureSample: the octave loops call this from
   // inside `if (visible > ...)`, which is non-uniform control flow, where the
   // implicit-derivative sample is illegal. The lattice has one mip anyway.
-  return textureSampleLevel(tex, samp, (i + u + vec3f(0.5)) * lattice.invSize, 0.0).r;
+  return hreal(textureSampleLevel(tex, samp, (i + u + vec3f(0.5)) * lattice.invSize, 0.0).r);
 }
 
 /**
@@ -153,7 +195,7 @@ fn hash31(p: vec3f) -> f32 {
   return fract((q.x + q.y) * q.z);
 }
 
-fn noise3Analytic(p: vec3f) -> f32 {
+fn noise3Analytic(p: vec3f) -> hreal {
   let i = floor(p);
   let f = fract(p);
   let u = f * f * (3.0 - 2.0 * f);
@@ -169,7 +211,10 @@ fn noise3Analytic(p: vec3f) -> f32 {
   let x10 = mix(c010, c110, u.x);
   let x01 = mix(c001, c101, u.x);
   let x11 = mix(c011, c111, u.x);
-  return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+  // The eight hashes stay f32 — `fract` of a large product is exactly the kind
+  // of arithmetic f16 destroys — and only the interpolated result narrows, so
+  // both arms of the noise A/B carry the same precision contract.
+  return hreal(mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z));
 }
 
 /**
@@ -193,7 +238,7 @@ fn noise3Analytic(p: vec3f) -> f32 {
  */
 const DISK_NOISE_ANALYTIC: bool = false;
 
-fn noise3(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> f32 {
+fn noise3(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> hreal {
   if (DISK_NOISE_ANALYTIC) { return noise3Analytic(p); }
   return noise3Tiled(tex, samp, lattice, p);
 }
@@ -228,22 +273,27 @@ fn streakFbm(
   lacAng: f32,
   lacRad: f32,
   seed: f32,
-) -> f32 {
-  var value = 0.0;
-  var total = 0.0;
-  var amplitude = 0.5;
+) -> hreal {
+  // Accumulators are `hreal`: this loop IS the hot path (up to 5 octaves, run
+  // ~26 times per pixel per layer), so it is the only place where narrowing can
+  // pay for itself. The COORDINATES `a`, `r`, `offset` and the footprint fade
+  // stay f32 — see the alias block.
+  var value: hreal = 0.0;
+  var total: hreal = 0.0;
+  var amplitude: hreal = 0.5;
   var a = angScale;
   var r = radScale;
   var offset = seed;
   for (var i = 0; i < octaves; i++) {
     // Per-axis Nyquist fade. `dAngle * a` is how much the cos/sin pair moves
-    // across one pixel, `dRadius * r` the same for the radial axis.
+    // across one pixel, `dRadius * r` the same for the radial axis. Computed and
+    // COMPARED in f32 so both precision variants skip the same octaves.
     let visible = clamp(1.0 - 1.7 * max(dAngle * a, dRadius * r), 0.0, 1.0);
     // Skipping the hash when the octave is invisible is a real win: the edge-on
     // band (where the radial frequency explodes) is a large share of the pixels.
-    var sampleValue = 0.5;
+    var sampleValue: hreal = 0.5;
     if (visible > 0.004) {
-      sampleValue = mix(0.5, noise3(tex, samp, lattice, vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset)), visible);
+      sampleValue = mix(hreal(0.5), noise3(tex, samp, lattice, vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset)), hreal(visible));
     }
     value += amplitude * sampleValue;
     total += amplitude;
@@ -252,7 +302,7 @@ fn streakFbm(
     offset += 23.7;
     amplitude *= 0.55;
   }
-  return value / max(total, 0.0001);
+  return value / max(total, hreal(0.0001));
 }
 
 /**
@@ -277,21 +327,23 @@ fn ridgeFbm(
   lacAng: f32,
   lacRad: f32,
   seed: f32,
-) -> f32 {
-  var value = 0.0;
-  var total = 0.0;
-  var amplitude = 0.5;
+) -> hreal {
+  var value: hreal = 0.0;
+  var total: hreal = 0.0;
+  var amplitude: hreal = 0.5;
   var a = angScale;
   var r = radScale;
   var offset = seed;
   for (var i = 0; i < octaves; i++) {
     let visible = clamp(1.0 - 1.7 * max(dAngle * a, dRadius * r), 0.0, 1.0);
-    var crest = 0.42;
+    var crest: hreal = 0.42;
     if (visible > 0.004) {
       let n = noise3(tex, samp, lattice, vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset));
       // 0.42 is the mean of the folded noise, so an invisible octave decays to
-      // the same average the visible one would have produced.
-      crest = mix(0.42, pow(1.0 - abs(n * 2.0 - 1.0), 1.35), visible);
+      // the same average the visible one would have produced. The ridge fold is
+      // the sharpest thing in the shader, so it is also where a precision loss
+      // would show first — that is exactly what the RMSE gate measures.
+      crest = mix(hreal(0.42), pow(1.0 - abs(n * 2.0 - 1.0), hreal(1.35)), hreal(visible));
     }
     value += amplitude * crest;
     total += amplitude;
@@ -300,7 +352,7 @@ fn ridgeFbm(
     offset += 41.9;
     amplitude *= 0.62;
   }
-  return value / max(total, 0.0001);
+  return value / max(total, hreal(0.0001));
 }
 
 /** Everything the smoke field needs besides the sheared flow coordinate. */
@@ -327,11 +379,16 @@ fn smokeField(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, angle:
   // Two low-frequency layers displace the sampling point mostly RADIALLY: that
   // makes the filaments meander across the flow while staying tangential, i.e.
   // frayed rather than blobby. Amplitude follows `chaos`, so the rim shreds.
-  let warpA = streakFbm(tex, samp, lattice, angle, radius, p.angBase * 0.55, p.flowRad * 1.6, 2, p.dAngle, p.dRadius, 1.6, 2.0, 3.7) - 0.5;
+  //
+  // The two warps come back out of the fBm as f32 even in the half variant: what
+  // they feed is a COORDINATE (`radiusW`, `angleW`), and a quantized advection
+  // would step the whole field in visible jumps rather than just dither its
+  // value. Narrowing stops at this boundary, on purpose.
+  let warpA = f32(streakFbm(tex, samp, lattice, angle, radius, p.angBase * 0.55, p.flowRad * 1.6, 2, p.dAngle, p.dRadius, 1.6, 2.0, 3.7)) - 0.5;
   // warpB is deliberately short-wavelength in AZIMUTH: a warp that is smooth all
   // the way around only slides the threads sideways and keeps the silky-ring
   // look. This is the layer that actually shreds the rim.
-  let warpB = streakFbm(tex, samp, lattice, angle + 2.4, radius * 1.13, p.angBase * 2.8, p.radBase * 0.45, 3, p.dAngle, p.dRadius, 1.7, 2.0, 61.3) - 0.5;
+  let warpB = f32(streakFbm(tex, samp, lattice, angle + 2.4, radius * 1.13, p.angBase * 2.8, p.radBase * 0.45, 3, p.dAngle, p.dRadius, 1.7, 2.0, 61.3)) - 0.5;
   let radiusW = radius + (warpA * 1.9 + warpB * 1.25 * p.outward) * p.chaos;
   let angleW = angle + (warpB * 0.9 - warpA * 0.35) * p.chaos * 0.55 / max(radius * 0.22, 0.35);
 
@@ -349,11 +406,14 @@ fn smokeField(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, angle:
   // `mix` instead of a fixed sum matters: an unresolved fBm decays to a flat
   // constant and would otherwise wash the contrast out of the whole band.
   let fineVis = clamp(1.0 - 1.7 * max(p.dAngle * p.angBase * 0.85, p.dRadius * p.radBase), 0.0, 1.0);
-  let field = mix(flow, flow * 0.22 + threads * 1.05, fineVis);
+  let field = mix(flow, flow * 0.22 + threads * 1.05, hreal(fineVis));
   // Ragged rim: feeds a noisy outer cutoff radius so the disk dissolves into
   // wisps instead of ending on a clean circle.
   let rim = (warpA + warpB * 0.5) * 0.9;
-  return vec2f(field, rim);
+  // Widened back to f32 at the module boundary so the returned pair keeps one
+  // type: `rim` is a coordinate-ish quantity (it moves the outer cutoff radius)
+  // and `field` is consumed by the emission chain, which re-narrows it.
+  return vec2f(f32(field), rim);
 }
 
 /** Mean of `smokeField().x`. Only used as the pivot of the contrast rescale. */
@@ -513,26 +573,38 @@ export fn shadeDisk(
   var field = FIELD_MEAN + (blended.x - FIELD_MEAN) / sqrt(max(w0 * w0 + w1 * w1 + 2.0 * rho * w0 * w1, 0.25));
 
   // --- density / emissivity split ------------------------------------------
+  //
+  // From here down the arithmetic is RADIOMETRIC — a remap of the field, an
+  // emissivity and a color — so it is all `hreal`. Every value below is bounded
+  // (0..1 remaps, a color, an optical depth of a few units), which is exactly
+  // the regime where f16's 11-bit mantissa is invisible and its two-per-clock
+  // packing can pay off. The f32 quantities it consumes (`field`, `envelope`,
+  // the geometric gains) are narrowed at ONE clearly marked place each, so the
+  // structure of the expressions — and therefore the f32 arm's bit-exact
+  // result — is unchanged.
   let rimNoise = blended.y;
   let innerEdge = smoothstep(0.0, 0.055, radiusNorm);
   let outerEdge = 1.0 - smoothstep(0.42 + rimNoise * 0.30 * fray, 1.0, radiusNorm);
-  let envelope = innerEdge * outerEdge * mix(1.0, 0.62, outward);
+  let envelope = hreal(innerEdge * outerEdge * mix(1.0, 0.62, outward));
 
   let contrast = max(0.2, 1.0 + look.spare2);
   let lo = 0.50 - 0.16 / contrast;
   let hi = 0.50 + 0.21 / contrast;
+  // The field, narrowed once. `field` itself had to be f32: it is built from the
+  // sawtooth weights and the variance rescale, i.e. from the wind-up clock.
+  let fieldH = hreal(field);
   // A gamma on top of the remap, not just a narrower window: it is what opens
   // real black lanes between the threads instead of a uniform gray sheet.
-  var smoke = clamp(pow(smoothstep(lo, hi, field), 1.0 + 0.9 * contrast) * envelope, 0.0, 1.0);
+  var smoke = clamp(pow(smoothstep(hreal(lo), hreal(hi), fieldH), hreal(1.0 + 0.9 * contrast)) * envelope, 0.0, 1.0);
 
   // A softer, wider remap of the same field drives the SURFACE BRIGHTNESS.
   // This is the piece that makes the streaks readable: where the slab is
   // optically thick (the whole edge-on band) opacity is pinned at 1 and can no
   // longer show anything, so the bright/dark lanes have to live in the emission.
-  let fieldN = clamp((field - (lo - 0.10)) / max(hi - lo + 0.26, 0.02), 0.0, 1.0);
+  let fieldN = clamp((fieldH - hreal(lo - 0.10)) / hreal(max(hi - lo + 0.26, 0.02)), 0.0, 1.0);
   // The crest term is what turns a gray sheet into glowing threads: the top of
   // the ridge overshoots well past 1 and blows out, the flanks stay mid-gray.
-  let emissivity = (mix(0.05, 1.0, pow(fieldN, 1.35)) + 2.2 * pow(fieldN, 5.0)) * envelope;
+  let emissivity = (mix(hreal(0.05), hreal(1.0), pow(fieldN, hreal(1.35))) + 2.2 * pow(fieldN, hreal(5.0))) * envelope;
 
   // --- radiative transfer --------------------------------------------------
   // The G-buffer stores a hard surface, but the disk must read as a thin slab:
@@ -542,14 +614,14 @@ export fn shadeDisk(
   // the failure mode this shader is meant to fix.
   let path = pow(grazing, 0.62);
   let thickness = mix(0.30, 0.85, radiusNorm);
-  let opticalDepth = smoke * thickness * path * look.density * 0.95;
+  let opticalDepth = smoke * hreal(thickness) * hreal(path) * hreal(look.density) * 0.95;
   let coverage = 1.0 - exp(-opticalDepth);
 
   // Thermal gradient: white-hot at ISCO, deep orange at the rim. Only the
-  // luminance matters — composite.wgsl desaturates to 0.
-  let heat = pow(1.0 - radiusNorm, 1.25);
-  var thermal = mix(vec3f(0.52, 0.14, 0.03), vec3f(1.0, 0.56, 0.17), smoothstep(0.03, 0.5, heat));
-  thermal = mix(thermal, vec3f(1.0, 0.94, 0.83), pow(heat, 2.2));
+  // luminance matters — the tone map in shade.wgsl desaturates to 0.
+  let heat = hreal(pow(1.0 - radiusNorm, 1.25));
+  var thermal = mix(hreal3(0.52, 0.14, 0.03), hreal3(1.0, 0.56, 0.17), smoothstep(hreal(0.03), hreal(0.5), heat));
+  thermal = mix(thermal, hreal3(1.0, 0.94, 0.83), pow(heat, hreal(2.2)));
 
   // Relativistic beaming, deliberately gentle (Interstellar tones it down so the
   // disk stays nearly symmetric instead of one side being ~200x brighter).
@@ -582,14 +654,22 @@ export fn shadeDisk(
   // A small, bounded edge-on boost keeps the razor-thin incandescent silhouette.
   let edgeGlow = 1.0 + 0.55 * smoothstep(6.0, 26.0, grazing);
 
-  let source = thermal * beaming * redshift * facing * flux * lift * edgeGlow * core * emissivity;
-  let emission = source * look.brightness * 1.35;
+  // The relativistic gains above (beaming, redshift, flux, lift, edgeGlow, core)
+  // stay f32: they are per-pixel scalars derived from normalized directions and
+  // dot products, evaluated ONCE per layer, so narrowing them would buy nothing
+  // measurable while risking a visibly different Doppler lobe. They are narrowed
+  // individually here, which keeps the multiplication order — and therefore the
+  // f32 arm's exact result — identical to before.
+  let source = thermal * hreal(beaming) * hreal(redshift) * hreal(facing) * hreal(flux) * hreal(lift) * hreal(edgeGlow) * hreal(core) * emissivity;
+  let emission = source * hreal(look.brightness) * 1.35;
 
+  // Back to the f32 contract: `DiskSample` is what shade.wgsl composites, and
+  // the entry shader's bindings and structs are precision-agnostic by design.
   var sample: DiskSample;
-  sample.color = emission;
+  sample.color = vec3f(emission);
   // Wispy edges: coverage never quite reaches 1 at the fringes, so the baked
   // background (stars / horizon) bleeds through the smoke.
-  sample.alpha = coverage;
-  sample.density = coverage;
+  sample.alpha = f32(coverage);
+  sample.density = f32(coverage);
   return sample;
 }

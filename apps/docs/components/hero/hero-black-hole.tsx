@@ -25,21 +25,41 @@ function formatMeasurement(r: MeasureResult): string {
 }
 
 /**
- * The A/B verdict.
+ * The A/B verdict over every measured arm, each compared to the one before it.
  *
- * Reports the GPU number whenever both arms have one: wall-clock cannot separate
- * two variants that are both faster than the display, and reporting a "1.00x"
- * that only means "both hit vsync" would be worse than reporting nothing.
+ * Reports the GPU number whenever EVERY arm has one: wall-clock cannot separate
+ * variants that are all faster than the display, and reporting a "1.00x" that
+ * only means "they all hit vsync" would be worse than reporting nothing.
+ *
+ * Chained ratios rather than everything against the control, because that is how
+ * the decisions are actually made: `analytic → tiled` is the volume lane's win,
+ * `tiled → tiled+f16` is the one that decides whether half precision ships.
  */
-function formatComparison(analytic: MeasureResult, tiled: MeasureResult): string {
-  const useGpu = analytic.gpuMedianMs !== undefined && tiled.gpuMedianMs !== undefined;
-  const a = useGpu ? analytic.gpuMedianMs! : analytic.medianMs;
-  const t = useGpu ? tiled.gpuMedianMs! : tiled.medianMs;
-  const ratio = a / t;
-  const verdict = ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1 / ratio).toFixed(2)}x SLOWER`;
-  const caveat = !useGpu && (analytic.vsyncCapped || tiled.vsyncCapped) ? ' (vsync-capped, unreliable)' : '';
-  return `analytic ${a.toFixed(2)}ms → tiled ${t.toFixed(2)}ms = tiled is ${verdict} [${useGpu ? 'gpu' : 'wall'}]${caveat}`;
+function formatComparison(results: readonly MeasureResult[]): string {
+  if (results.length === 0) return 'nothing measured';
+  const useGpu = results.every((r) => r.gpuMedianMs !== undefined);
+  const ms = (r: MeasureResult) => (useGpu ? r.gpuMedianMs! : r.medianMs);
+  const parts = results.map((r, index) => {
+    const time = `${r.variant} ${ms(r).toFixed(2)}ms`;
+    if (index === 0) return time;
+    const previous = results[index - 1]!;
+    const ratio = ms(previous) / ms(r);
+    const verdict = ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1 / ratio).toFixed(2)}x SLOWER`;
+    return `${time} (${verdict} than ${previous.variant})`;
+  });
+  const caveat = !useGpu && results.some((r) => r.vsyncCapped) ? ' (vsync-capped, unreliable)' : '';
+  return `${parts.join(' → ')} [${useGpu ? 'gpu' : 'wall'}]${caveat}`;
 }
+
+/**
+ * Dropdown labels for the shade variants. Kept next to the panel rather than in
+ * renderer.ts: the ids are the contract, the wording is UI.
+ */
+const VARIANT_LABELS: Record<DiskNoiseVariant, string> = {
+  analytic: 'analytic (control)',
+  tiled: 'tiled volume',
+  'tiled-f16': 'tiled + f16',
+};
 
 export function HeroBlackHole() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -105,7 +125,14 @@ export function HeroBlackHole() {
     const applyHideUi = () => document.documentElement.classList.toggle(HERO_SOLO_CLASS, ui.hideUi);
     applyHideUi();
 
-    void import('lil-gui').then(({ default: GUI }) => {
+    void import('lil-gui').then(async ({ default: GUI }) => {
+      // Built only once the renderer is ready, because the perf folder's dropdown
+      // is populated from the pipelines that actually COMPILED
+      // (`availableVariants`), which is not known until the device exists. The
+      // panel therefore appears a few hundred ms after the hero, which is the
+      // right trade: a dropdown offering an option the device cannot run would
+      // report a measurement of something else entirely.
+      await rendererRef.current?.ready.catch(() => undefined);
       if (cancelled) return;
       const settings = settingsRef.current;
       const rebake = () => rendererRef.current?.rebake();
@@ -180,10 +207,15 @@ export function HeroBlackHole() {
       }).name('disk layers');
 
       // --- perf A/B ---------------------------------------------------------
-      // Two independently compiled shade pipelines (see DISK_NOISE_SWITCH in
-      // renderer.ts). Switching is a pipeline swap, not a re-bake: the G-buffer
-      // is pure geometry and knows nothing about the disk's noise.
-      const perf = panel.addFolder('perf A/B (disk noise)');
+      // One independently compiled shade pipeline per variant (see
+      // precision.mjs). Switching is a pipeline swap, not a re-bake: the G-buffer
+      // is pure geometry and knows nothing about the disk's noise or precision.
+      //
+      // The list comes from the RENDERER, not from this file: `tiled-f16` only
+      // exists if the adapter offered `shader-f16`, and offering an option that
+      // silently draws `tiled` instead would fake a measurement.
+      const variants = rendererRef.current?.availableVariants() ?? [];
+      const perf = panel.addFolder('perf A/B (disk noise + precision)');
       const readout = { result: 'press "measure frame time"' };
       let busy = false;
 
@@ -222,39 +254,46 @@ export function HeroBlackHole() {
       const perfActions = {
         'measure frame time': () => { void runMeasure(); },
         /**
-         * Measures both arms back to back and prints the ratio.
+         * Measures every available arm back to back and prints the chained ratios.
          *
          * Worth having over "switch, measure, write it down, switch back": it
-         * removes the transcription step and, more importantly, it measures both
+         * removes the transcription step and, more importantly, it measures all
          * arms seconds apart on the same thermal state, which is the main way a
          * hand-run A/B goes wrong.
          */
-        'A/B both variants': () => {
+        'A/B all variants': () => {
           void (async () => {
             const restore = settings.diskNoise;
-            const results: Partial<Record<DiskNoiseVariant, MeasureResult>> = {};
-            for (const variant of ['analytic', 'tiled'] as const) {
+            const refresh = () => panel.controllersRecursive().forEach((c) => c.updateDisplay());
+            const results: MeasureResult[] = [];
+            for (const variant of variants) {
               settings.diskNoise = variant;
               const result = await runMeasure(variant);
-              if (!result) { settings.diskNoise = restore; panel.controllersRecursive().forEach((c) => c.updateDisplay()); return; }
-              results[variant] = result;
+              if (!result) { settings.diskNoise = restore; refresh(); return; }
+              results.push(result);
             }
             settings.diskNoise = restore;
-            panel.controllersRecursive().forEach((c) => c.updateDisplay());
-            readout.result = formatComparison(results.analytic!, results.tiled!);
-            console.log(`[hero] A/B ${formatComparison(results.analytic!, results.tiled!)}`, results);
+            refresh();
+            readout.result = formatComparison(results);
+            console.log(`[hero] A/B ${formatComparison(results)}`, results);
           })();
         },
       };
-      perf.add(settings, 'diskNoise', {
-        'analytic (control)': 'analytic',
-        'tiled volume': 'tiled',
-      }).name('disk noise');
+      perf.add(settings, 'diskNoise', Object.fromEntries(variants.map((variant) => [VARIANT_LABELS[variant], variant])))
+        .name('shade variant');
       perf.add(perfActions, 'measure frame time');
-      perf.add(perfActions, 'A/B both variants');
+      perf.add(perfActions, 'A/B all variants');
       // Disabled = read-only text field. `.listen()` polls the object, so the
       // async handlers above can just assign to `readout.result`.
       perf.add(readout, 'result').name('last measurement').disable().listen();
+      // Say WHY the f16 arm is missing rather than leaving a hole in the list: on
+      // an adapter without `shader-f16` the variant cannot be compiled at all,
+      // and a reader comparing notes with someone else's machine needs to know
+      // that is the reason and not a mistake.
+      if (!variants.includes('tiled-f16')) {
+        const note = { f16: 'unavailable — this adapter has no `shader-f16`' };
+        perf.add(note, 'f16').name('tiled + f16').disable();
+      }
 
       const actions = {
         'copy JSON': () => {

@@ -6,6 +6,18 @@
 
 import { pcg3d, unitFloat } from "@vgpu/wgsl-std/hash";
 
+/**
+ * PRECISION ALIAS — see the alias block in disk.wgsl for the full contract.
+ *
+ * `f32` in the shipped shader; `precision.mjs` rewrites this one declaration to
+ * `f16` to build the half-precision variant. Only the star's EMISSION rides in
+ * it. The cube-face coordinates, the cell grid (up to 210 cells across a face,
+ * so cell centers reach ~210 with sub-texel jitter), the pcg3d hash and the
+ * twinkle phase all stay f32: the grid is a coordinate and the hash is integer
+ * work, and quantizing either would move or drop stars rather than dim them.
+ */
+alias hreal = f32;
+
 const STAR_INTENSITY: f32 = 0.16;
 // Cube-face angular radius shared by every star. This matches the smallest
 // point from the prior field; `starLayer` converts it to each grid's units.
@@ -56,7 +68,7 @@ fn starLayer(
   seed: i32,
   time: f32,
   twinkle: f32,
-) -> f32 {
+) -> hreal {
   let face = faceCoords(direction);
   let grid = face.xy * cells;
   let cell = floor(grid);
@@ -71,18 +83,24 @@ fn starLayer(
   // Grid units scale with `cells`, so multiply by the grid resolution to make
   // every layer use one shared angular point radius.
   let radius = UNIFORM_POINT_RADIUS * cells;
-  let falloff = 1.0 - smoothstep(0.0, radius, length(grid - center));
+  // Measured in GRID units, in f32: `grid` runs to `cells` (210 on the finest
+  // layer) while `radius` is ~0.06, so the subtraction needs the f32 mantissa to
+  // resolve a point at all. Only the resulting coverage narrows.
+  let falloff = hreal(1.0 - smoothstep(0.0, radius, length(grid - center)));
 
   // The same stable per-cell hash that decides whether this star exists maps
   // linearly to the user-selected [brightnessMin, brightnessMax] interval.
   // Normalizing by density keeps that interval represented at every population.
   let brightnessHash = presence / max(density, 1.0e-4);
-  let magnitude = mix(brightnessMin, brightnessMax, clamp(brightnessHash, 0.0, 1.0));
+  let magnitude = hreal(mix(brightnessMin, brightnessMax, clamp(brightnessHash, 0.0, 1.0)));
 
   // Kept deliberately gentler than the old field: at twinkle = 1 this varies
   // by only +/- 6%, and every star has a stable hash-derived phase.
   let phase = unitFloat(hashed.y) * 6.2831853;
-  let shimmer = 1.0 + clamp(twinkle, 0.0, 1.0) * 0.06 * sin(time * (0.35 + unitFloat(hashed.z) * 0.4) + phase);
+  // The twinkle phase is f32 because it is a CLOCK: `time` grows without bound
+  // and f16 resolves ~0.03 s by t = 60 s, which would turn a slow shimmer into a
+  // stutter. Same rule as the disk's wind-up phases.
+  let shimmer = hreal(1.0 + clamp(twinkle, 0.0, 1.0) * 0.06 * sin(time * (0.35 + unitFloat(hashed.z) * 0.4) + phase));
   return falloff * falloff * magnitude * shimmer;
 }
 
@@ -100,7 +118,9 @@ export fn shadeStars(direction: vec3f, look: StarLook, time: f32) -> vec3f {
     starLayer(d, 34.0, population * 0.55, dimmest, brightest, 17, time, look.twinkle) * 1.35
       + starLayer(d, 92.0, population * 0.42, dimmest, brightest, 71, time, look.twinkle) * 0.85
       + starLayer(d, 210.0, population * 0.26, dimmest, brightest, 149, time, look.twinkle) * 0.30
-  ) * STAR_INTENSITY;
+  ) * hreal(STAR_INTENSITY);
 
-  return vec3f(luminance * max(0.0, look.brightness));
+  // Widened back at the entry-shader boundary: shade.wgsl composites in f32 and
+  // knows nothing about which precision variant it was built with.
+  return vec3f(f32(luminance * hreal(max(0.0, look.brightness))));
 }

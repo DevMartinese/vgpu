@@ -33,11 +33,16 @@
 //   --stars.<key> <v>    any StarLook field (brightness, density, twinkle, ...)
 //   --noiseSize <n>      edge of the tiled 3D noise lattice (default 64; try 128 to
 //                        A/B whether the tiling repeats visibly)
-//   --diskNoise <which>  disk noise implementation: `tiled` (default, one trilinear
-//                        fetch) or `analytic` (the pre-optimization control, eight
-//                        inline hashes). Same A/B the ?debug panel exposes; note the
-//                        two arms draw DIFFERENT realizations, so the filaments
-//                        rearrange between them (see GBUFFER.md).
+//   --diskNoise <which>  shade variant: `tiled` (default, one trilinear fetch),
+//                        `analytic` (the pre-optimization control, eight inline
+//                        hashes) or `tiled-f16` (tiled with the noise/emission
+//                        arithmetic in half precision; needs the `shader-f16`
+//                        device feature and fails loudly without it). Same A/B the
+//                        ?debug panel exposes; note that analytic draws a
+//                        DIFFERENT realization, so the filaments rearrange between
+//                        it and the other two (see GBUFFER.md), while `tiled-f16`
+//                        draws the same realization and should differ only by
+//                        rounding.
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
 //   --json               print the resolved settings and per-image stats as JSON
 //
@@ -53,6 +58,7 @@ import { resolveShader } from '@vgpu/wgsl/runtime';
 import { init } from 'vgpu/node';
 
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
+import { SHADE_VARIANTS, shadeVariantSource, variantNeedsF16 } from './precision.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -128,7 +134,7 @@ function parseArgs(argv) {
     if (key === 'time') { options.time = Number(value); continue; }
     if (key === 'noiseSize') { options.noiseSize = Math.max(2, Number(value) | 0); continue; }
     if (key === 'diskNoise') {
-      if (value !== 'tiled' && value !== 'analytic') throw new Error(`--diskNoise must be 'tiled' or 'analytic', got '${value}'`);
+      if (!SHADE_VARIANTS.includes(value)) throw new Error(`--diskNoise must be one of ${SHADE_VARIANTS.join(', ')}, got '${value}'`);
       options.diskNoise = value;
       continue;
     }
@@ -167,23 +173,6 @@ function deepMerge(base, patch) {
 async function loadShader(name) {
   const resolved = await resolveShader({ entry: resolve(HERE, name), rootDir: HERE, validate: false });
   return resolved.wgsl;
-}
-
-/**
- * disk.wgsl's `DISK_NOISE_ANALYTIC` gate, matched around the bundler's hash
- * prefix (`_vgsl_<hash>__`), which changes whenever disk.wgsl is edited.
- *
- * Mirrors DISK_NOISE_SWITCH in renderer.ts — keep the two in sync.
- */
-const DISK_NOISE_SWITCH = /(const\s+[A-Za-z0-9_]*DISK_NOISE_ANALYTIC\s*:\s*bool\s*=\s*)false(\s*;)/g;
-
-/** Flips the gate, throwing rather than silently rendering the tiled arm twice. */
-function toAnalyticShade(source) {
-  const matches = source.match(DISK_NOISE_SWITCH);
-  if (matches?.length !== 1) {
-    throw new Error(`expected exactly 1 DISK_NOISE_ANALYTIC gate, found ${matches?.length ?? 0} — the disk.wgsl A/B switch is broken`);
-  }
-  return source.replace(DISK_NOISE_SWITCH, '$1true$2');
 }
 
 function writePng(path, width, height, rgba) {
@@ -226,7 +215,17 @@ async function main() {
   ]);
 
   await mkdir(options.out, { recursive: true });
-  const gpu = await init();
+  // The f16 variant needs the feature AT DEVICE CREATION, so the request depends
+  // on which variant was asked for. Deliberately NOT best-effort here: a harness
+  // that quietly rendered f32 while the filename said f16 would poison the RMSE
+  // comparison this tool exists to produce. The browser renderer does the
+  // opposite (silently drops the variant), because there the fallback path is the
+  // product and the panel reports what it actually built.
+  const needsF16 = variantNeedsF16(options.diskNoise);
+  const gpu = await init(needsF16 ? { requiredFeatures: ['shader-f16'] } : {});
+  if (needsF16 && !gpu.device.features.has('shader-f16')) {
+    throw new Error(`--diskNoise ${options.diskNoise} needs the "shader-f16" device feature, which this adapter does not provide`);
+  }
   const [width, height] = options.size;
 
   const gbuffer = gpu.target({
@@ -239,12 +238,11 @@ async function main() {
   const output = gpu.target({ size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
 
   const bake = gpu.effect(bakeWgsl, { label: 'hero-debug-bake' });
-  // Same one-line gate rewrite the browser renderer does, kept here so the
-  // headless harness can render either arm. Asserting the match matters as much
-  // as it does there: a silent no-op would render `tiled` twice and label one of
-  // them `analytic`.
-  const shadeSource = options.diskNoise === 'analytic' ? toAnalyticShade(shadeWgsl) : shadeWgsl;
-  const shade = gpu.effect(shadeSource, { label: `hero-debug-shade-${options.diskNoise}` });
+  // The SAME specialization the browser renderer applies (precision.mjs, one
+  // shared module — not a copy), so a PNG from this harness and a frame from the
+  // page are the same program. Every rewrite in there asserts what it matched: a
+  // silent no-op would render `tiled` and label it `analytic` or `tiled-f16`.
+  const shade = gpu.effect(shadeVariantSource(shadeWgsl, options.diskNoise), { label: `hero-debug-shade-${options.diskNoise}` });
 
   // Same lattice bytes the browser uploads (shared module, not a copy), so the
   // harness renders the disk the page renders. Node/Dawn takes the 3D texture
@@ -310,7 +308,7 @@ async function main() {
     console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, diskNoise: options.diskNoise, settings, images: results }, null, 2));
     return;
   }
-  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.diskNoise === 'analytic' ? 'analytic' : `${options.noiseSize}^3`} -> ${options.out}`);
+  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.diskNoise === 'analytic' ? 'analytic' : `${options.noiseSize}^3 ${options.diskNoise}`} -> ${options.out}`);
   for (const result of results) {
     console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
   }
