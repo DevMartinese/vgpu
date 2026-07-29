@@ -114,9 +114,14 @@ export function defaultHeroSettings(): HeroSettings {
       spare3: 0.69,
     },
     stars: {
-      brightness: 0.82,
-      brightnessMin: 1,
-      brightnessMax: 2.93,
+      // All three brightness knobs ship pinned at the top of their sliders
+      // (0..3, 0..4, 0..4). Note min === max: emission is
+      // `brightness * mix(min, max, hash)`, so the per-star hash stops mattering
+      // and every star renders at the same brightness. That is intentional —
+      // lower `brightnessMin` to bring the faint end, and the variation, back.
+      brightness: 3,
+      brightnessMin: 4,
+      brightnessMax: 4,
       density: 2.92,
       twinkle: 0,
     },

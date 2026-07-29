@@ -134,10 +134,16 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
+        // Site-wide serif: `sans` deliberately resolves to Geist Serif so that
+        // every existing `font-sans` (the root body, and anything that opted in
+        // explicitly) renders serif without touching each call site. The face
+        // ships Regular only, so bold/semibold are synthesised — accepted.
+        // To go back to a sans site, restore `var(--font-geist-sans)` here; the
+        // variable is still declared on <html> in app/layout.tsx.
+        sans: ['var(--font-geist-serif)', 'Georgia', 'Times New Roman', 'serif'],
         mono: ['var(--font-geist-mono)', 'Menlo', 'Monaco', 'monospace'],
-        // Homepage display face. Declared as a CSS variable in app/fonts.ts and
-        // applied on the homepage wrapper, so it only loads for that route.
+        // Same face under its own name, for places that ask for serif directly
+        // (the homepage wrapper). Declared as a CSS variable in app/fonts.ts.
         serif: ['var(--font-geist-serif)', 'Georgia', 'Times New Roman', 'serif'],
       },
       fontSize: {

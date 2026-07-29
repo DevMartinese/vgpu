@@ -77,9 +77,11 @@ const DEFAULT_SETTINGS = {
     spare3: 0.69,
   },
   stars: {
-    brightness: 0.82,
-    brightnessMin: 1,
-    brightnessMax: 2.93,
+    // Pinned at the slider tops; min === max collapses the per-star variation.
+    // Keep in sync with defaultHeroSettings() in renderer.ts.
+    brightness: 3,
+    brightnessMin: 4,
+    brightnessMax: 4,
     density: 2.92,
     twinkle: 0,
   },

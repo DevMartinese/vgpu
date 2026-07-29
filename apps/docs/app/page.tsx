@@ -135,7 +135,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="mx-auto mb-24 max-w-4xl px-6 lg:px-12">
+        <section className="mx-auto mb-24 max-w-6xl px-6 lg:px-12">
           <h2 className="mb-10 text-center text-2xl text-gray-12 md:text-3xl">Why vgpu</h2>
           <div className="grid gap-4 md:grid-cols-3">
             {pillars.map((pillar) => (
@@ -154,7 +154,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-4xl px-6 lg:px-12">
+        <section className="mx-auto max-w-6xl px-6 lg:px-12">
           <h2 className="mb-12 text-center text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
           <div className="grid gap-4 md:grid-cols-2">
             {docLinks.map(([href, title, description]) => (

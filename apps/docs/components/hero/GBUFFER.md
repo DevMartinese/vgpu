@@ -488,9 +488,9 @@ image as the page.
 
 | Geometry (re-bakes) | | Disk (per frame) | | Stars (per frame) | |
 |---|---|---|---|---|---|
-| `cameraY` | `0.085` | `brightness` | `0.098` | `brightness` (global) | `0.82` |
-| `distance` | `13.5` | `speed` | `0.75` | `brightnessMin` | `1` |
-| `diskRadius` | `10.8` | `stretch` | `5.75` | `brightnessMax` | `2.93` |
+| `cameraY` | `0.085` | `brightness` | `0.098` | `brightness` (global) | `3` |
+| `distance` | `13.5` | `speed` | `0.75` | `brightnessMin` | `4` |
+| `diskRadius` | `10.8` | `stretch` | `5.75` | `brightnessMax` | `4` |
 | `fov` | `2.67` | `detail` | `3.44` | `density` | `2.92` |
 | `centerY` | `0` | `turbulence` | `4.46` | `twinkle` | `0` |
 | | | `density` | `1.38` | | |
@@ -506,13 +506,22 @@ Two things to know about these values:
   internal gain, so the useful range of this knob is near zero; its slider is
   `0..0.6` with a `0.002` step for that reason. If `disk.wgsl` ever rebalances
   its gain, this default has to be re-picked with it.
-- Slider ranges in `hero-black-hole.tsx` are kept wide enough that **every**
-  default sits with headroom on both sides. Each defaults revision has needed
-  one: `detail`/`turbulence` were once pinned at their maximum, and the star
-  `brightnessMin`/`brightnessMax` sliders were widened from `0..1` / `0..3` to a
-  shared `0..4` when the current `1` / `2.93` landed on their old tops. When you
-  change a default, check its slider still has room — a default pinned at the
-  end of its range means the next person cannot tune past it.
+- **The three star brightness defaults are deliberately pinned at their slider
+  maximums** (`brightness` `3` of `0..3`, `brightnessMin` and `brightnessMax` `4`
+  of `0..4`) because the design calls for the brightest possible field. Two
+  consequences worth knowing before you touch them:
+  - `brightnessMin === brightnessMax` makes emission
+    `brightness * mix(min, max, hash)` independent of the per-star hash, so every
+    star renders at **identical** brightness. Drop `brightnessMin` to restore the
+    faint end and the variation.
+  - Being pinned, they cannot be tuned upward from the panel. If the field needs
+    to go brighter still, widen the slider in `hero-black-hole.tsx` rather than
+    assuming the look is maxed out.
+- Every other default is kept with headroom on both sides, and each defaults
+  revision has needed the check: `detail`/`turbulence` were once pinned at their
+  maximum, and the star sliders themselves were widened from `0..1` / `0..3` to a
+  shared `0..4` when an earlier `1` / `2.93` landed on their old tops. When you
+  change a default, check its slider still has room.
 
 ## Bake invalidation
 
