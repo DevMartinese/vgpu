@@ -6,11 +6,18 @@ raymarch, runs only when the camera/geometry changes) and a **cheap frame pass**
 the infrastructure and the two shading workstreams.
 
 ```
-bake.wgsl ──► G-buffer (MRT, 3 attachments) ──► shade.wgsl ──► scene (rgba16float) ──► composite.wgsl ──► canvas
- one-shot                                       every frame                            every frame
+bake.wgsl ──► G-buffer (MRT, 4 attachments) ──► shade.wgsl ──► canvas
+ one-shot                                       every frame
                                                    ├── disk.wgsl   (disk pixels)
-                                                   └── stars.wgsl  (escaped rays)
+                                                   ├── stars.wgsl  (escaped rays)
+                                                   └── tonemap()   (ACES + vignette, in place)
 ```
+
+**Two passes, not three.** `shade.wgsl` tone maps in a register and writes the
+swap chain directly. There is no intermediate `scene` target and no
+`composite.wgsl`: that pass was pure bandwidth (an `rgba16float` write plus a
+filtered 1:1 read of the whole frame, ~15.8 MiB of traffic at 1920x1080) for a
+handful of ALU ops. See [Tone mapping](#tone-mapping-lives-at-the-end-of-shadewgsl).
 
 ## File ownership
 
@@ -18,12 +25,12 @@ bake.wgsl ──► G-buffer (MRT, 3 attachments) ──► shade.wgsl ──►
 |---|---|---|
 | `bake.wgsl` | infrastructure | no |
 | `gbuffer.wgsl` | infrastructure | no (read it — it defines `GBufferSample`) |
-| `shade.wgsl` | infrastructure | no (thin dispatcher + debug views) |
+| `shade.wgsl` | infrastructure | no (thin dispatcher + debug views + tone map) |
 | `renderer.ts` | infrastructure | only to add a new look field (see below) |
 | `hero-black-hole.tsx` | infrastructure | only to add a GUI row for a new field |
 | **`disk.wgsl`** | **disk workstream** | **yes — this is your file** |
 | **`stars.wgsl`** | **stars workstream** | **yes — this is your file** |
-| `composite.wgsl` | infrastructure | no (ACES + vignette + `SATURATION 0`) |
+| ~~`composite.wgsl`~~ | — | **deleted** — absorbed into `shade.wgsl::tonemap` |
 | `debug-render.mjs` | shared harness | run it, extend it if useful |
 
 Two agents can work at the same time: the disk agent touches only `disk.wgsl`,
@@ -71,7 +78,16 @@ device.
 ## G-buffer layout
 
 Created in `renderer.ts::createTargets`, size = canvas size in physical pixels
-(dpr clamped to 1.6). Cleared to `[0,0,0,1]` before the bake.
+(dpr clamped to **1.5**, `MAX_DPR` in `renderer.ts`). Cleared to `[0,0,0,1]`
+before the bake.
+
+`MAX_DPR` is the single biggest lever on cost in the whole hero — the bake is a
+geodesic raymarch per pixel and the G-buffer is 32 bytes per sample — so it is
+used in **both** places that can size the swap chain, `gpu.surface({ dpr })` and
+`measure()`. They must agree: if they disagreed, a resize would fight the
+surface's own clamp and the G-buffer would stop matching the canvas 1:1.
+Dropping it from 1.6 to 1.5 removes ~12% of the fragments on any display with
+`devicePixelRatio >= 1.6`, and displays at 1.5 or below are unaffected.
 
 | # | Binding in `shade.wgsl` | Format | Channels |
 |---|---|---|---|
@@ -221,11 +237,14 @@ point of importing it instead of hard-coding a number here. **Do not replace it
 with a literal, and do not put the raw `shade.time` back.**
 - `shade.wgsl` composites as
   `mix(background, color, alpha) + color * alpha * 0.35` (a small additive
-  glow term), then the composite pass applies exposure 1.15, ACES, vignette,
-  gamma and full desaturation (`SATURATION = 0` — the hero is monochrome, do
-  not fight it with hue work).
-- Output is linear HDR: values above 1 are expected and intended (they are what
-  makes the edge-on band read as incandescent).
+  glow term), and then tone maps that value in place — exposure 1.15, ACES,
+  vignette, gamma and full desaturation (`SATURATION = 0` — the hero is
+  monochrome, do not fight it with hue work). See
+  [Tone mapping](#tone-mapping-lives-at-the-end-of-shadewgsl).
+- **What `shadeDisk` returns is still linear HDR**: values above 1 are expected
+  and intended (they are what makes the edge-on band read as incandescent). The
+  tone map is applied once, by `shade.wgsl`, after both layers are composited —
+  never inside `disk.wgsl`.
 
 ### `stars.wgsl`
 
@@ -342,6 +361,51 @@ layers, so adding the second one does not change how bright the front band is.
 Each layer gets its **own** noise footprint (`diskFootprint`), because the second
 crossing sits at a different radius and azimuth. Both are measured in uniform
 control flow — `fwidth` is undefined inside the `isHit` branches.
+
+### Tone mapping lives at the end of `shade.wgsl`
+
+There used to be a third pass, `composite.wgsl`, that sampled an intermediate
+`rgba16float` scene target and graded it. It is gone: `shade.wgsl::tonemap` does
+the same arithmetic on a value that is still in a register, and shade draws
+straight to the swap chain.
+
+```
+color = compositeDisk(compositeDisk(stars, back), front)   // linear HDR
+  ├── debugView 1..7 ─► return RAW, before the tone map
+  └── debugView 0     ─► return tonemap(color, uv)
+```
+
+`tonemap` is, in this exact order:
+
+| Step | Value |
+|---|---|
+| exposure | `* EXPOSURE` (1.15) |
+| tone curve | ACES (Narkowicz fit), clamped to `0..1` |
+| vignette | `* mix(0.72, 1.0, 1 - smoothstep(0.55, 1.15, length(uv - 0.5) * 1.6))` |
+| gamma | `pow(color, 1/2.2)` |
+| desaturation | `mix(luma, color, SATURATION)`, `SATURATION = 0` |
+
+Three things about it are load-bearing:
+
+- **The `uv` is the canvas uv, not a disk coordinate.** The vignette is a lens
+  effect and must stay anchored to the frame. It is the same varying the old
+  composite pass received, because that pass sampled the scene 1:1 with no
+  offset — which is why the fusion is a no-op image-wise.
+- **The order does not commute.** The vignette darkens the *tone mapped* value
+  and the gamma comes *after* it. Swapping any two of these visibly changes the
+  falloff at the corners.
+- **Debug views return before it** (see [Debugging](#debugging)).
+
+`EXPOSURE` and `SATURATION` are `const`, not uniforms: nothing in the panel or
+the harness ever varied them, and keeping them as uniforms would have kept a
+bind group alive to carry two numbers that never change.
+
+Measured cost of the fusion: one full-screen pass, one `rgba16float` write and
+one filtered read of the whole frame (~15.8 MiB of traffic at 1920x1080), plus
+the allocation itself. Verified image-identical against the pre-fusion harness
+over `t = 0 / 2.5 / 9.9 / 10.1`, `yaw = 0 / ±0.15`, `diskLayers = 1 / 2`, all 8
+views: **worst RMSE 0.18/255, max error 1/255** (pure 8-bit rounding — the old
+path quantized through f16 first).
 
 ### Adding a look parameter
 
@@ -533,8 +597,8 @@ let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
 ```
 
 This is the **only** place the convention is converted. Every other pass is a
-pass-through (`shade.wgsl` does `uv * dimensions` -> `textureLoad`, `composite`
-samples at `uv`), so the browser and the node harness stay consistent
+pass-through (`shade.wgsl` does `uv * dimensions` -> `textureLoad`, and the same
+`uv` positions the vignette), so the browser and the node harness stay consistent
 automatically. Feeding `uv.y * 2 - 1` straight into the camera `up` vector
 renders the entire scene upside down — that was a real bug, and it is invisible
 in a symmetric test image, so verify with `cameraY > 0`: the camera is **above**
@@ -585,8 +649,12 @@ switches between `front hit only` (what the renderer did before the second hit
 existed) and `front + hidden hit` (the default) — the quickest way to see what
 the second layer contributes.
 
-While a debug view is active the composite pass **skips** tone mapping and
-desaturation, so the channels are the raw values.
+While a debug view is active `shade.wgsl` **returns before `tonemap`**, so the
+channels are the raw values — no exposure, no ACES, no vignette, no gamma, no
+desaturation. Those early returns are load-bearing: they are the only thing
+keeping the debug bypass alive now that there is no separate composite pass to
+skip. If you add a view, add it in the same block, **above** the final
+`return vec4f(tonemap(color, uv), 1.0)`.
 
 The **debug** folder also has a **hide UI** toggle (default **on**), which drops
 the hero copy — header, H1, tagline, CTAs, tabs and the legibility gradient — so
@@ -612,8 +680,12 @@ static PNG fallback.
 
 ### Headless, no browser — `debug-render.mjs`
 
-Runs the real pipeline (bake → shade → composite) on the Node/Dawn adapter and
-writes PNGs. This is the fastest iteration loop for shader work.
+Runs the real pipeline (bake → shade, tone mapped in place) on the Node/Dawn
+adapter and writes PNGs. This is the fastest iteration loop for shader work.
+
+It draws shade straight into an `rgba8unorm` target, exactly as the browser draws
+it into the swap chain, so the harness image is the page image — there is no HDR
+scene target in either path to drift apart.
 
 ```bash
 # from the worktree root

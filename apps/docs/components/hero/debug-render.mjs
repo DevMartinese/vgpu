@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // Headless debug harness for the hero black hole.
 //
-// Runs the real pipeline (bake -> shade -> composite) on the Node/Dawn adapter,
-// with no browser, and writes PNGs for the final frame plus every G-buffer debug
-// view. Use it to iterate on disk.wgsl / stars.wgsl and to prove what the bake
+// Runs the real pipeline (bake -> shade) on the Node/Dawn adapter, with no
+// browser, and writes PNGs for the final frame plus every G-buffer debug view.
+// Use it to iterate on disk.wgsl / stars.wgsl and to prove what the bake
 // actually produced.
+//
+// Two passes, exactly like the page: shade tone maps in place and writes the
+// display-referred image straight to an rgba8unorm target. There is no HDR
+// scene target and no composite pass.
 //
 //   node apps/docs/components/hero/debug-render.mjs
 //   node apps/docs/components/hero/debug-render.mjs --size 960x540 --time 4
@@ -182,10 +186,9 @@ async function main() {
     if (!(name in VIEWS)) throw new Error(`unknown view "${name}"; expected ${Object.keys(VIEWS).join(', ')} or all`);
   }
 
-  const [bakeWgsl, shadeWgsl, compositeWgsl] = await Promise.all([
+  const [bakeWgsl, shadeWgsl] = await Promise.all([
     loadShader('bake.wgsl'),
     loadShader('shade.wgsl'),
-    loadShader('composite.wgsl'),
   ]);
 
   await mkdir(options.out, { recursive: true });
@@ -197,13 +200,12 @@ async function main() {
     colors: GBUFFER_FORMATS.map((format) => ({ format })),
     label: 'hero-debug-gbuffer',
   });
-  const scene = gpu.target({ size: [width, height], format: 'rgba16float', label: 'hero-debug-scene' });
+  // Display-referred, exactly what the swap chain gets in the browser: shade
+  // tone maps in place, so this is the only pass target after the G-buffer.
   const output = gpu.target({ size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
 
   const bake = gpu.effect(bakeWgsl, { label: 'hero-debug-bake' });
   const shade = gpu.effect(shadeWgsl, { label: 'hero-debug-shade' });
-  const composite = gpu.effect(compositeWgsl, { label: 'hero-debug-composite' });
-  const sampler = gpu.sampler({ minFilter: 'linear', magFilter: 'linear' });
 
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
   bake.set({ bake: {
@@ -225,7 +227,6 @@ async function main() {
     disk: settings.disk,
     stars: settings.stars,
   });
-  composite.set({ scene, samp: sampler, composite: { exposure: 1.15, debug: 0 } });
 
   // One bake for every view: that is the whole point of the split.
   gpu.frame((frame) => {
@@ -236,7 +237,7 @@ async function main() {
   for (const name of names) {
     const debugView = VIEWS[name];
     shade.set({ shade: {
-      resolution: scene.size,
+      resolution: output.size,
       time: options.time,
       diskOuter: settings.diskRadius,
       debugView,
@@ -244,10 +245,10 @@ async function main() {
       // Instantaneous scene rotation; the browser smooths it from the pointer.
       sceneYaw: options.yaw,
     } });
-    composite.set({ composite: { exposure: 1.15, debug: debugView > 0 ? 1 : 0 } });
+    // No composite uniform: the debug bypass is an early return inside
+    // shade.wgsl, so `debugView` alone decides whether the tone map runs.
     gpu.frame((frame) => {
-      frame.pass({ target: scene, clear: [0, 0, 0, 1] }, (pass) => pass.draw(shade));
-      frame.pass({ target: output, clear: [0, 0, 0, 1] }, (pass) => pass.draw(composite));
+      frame.pass({ target: output, clear: [0, 0, 0, 1] }, (pass) => pass.draw(shade));
     });
     const pixels = await output.read();
     const path = join(options.out, `${name}.png`);

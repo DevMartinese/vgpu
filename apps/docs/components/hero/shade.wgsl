@@ -1,4 +1,5 @@
-// FRAME PASS ENTRY — thin dispatcher, runs every frame.
+// FRAME PASS ENTRY — thin dispatcher, runs every frame, draws straight to the
+// swap chain.
 //
 // INFRASTRUCTURE FILE — avoid editing it. It owns the bindings, decodes the
 // G-buffer written by bake.wgsl, computes the noise footprints (derivatives need
@@ -8,6 +9,12 @@
 //   stars.wgsl   (shadeStars, with the baked lensed direction) or black
 //   disk.wgsl    (shadeDisk on the SECOND disk crossing — the hidden image)
 //   disk.wgsl    (shadeDisk on the FIRST disk crossing — the front band)
+//
+// ...and then tone maps the result in place (exposure, ACES, vignette, gamma,
+// desaturation — see `tonemap`). There is NO separate composite pass and no
+// intermediate HDR target: the linear HDR value never leaves a register, which
+// saves one full-screen pass plus an rgba16float write + filtered read per pixel.
+// The G-buffer debug views return BEFORE the tone map, so their channels stay raw.
 //
 // No raymarching happens here: the geodesics were solved once by bake.wgsl.
 // See GBUFFER.md for the full contract.
@@ -58,6 +65,18 @@ const STAR_CELL: f32 = 1.0 / 210.0;
  * layers so adding the second one does not change how bright the front band is.
  */
 const DISK_GAIN: f32 = 1.35;
+
+// --- Tone map (absorbed from the former composite.wgsl pass) -----------------
+//
+// These three used to be a separate full-screen pass reading an rgba16float
+// scene target. They are constants, not uniforms: nothing in the panel or the
+// harness ever varied them, and a uniform would have kept the composite bind
+// group alive for no reason.
+
+/** Linear exposure applied before the tone curve. */
+const EXPOSURE: f32 = 1.15;
+/** The hero is monochrome by design — do not fight it with hue work. */
+const SATURATION: f32 = 0.0;
 
 @group(0) @binding(0) var<uniform> shade: Shade;
 @group(0) @binding(1) var gHit1: texture_2d<f32>;
@@ -163,6 +182,45 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   return sample.color * sample.alpha * DISK_GAIN + under * (1.0 - sample.alpha);
 }
 
+/** Narkowicz's ACES fit, clamped to the displayable range. */
+fn aces(x: vec3f) -> vec3f {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp((x * (a * x + vec3f(b))) / (x * (c * x + vec3f(d)) + vec3f(e)), vec3f(0.0), vec3f(1.0));
+}
+
+/**
+ * Linear HDR -> display. Formerly the whole of composite.wgsl, applied here to a
+ * value that is still in a register instead of to a round trip through an
+ * rgba16float target.
+ *
+ * `uv` is the full-screen quad coordinate, i.e. the position on the CANVAS, not
+ * on the disk — the vignette is a lens effect and has to stay anchored to the
+ * frame. It is the same varying the composite pass received, because that pass
+ * sampled the scene 1:1 with no offset, so the vignette lands on exactly the
+ * same pixels it always did.
+ *
+ * Order is load-bearing and unchanged: exposure -> ACES -> vignette -> gamma ->
+ * desaturation. The vignette multiplies the TONE MAPPED value (a darkening of
+ * the displayed image), and the gamma comes after it.
+ */
+fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
+  var color = aces(linearColor * EXPOSURE);
+
+  // Subtle cinematic vignette.
+  let centered = uv - vec2f(0.5);
+  let vignette = 1.0 - smoothstep(0.55, 1.15, length(centered) * 1.6);
+  color *= mix(0.72, 1.0, vignette);
+
+  color = pow(color, vec3f(1.0 / 2.2));
+
+  let luma = dot(color, vec3f(0.2126, 0.7152, 0.0722));
+  return mix(vec3f(luma), color, SATURATION);
+}
+
 @fragment fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
   // The camera is frozen by the bake and there is no pointer parallax: one
   // G-buffer texel per pixel, read straight through.
@@ -245,8 +303,13 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   color = compositeDisk(color, backSample);
   color = compositeDisk(color, frontSample);
 
-  // Debug visualisations of the baked G-buffer (lil-gui "debug view"). The
-  // composite pass skips tone mapping and desaturation while one is active.
+  // Debug visualisations of the baked G-buffer (lil-gui "debug view").
+  //
+  // THEY RETURN BEFORE `tonemap`, ON PURPOSE: these channels carry data, not
+  // radiance, and ACES + gamma + desaturation would make them unreadable. This
+  // early-return placement is the whole reason the debug bypass survived the
+  // removal of the composite pass — do not move the tone map above this block.
+  //
   // Views 1..5 describe the FRONT crossing; view 7 is the second one.
   let mode = i32(shade.debugView + 0.5);
   if (mode == 1) {
@@ -282,6 +345,7 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
     return vec4f(select(vec3f(0.0), vec3f(layers.back.diskUv, 1.0), layers.back.isHit), 1.0);
   }
 
-  // Linear HDR output; tone mapping happens in the composite pass.
-  return vec4f(color, 1.0);
+  // Display-referred output, written straight to the swap chain: the linear HDR
+  // value above never touches memory.
+  return vec4f(tonemap(color, uv), 1.0);
 }

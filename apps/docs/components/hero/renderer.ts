@@ -2,7 +2,6 @@ import type { Effect, Frame, Gpu, Surface, Target } from 'vgpu';
 
 import bakeWgsl from './bake.wgsl';
 import shadeWgsl from './shade.wgsl';
-import compositeWgsl from './composite.wgsl';
 
 /**
  * Disk look, uploaded verbatim as the `disk` uniform (see disk.wgsl `DiskLook`).
@@ -170,18 +169,27 @@ type Output = Surface | Target;
 interface Effects {
   bake: Effect;
   shade: Effect;
-  composite: Effect;
-  sampler: GPUSampler;
 }
 
 interface Targets {
   /** G-buffer written once by the bake pass (MRT: hit1 / hit2 / sky / view). */
   gbuffer: Target;
-  /** HDR scene assembled every frame from the G-buffer. */
-  scene: Target;
 }
 
-const HDR_FORMAT: GPUTextureFormat = 'rgba16float';
+/**
+ * Upper bound on `devicePixelRatio`.
+ *
+ * Every buffer in the chain is allocated at CSS size x this, so it is the single
+ * biggest lever on fill cost: the bake is a geodesic raymarch per pixel and the
+ * G-buffer is 32 bytes per sample. 1.5 keeps the hero crisp on Retina while
+ * costing ~12% fewer fragments than the 1.6 it replaced, and ~44% fewer than an
+ * uncapped 2.
+ *
+ * Used in BOTH places that can size the swap chain — `gpu.surface({ dpr })` and
+ * `measure()` — which must agree or a resize would fight the surface clamp.
+ */
+const MAX_DPR = 1.5;
+
 /**
  * G-buffer attachments, in @location order (hit1, hit2, sky, view).
  *
@@ -206,6 +214,23 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   let targets: Targets | undefined;
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
+  let intersection: IntersectionObserver | undefined;
+  // --- Visibility state machine (see `reconcileLoop`) -------------------------
+  // Two independent reasons to be off screen, one derived answer. Both default
+  // to "visible" so a browser without IntersectionObserver, or an SSR-ish
+  // environment, still renders.
+  let documentVisible = typeof document === 'undefined' ? true : !document.hidden;
+  let canvasIntersecting = true;
+  /** Set once the GPU objects exist: before that there is nothing to run. */
+  let started = false;
+  // --- Animation clock --------------------------------------------------------
+  // NOT `gpu.time`: that one accumulates the whole wall-clock interval since the
+  // last frame (gpu.ts `#advanceTime`), so resuming after a minute in a hidden
+  // tab would teleport the disk a minute forward — a visible jump in the
+  // Keplerian shear and the sawtooth crossfades in disk.wgsl. This clock only
+  // ever advances while the loop is actually running.
+  let animationTime = 0;
+  let lastFrameAt: number | undefined;
   let resizeFrame = 0;
   let pendingSize: RenderSize | undefined;
   let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
@@ -265,7 +290,70 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     // relatedTarget === null means the pointer left the window, not just one element.
     if (event.relatedTarget === null) recenterPointer();
   };
-  const onVisibilityChange = () => { if (document.hidden) recenterPointer(); };
+  const onVisibilityChange = () => {
+    if (document.hidden) recenterPointer();
+    documentVisible = !document.hidden;
+    reconcileLoop();
+  };
+
+  /**
+   * The one place a render loop is started or stopped.
+   *
+   * Everything else (visibilitychange, IntersectionObserver, init, dispose)
+   * only writes a boolean and calls this. The `loop` handle IS the "am I
+   * running" flag, so the function is idempotent: calling it twice for the same
+   * state cannot start a second `gpu.frame.loop`, which would double the frame
+   * rate and the GPU cost permanently.
+   *
+   * Resuming resets both timestamp bases. `lastFrameAt` keeps the animation
+   * clock from swallowing the paused interval in one frame, and `lastYawAt`
+   * keeps the exponential pointer smoothing from snapping the scene to its
+   * target (`1 - exp(-dt/tau)` is ~1 for a large dt).
+   */
+  function reconcileLoop(): void {
+    if (!started || !gpu) return;
+    const shouldRun = !disposed && documentVisible && canvasIntersecting;
+    if (shouldRun === Boolean(loop)) return;
+    if (shouldRun) {
+      lastFrameAt = undefined;
+      lastYawAt = undefined;
+      loop = gpu.frame.loop(renderFrame);
+    } else {
+      loop?.stop();
+      loop = undefined;
+    }
+  }
+
+  /**
+   * Advances the animation clock by this frame's ACTIVE delta and returns it.
+   *
+   * Unclamped on purpose: while the loop runs this reproduces `gpu.time`
+   * exactly (both are wall-clock sums), so nothing about the animation changes
+   * on a page that is never hidden. The only intervals it drops are the ones
+   * spent paused, because `reconcileLoop` clears `lastFrameAt` on resume and
+   * the first frame back therefore contributes dt = 0.
+   */
+  const advanceAnimationTime = (now: number): number => {
+    animationTime += lastFrameAt === undefined ? 0 : Math.max(0, (now - lastFrameAt) / 1000);
+    lastFrameAt = now;
+    return animationTime;
+  };
+
+  const renderFrame = (frame: Frame): void => {
+    if (disposed || !effects || !targets || !surface) return;
+    // Polling the geometry here (instead of trusting the panel to call
+    // rebake()) means NO geometry setting can ever be applied without a bake:
+    // fov, cameraY & friends are pure bake inputs and the shade pass ignores
+    // them, so a missed invalidation would silently do nothing. A rebake
+    // requested while paused just leaves `forceBake` set and runs on resume.
+    const now = clockMs();
+    const runBake = resolveBake(now);
+    if (runBake) setBakeUniforms(effects, targets, settings);
+    // The mouse rotation is a uniform, never a bake: the scene is axisymmetric
+    // so the baked G-buffer is still exact in the rotated frame.
+    setShadeUniforms(effects, targets, settings, advanceAnimationTime(now), advanceSceneYaw(now));
+    renderChain(frame, effects, targets, surface, runBake);
+  };
 
   /**
    * Advances the smoothed scene rotation and returns the value for this frame.
@@ -313,7 +401,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   };
   const measure = () => {
     const rect = options.canvas.getBoundingClientRect();
-    resize({ width: rect.width, height: rect.height, dpr: Math.min(1.6, Math.max(1, window.devicePixelRatio || 1)) });
+    resize({ width: rect.width, height: rect.height, dpr: Math.min(MAX_DPR, Math.max(1, window.devicePixelRatio || 1)) });
   };
   const onWindowResize = () => {
     if (window.devicePixelRatio === lastDpr) return;
@@ -331,6 +419,13 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     pendingSize = undefined;
     observer?.disconnect();
     observer = undefined;
+    // Disconnect before anything is torn down: a queued IntersectionObserver
+    // callback firing after dispose would call reconcileLoop() on a disposed
+    // gpu. `started`/`disposed` already guard it, but not leaking the observer
+    // (and its reference to the canvas) is the actual fix.
+    intersection?.disconnect();
+    intersection = undefined;
+    started = false;
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('pointermove', onPointerMove);
@@ -353,10 +448,9 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     const nextGpu = await init();
     if (disposed) { nextGpu.dispose(); return; }
     gpu = nextGpu;
-    surface = gpu.surface(options.canvas, { dpr: [1, 1.6] });
+    surface = gpu.surface(options.canvas, { dpr: [1, MAX_DPR] });
     effects = createEffects(gpu, 'black-hole-live');
     targets = createTargets(gpu, surface.size, 'black-hole-live');
-    setConstants(effects, settings);
     setBindings(effects, targets);
     await prewarm(effects, targets, surface);
     if (disposed) return;
@@ -369,21 +463,24 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     window.addEventListener('pointerout', onPointerOut, { passive: true });
     window.addEventListener('blur', recenterPointer);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    // A hero scrolled past is 100% wasted GPU: this is a per-pixel geodesic
+    // shade at up to 1.5x dpr, running behind whatever the reader is actually
+    // looking at. threshold 0 = "any part of the canvas is on screen".
+    if (typeof IntersectionObserver !== 'undefined') {
+      intersection = new IntersectionObserver((entries) => {
+        // Last entry wins: a batch is ordered oldest-first, so it is the
+        // current state.
+        canvasIntersecting = entries[entries.length - 1]?.isIntersecting ?? canvasIntersecting;
+        reconcileLoop();
+      }, { threshold: 0 });
+      intersection.observe(options.canvas);
+    }
     measure();
-    loop = gpu.frame.loop((frame) => {
-      if (disposed || !effects || !targets || !surface) return;
-      // Polling the geometry here (instead of trusting the panel to call
-      // rebake()) means NO geometry setting can ever be applied without a bake:
-      // fov, cameraY & friends are pure bake inputs and the shade pass ignores
-      // them, so a missed invalidation would silently do nothing.
-      const now = clockMs();
-      const runBake = resolveBake(now);
-      if (runBake) setBakeUniforms(effects, targets, settings);
-      // The mouse rotation is a uniform, never a bake: the scene is axisymmetric
-      // so the baked G-buffer is still exact in the rotated frame.
-      setShadeUniforms(effects, targets, settings, gpu!.time, advanceSceneYaw(now));
-      renderChain(frame, effects, targets, surface, runBake);
-    });
+    // From here on the loop is owned by the state machine, never started
+    // directly — see `reconcileLoop`.
+    started = true;
+    documentVisible = !document.hidden;
+    reconcileLoop();
   };
 
   function handleFailure(error: unknown): void {
@@ -408,8 +505,6 @@ function createEffects(gpu: Gpu, label: string): Effects {
   return {
     bake: gpu.effect(bakeWgsl, { label: `${label}-bake` }),
     shade: gpu.effect(shadeWgsl, { label: `${label}-shade` }),
-    composite: gpu.effect(compositeWgsl, { label: `${label}-composite` }),
-    sampler: gpu.sampler({ minFilter: 'linear', magFilter: 'linear' }),
   };
 }
 
@@ -421,22 +516,15 @@ function createTargets(gpu: Gpu, size: readonly [number, number], label: string)
       colors: GBUFFER_FORMATS.map((format) => ({ format })),
       label: `${label}-gbuffer`,
     }),
-    scene: gpu.target({ size: full, format: HDR_FORMAT, label: `${label}-scene` }),
   };
 }
 
 function destroyTargets(targets: Targets): void {
   destroyTarget(targets.gbuffer);
-  destroyTarget(targets.scene);
 }
 
 function destroyTarget(target: Target | undefined): void {
   (target as { destroy?: () => void } | undefined)?.destroy?.();
-}
-
-function setConstants(effects: Effects, settings: HeroSettings): void {
-  void settings;
-  effects.composite.set({ samp: effects.sampler, composite: { exposure: 1.15, debug: 0 } });
 }
 
 function setBindings(effects: Effects, targets: Targets): void {
@@ -447,9 +535,10 @@ function setBindings(effects: Effects, targets: Targets): void {
     gHit2: hit2,
     gSky: sky,
     gView: view,
-    shade: { resolution: targets.scene.size },
+    // The shade pass draws at G-buffer resolution: it is a 1:1 textureLoad, and
+    // the swap chain is created from the same clamped physical size.
+    shade: { resolution: targets.gbuffer.size },
   });
-  effects.composite.set({ scene: targets.scene });
 }
 
 function setBakeUniforms(effects: Effects, targets: Targets, settings: HeroSettings): void {
@@ -473,7 +562,7 @@ function setShadeUniforms(
 ): void {
   effects.shade.set({
     shade: {
-      resolution: targets.scene.size,
+      resolution: targets.gbuffer.size,
       time,
       diskOuter: settings.diskRadius,
       debugView: settings.debugView,
@@ -487,22 +576,23 @@ function setShadeUniforms(
     disk: settings.disk,
     stars: settings.stars,
   });
-  // Debug views carry raw channel data: skip tone mapping and desaturation.
-  effects.composite.set({ composite: { exposure: 1.15, debug: settings.debugView > 0 ? 1 : 0 } });
+  // No composite uniform to update: shade.wgsl tone maps in place and returns
+  // early (raw) for every debug view, so the bypass is a branch in the shader.
 }
 
 async function prewarm(effects: Effects, targets: Targets, output: Output): Promise<void> {
   await Promise.all([
     effects.bake.compile(targets.gbuffer),
-    effects.shade.compile(targets.scene),
-    effects.composite.compile({ colors: [output.format] }),
+    // Compiled against the OUTPUT format (the swap chain), not an HDR target:
+    // shade is the last pass and writes display-referred unorm.
+    effects.shade.compile({ colors: [output.format] }),
   ]);
 }
 
 function renderChain(frame: Frame, effects: Effects, targets: Targets, output: Output, bake: boolean): void {
   if (bake) frame.pass({ target: targets.gbuffer, clear: CLEAR }, (pass) => pass.draw(effects.bake));
-  frame.pass({ target: targets.scene, clear: CLEAR }, (pass) => pass.draw(effects.shade));
-  frame.pass({ target: output, clear: CLEAR }, (pass) => pass.draw(effects.composite));
+  // Two passes, not three: shade reads the G-buffer and writes the swap chain.
+  frame.pass({ target: output, clear: CLEAR }, (pass) => pass.draw(effects.shade));
 }
 
 /** Wall clock for the bake throttle; independent of the animation clock. */
