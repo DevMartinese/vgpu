@@ -1,6 +1,7 @@
 import type { Effect, Frame, Gpu, Surface, Target } from 'vgpu';
 
 import bakeWgsl from './bake.wgsl';
+import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
 import shadeWgsl from './shade.wgsl';
 
 /**
@@ -169,7 +170,20 @@ type Output = Surface | Target;
 interface Effects {
   bake: Effect;
   shade: Effect;
+  /**
+   * Tiled 3D value-noise lattice for disk.wgsl, plus its sampler.
+   *
+   * Immutable and resolution-independent, so unlike the G-buffer it is created
+   * ONCE and survives every resize — `setBindings` re-binds the same handle.
+   * Lives on `Effects` rather than `Targets` for exactly that reason: `Targets`
+   * is the set of things a resize throws away.
+   */
+  noiseVolume: NoiseVolume;
+  noiseSampler: GPUSampler;
 }
+
+/** What `createNoiseVolume` hands back: a core `Texture` we have to destroy. */
+type NoiseVolume = ReturnType<typeof createNoiseVolume>;
 
 interface Targets {
   /** G-buffer written once by the bake pass (MRT: hit1 / hit2 / sky / view). */
@@ -435,6 +449,9 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     }
     if (targets) destroyTargets(targets);
     targets = undefined;
+    // Not a Target, so `destroyTargets` never sees it; 256 KiB of device memory
+    // that would otherwise outlive a remount.
+    effects?.noiseVolume.destroy();
     surface?.dispose();
     surface = undefined;
     gpu?.dispose();
@@ -505,6 +522,11 @@ function createEffects(gpu: Gpu, label: string): Effects {
   return {
     bake: gpu.effect(bakeWgsl, { label: `${label}-bake` }),
     shade: gpu.effect(shadeWgsl, { label: `${label}-shade` }),
+    // Built and uploaded here, synchronously, before the first bind: the
+    // lattice is a pure function of its size, so there is nothing to await and
+    // nothing that can change later.
+    noiseVolume: createNoiseVolume(gpu, NOISE_VOLUME_SIZE, `${label}-noise-volume`),
+    noiseSampler: noiseVolumeSampler(gpu),
   };
 }
 
@@ -535,6 +557,11 @@ function setBindings(effects: Effects, targets: Targets): void {
     gHit2: hit2,
     gSky: sky,
     gView: view,
+    // Resize-invariant, but re-bound with the rest: `setBindings` rebuilds the
+    // whole shade bind group when the G-buffer is recreated, and a bind group
+    // is all-or-nothing.
+    noiseVolume: effects.noiseVolume,
+    noiseSampler: effects.noiseSampler,
     // The shade pass draws at G-buffer resolution: it is a 1:1 textureLoad, and
     // the swap chain is created from the same clamped physical size.
     shade: { resolution: targets.gbuffer.size },

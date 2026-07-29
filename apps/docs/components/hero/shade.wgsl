@@ -85,6 +85,22 @@ const SATURATION: f32 = 0.0;
 @group(0) @binding(4) var gView: texture_2d<f32>;
 @group(0) @binding(5) var<uniform> disk: DiskLook;
 @group(0) @binding(6) var<uniform> stars: StarLook;
+/**
+ * Tiled 3D value-noise lattice for disk.wgsl, and its sampler.
+ *
+ * The disk's smoke used to hash its noise lattice inline, eight `hash31` calls
+ * per sample and ~26 samples per pixel per layer. The lattice is now baked once
+ * into an `r8unorm` `texture_3d` (`noise-volume.mjs`) and read with a single
+ * trilinear fetch. They live HERE and not in disk.wgsl because WGSL modules in
+ * this project never declare bindings — the entry shader owns the bind group
+ * and passes resources down, exactly like `disk` and `stars` above.
+ *
+ * The sampler MUST be linear min/mag with `repeat` on all three axes: `noise3`
+ * wraps the integer cell itself but relies on `repeat` to close the tile
+ * between the last texel and the first.
+ */
+@group(0) @binding(7) var noiseVolume: texture_3d<f32>;
+@group(0) @binding(8) var noiseSampler: sampler;
 
 /**
  * Screen-space footprint of the disk noise for one layer, in noise units per
@@ -290,10 +306,10 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   var backSample = emptyDiskSample();
   var frontSample = emptyDiskSample();
   if (layers.back.isHit && shade.diskLayers > 1.5) {
-    backSample = shadeDisk(layers.back, disk, shade.time, backFootprint);
+    backSample = shadeDisk(layers.back, disk, shade.time, backFootprint, noiseVolume, noiseSampler);
   }
   if (layers.front.isHit) {
-    frontSample = shadeDisk(layers.front, disk, shade.time, frontFootprint);
+    frontSample = shadeDisk(layers.front, disk, shade.time, frontFootprint, noiseVolume, noiseSampler);
   }
 
   // Back to front. Both composites are unconditional: an empty layer has

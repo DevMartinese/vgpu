@@ -246,6 +246,48 @@ with a literal, and do not put the raw `shade.time` back.**
   tone map is applied once, by `shade.wgsl`, after both layers are composited —
   never inside `disk.wgsl`.
 
+#### The tiled noise volume
+
+`shadeDisk` does not hash its noise any more. The value-noise lattice is baked
+once into an `r8unorm` `texture_3d` by `noise-volume.mjs` — which both
+`renderer.ts` and `debug-render.mjs` import, so the browser and the headless
+harness get byte-identical volumes — and each of the ~52 noise evaluations per
+pixel is now one trilinear fetch instead of eight inline hashes (~215 ALU).
+`disk.wgsl` documents the kernel itself; what matters at this level:
+
+- **The cubic fade is applied to the coordinate, not to the values.** Hardware
+  filtering is linear; sampling at `(i + u + 0.5) / size` with
+  `u = f*f*(3-2f)` makes the linear weights land on the cubic ones. Sampling at
+  `(i + f + 0.5) / size` would be plain linear interpolation and would visibly
+  soften every ridged filament. This is the single most breakable line here.
+- **The sampler must be `repeat` on all three axes** — that is what closes the
+  tile. It also means the shader does no coordinate wrapping of its own.
+- **The tiling is invisible in φ by construction.** The disk samples through a
+  cylindrical embedding (`cos`/`sin` of the azimuth on XY, radius on Z), which
+  is already exactly periodic in the azimuth, so there is no seam to align.
+  Only the radial axis actually wraps, at 64 noise units.
+- **64³ (256 KiB) is the shipped size, and 128³ is not better.** Measured
+  side by side, 128³ has no less visible repetition and slightly *lower* frame
+  contrast, for 8x the memory. `--noiseSize 128` in `debug-render.mjs` exists so
+  you can re-check that yourself, not because it is a quality setting.
+
+##### Why the lattice has a seed
+
+Tiling re-rolls which *realization* of the noise you get, because wrapping the
+radial axis re-slices every octave. That is not a small effect: the disk's
+large-scale contrast is set by the `flow` layer, which spans only about three
+lattice planes, so it is a very small sample. Re-rolling the **analytic** noise
+of the previous implementation (shifting every octave's z by a constant) moves
+the frame's masked luma std over 0.092..0.117 and the blown-out-crest fraction
+over 0.61%..2.13% — and the look the hero shipped with sits at the very top of
+that range. It is a lucky draw, and the disk was hand-tuned against it.
+
+So `NOISE_VOLUME_SEED` is chosen, not defaulted: it is the lattice, out of 16,
+whose contrast statistics land closest to that shipped frame, verified on times
+it was not selected on. If you ever regenerate the volume, expect to re-pick it,
+and expect the filaments to be *arranged* differently — that is realization
+noise, not a regression.
+
 ### `stars.wgsl`
 
 ```wgsl
@@ -326,12 +368,24 @@ fade in `shade.wgsl`.
 | `@group(0) @binding(4)` | `gView` | `texture_2d<f32>` | `gbuffer.colors[3]` |
 | `@group(0) @binding(5)` | `disk` | `DiskLook` uniform | `settings.disk` (verbatim) |
 | `@group(0) @binding(6)` | `stars` | `StarLook` uniform | `settings.stars` (verbatim) |
+| `@group(0) @binding(7)` | `noiseVolume` | `texture_3d<f32>` (`r8unorm`) | `noise-volume.mjs::createNoiseVolume` |
+| `@group(0) @binding(8)` | `noiseSampler` | `sampler` (linear, `repeat` xyz) | `noise-volume.mjs::noiseVolumeSampler` |
 
 `Shade` carries `resolution`, `time`, `diskOuter`, `debugView`, `diskLayers` and
 `sceneYaw` — nothing camera-related, the bake froze it (`sceneYaw` rotates the
 *scene*, not the camera; see below). G-buffer textures are read with
 `textureLoad` (no sampler): the 32-bit float formats are not filterable, and
 interpolating G-buffer values across silhouettes would be wrong anyway.
+
+Bindings 7 and 8 are the **only** sampled resources in the pipeline, and they
+belong to the disk's noise (see ["The tiled noise volume"](#the-tiled-noise-volume)).
+Note that
+`disk.wgsl` does not declare them: the disk module takes the texture and the
+sampler as ordinary function parameters and `shade.wgsl` passes them in, so the
+rule that **the entry shader owns every `@group`/`@binding`** still holds. The
+volume is created once, outlives resize (it is not part of `Targets`), and so
+`renderer.ts` has to destroy it explicitly in `dispose` — `destroyTargets` will
+not do it for you.
 
 ### How the two disk layers are composited
 

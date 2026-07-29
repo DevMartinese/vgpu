@@ -31,6 +31,8 @@
 //                        for the rotation: `--yaw t` must match `--bakeYaw -t`.
 //   --disk.<key> <v>     any DiskLook field (brightness, speed, stretch, detail, ...)
 //   --stars.<key> <v>    any StarLook field (brightness, density, twinkle, ...)
+//   --noiseSize <n>      edge of the tiled 3D noise lattice (default 64; try 128 to
+//                        A/B whether the tiling repeats visibly)
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
 //   --json               print the resolved settings and per-image stats as JSON
 //
@@ -44,6 +46,8 @@ import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { resolveShader } from '@vgpu/wgsl/runtime';
 import { init } from 'vgpu/node';
+
+import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -97,7 +101,7 @@ const VIEWS = {
 const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
 
 function parseArgs(argv) {
-  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0 };
+  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE };
   const patch = {};
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -115,6 +119,7 @@ function parseArgs(argv) {
       continue;
     }
     if (key === 'time') { options.time = Number(value); continue; }
+    if (key === 'noiseSize') { options.noiseSize = Math.max(2, Number(value) | 0); continue; }
     // Scene yaw vs camera yaw: `--yaw t` rotates the scene in the frame pass and
     // must produce the same image as `--bakeYaw -t`, which rotates the camera and
     // re-bakes. That equivalence is the whole justification for the feature.
@@ -207,6 +212,12 @@ async function main() {
   const bake = gpu.effect(bakeWgsl, { label: 'hero-debug-bake' });
   const shade = gpu.effect(shadeWgsl, { label: 'hero-debug-shade' });
 
+  // Same lattice bytes the browser uploads (shared module, not a copy), so the
+  // harness renders the disk the page renders. Node/Dawn takes the 3D texture
+  // and the trilinear repeat sampler through the identical core WebGPU path.
+  const noiseVolume = createNoiseVolume(gpu, options.noiseSize, 'hero-debug-noise-volume');
+  const noiseSampler = noiseVolumeSampler(gpu);
+
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
   bake.set({ bake: {
     resolution: gbuffer.size,
@@ -224,6 +235,8 @@ async function main() {
     gHit2: hit2Texture,
     gSky: skyTexture,
     gView: viewTexture,
+    noiseVolume,
+    noiseSampler,
     disk: settings.disk,
     stars: settings.stars,
   });
@@ -256,13 +269,14 @@ async function main() {
     results.push({ view: name, debugView, path, ...stats(pixels) });
   }
 
+  noiseVolume.destroy();
   gpu.dispose();
 
   if (options.json) {
-    console.log(JSON.stringify({ size: options.size, time: options.time, settings, images: results }, null, 2));
+    console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, settings, images: results }, null, 2));
     return;
   }
-  console.log(`hero debug render ${width}x${height} @ t=${options.time}s -> ${options.out}`);
+  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
   for (const result of results) {
     console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
   }

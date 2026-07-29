@@ -5,10 +5,12 @@
 //
 //   struct DiskLook { ... }                                  <- uniform payload, see GBUFFER.md
 //   struct DiskSample { color: vec3f, alpha: f32, density: f32 }
-//   fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32) -> DiskSample
+//   fn shadeDisk(g, look, time, footprint, noiseTex, noiseSampler) -> DiskSample
 //
 // WGSL modules must stay pure: never declare @group/@binding here. The entry
-// shader (shade.wgsl) owns the bindings and passes `look` in by value.
+// shader (shade.wgsl) owns the bindings and passes `look` in by value — and,
+// since the value noise moved from an inline hash to a tiled `texture_3d`
+// lattice, hands the texture and its sampler in as parameters too.
 
 import { GBufferSample, HORIZON, ISCO } from "./gbuffer.wgsl";
 
@@ -52,32 +54,83 @@ export struct DiskSample {
   density: f32,
 }
 
-fn hash31(p: vec3f) -> f32 {
-  var q = fract(p * vec3f(0.1031, 0.1030, 0.0973));
-  q += vec3f(dot(q, q.yzx + vec3f(33.33)));
-  return fract((q.x + q.y) * q.z);
+/**
+ * The lattice, and how wide it is.
+ *
+ * `noise3` needs both the texture and its edge length on every call, and the
+ * edge length has to travel with it: `textureDimensions` is uniform but reading
+ * it inside the octave loops would put a resource query on the hot path. It is
+ * read ONCE, in `shadeDisk`, and carried down as plain numbers.
+ *
+ * WGSL cannot put a texture or a sampler in a struct, so this bundles only the
+ * scalars; the two handles stay explicit parameters. Ugly, and deliberate — the
+ * module still declares no `@group`/`@binding` of its own (see the header), so
+ * `shade.wgsl` remains the single owner of the bind group.
+ */
+struct NoiseLattice {
+  /**
+   * `1 / edge`, where edge is both the texture's side in texels and the period
+   * of the noise in noise units. Read once per pixel in `shadeDisk` and passed
+   * down, so the octave loops never issue a `textureDimensions` query.
+   */
+  invSize: f32,
 }
 
-// Value noise in 3D. The disk samples it through a cylindrical embedding
-// (cos/sin of the azimuth on XY, radius on Z), which is exactly periodic in the
-// azimuth — no atan2 branch cut, so no radial seam across the disk.
-fn noise3(p: vec3f) -> f32 {
+/**
+ * Value noise in 3D, read from a tiled lattice texture.
+ *
+ * This used to hash the eight corners of the cell inline: `hash31` is ~20
+ * scalar ops and the whole thing came to ~215, all of it plain ALU (the hash is
+ * fract/dot based — there are no transcendentals in it; the `cos`/`sin` belong
+ * to the cylindrical embedding at the call site and are untouched by any of
+ * this). The disk evaluates ~26 of those per pixel per layer, ~52 per pixel
+ * over the two shear lobes, so the noise alone was ~11k ALU ops per pixel and
+ * comfortably the hottest thing in the frame pass. The lattice is now baked
+ * into an `r8unorm` `texture_3d` once at init (`noise-volume.mjs`, same hash,
+ * same statistics) and the eight hashes plus the eight-way `mix` chain collapse
+ * into ONE trilinear fetch: ~24 ALU + 1 TEX.
+ *
+ * That is a good trade on a GPU, where the 3D trilinear runs in the texture
+ * units in parallel with the ALU, and the working set is small (64^3 r8 = 256
+ * KiB, L2-resident) and coherent (the octaves finer than a pixel are skipped by
+ * the `visible` fade, so neighbouring pixels stay within a texel or two). It is
+ * a BAD trade on a software rasterizer, where a trilinear fetch is eight
+ * dependent scalar loads and the hash is perfectly vectorizable with no memory
+ * traffic at all. Do not be alarmed by the CPU numbers: measured on lavapipe
+ * this shader is ~28% SLOWER than the analytic one. That result says nothing
+ * about the target, and the win here has NOT been measured on real hardware.
+ *
+ * The cubic fade is preserved exactly, and that is the whole trick: hardware
+ * filtering is LINEAR, and swapping `u = f*f*(3-2f)` for a raw `f` would round
+ * off every crest — the ridged filaments would go soft and the disk would read
+ * as silk. So the fade is applied to the COORDINATE instead of to the values:
+ * sampling at `(i + u + 0.5) / size` makes the hardware's linear weights
+ * land on exactly the eight cubic weights the analytic version computed. The
+ * only differences left are the r8 quantization of the lattice and the
+ * sampler's fixed-point filter weights, both ~1 LSB.
+ *
+ * Nothing here wraps the coordinate: the sampler's `repeat` address mode does
+ * it, for free, in the addressing hardware. That is worth stating because the
+ * obvious defensive version (fold the cell into `[0, size)` first, since the
+ * finest octaves reach |p.z| ~ 2e3) costs 12 ALU per fetch — ~600 per pixel
+ * over the ~52 fetches — to buy precision the sampler cannot use: at p.z ~ 2e3
+ * an f32 holds the fade to ~1.2e-4 of a texel, while the filter weights
+ * themselves are quantized to ~1/256 of a texel. Measured over four decades of
+ * time: rmse 4e-5, and the worst pixel in the frame moves by 2/255.
+ *
+ * The disk samples this through a cylindrical embedding (cos/sin of the azimuth
+ * on XY, radius on Z), which is exactly periodic in the azimuth — no atan2
+ * branch cut, so no radial seam across the disk. Tiling does not disturb that:
+ * the embedding closes on itself geometrically, whatever the field underneath.
+ */
+fn noise3(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, p: vec3f) -> f32 {
   let i = floor(p);
-  let f = fract(p);
+  let f = p - i;
   let u = f * f * (3.0 - 2.0 * f);
-  let c000 = hash31(i);
-  let c100 = hash31(i + vec3f(1.0, 0.0, 0.0));
-  let c010 = hash31(i + vec3f(0.0, 1.0, 0.0));
-  let c110 = hash31(i + vec3f(1.0, 1.0, 0.0));
-  let c001 = hash31(i + vec3f(0.0, 0.0, 1.0));
-  let c101 = hash31(i + vec3f(1.0, 0.0, 1.0));
-  let c011 = hash31(i + vec3f(0.0, 1.0, 1.0));
-  let c111 = hash31(i + vec3f(1.0, 1.0, 1.0));
-  let x00 = mix(c000, c100, u.x);
-  let x10 = mix(c010, c110, u.x);
-  let x01 = mix(c001, c101, u.x);
-  let x11 = mix(c011, c111, u.x);
-  return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+  // textureSampleLevel, not textureSample: the octave loops call this from
+  // inside `if (visible > ...)`, which is non-uniform control flow, where the
+  // implicit-derivative sample is illegal. The lattice has one mip anyway.
+  return textureSampleLevel(tex, samp, (i + u + vec3f(0.5)) * lattice.invSize, 0.0).r;
 }
 
 /**
@@ -95,6 +148,9 @@ fn noise3(p: vec3f) -> f32 {
  * band aliases into moire.
  */
 fn streakFbm(
+  tex: texture_3d<f32>,
+  samp: sampler,
+  lattice: NoiseLattice,
   angle: f32,
   radius: f32,
   angScale: f32,
@@ -122,7 +178,7 @@ fn streakFbm(
     // band (where the radial frequency explodes) is a large share of the pixels.
     var sampleValue = 0.5;
     if (visible > 0.004) {
-      sampleValue = mix(0.5, noise3(vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset)), visible);
+      sampleValue = mix(0.5, noise3(tex, samp, lattice, vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset)), visible);
     }
     value += amplitude * sampleValue;
     total += amplitude;
@@ -143,6 +199,9 @@ fn streakFbm(
  * ever give soft clouds because its lowest octave carries half the energy.
  */
 fn ridgeFbm(
+  tex: texture_3d<f32>,
+  samp: sampler,
+  lattice: NoiseLattice,
   angle: f32,
   radius: f32,
   angScale: f32,
@@ -164,7 +223,7 @@ fn ridgeFbm(
     let visible = clamp(1.0 - 1.7 * max(dAngle * a, dRadius * r), 0.0, 1.0);
     var crest = 0.42;
     if (visible > 0.004) {
-      let n = noise3(vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset));
+      let n = noise3(tex, samp, lattice, vec3f(cos(angle) * a, sin(angle) * a, radius * r + offset));
       // 0.42 is the mean of the folded noise, so an invisible octave decays to
       // the same average the visible one would have produced.
       crest = mix(0.42, pow(1.0 - abs(n * 2.0 - 1.0), 1.35), visible);
@@ -198,16 +257,16 @@ struct FieldParams {
  * `vec2f(field, rimNoise)` — the rim wobble is a by-product of the warp layers
  * and must come from the same phase as the field it frays.
  */
-fn smokeField(angle: f32, radius: f32, p: FieldParams) -> vec2f {
+fn smokeField(tex: texture_3d<f32>, samp: sampler, lattice: NoiseLattice, angle: f32, radius: f32, p: FieldParams) -> vec2f {
   // --- advection ----------------------------------------------------------
   // Two low-frequency layers displace the sampling point mostly RADIALLY: that
   // makes the filaments meander across the flow while staying tangential, i.e.
   // frayed rather than blobby. Amplitude follows `chaos`, so the rim shreds.
-  let warpA = streakFbm(angle, radius, p.angBase * 0.55, p.flowRad * 1.6, 2, p.dAngle, p.dRadius, 1.6, 2.0, 3.7) - 0.5;
+  let warpA = streakFbm(tex, samp, lattice, angle, radius, p.angBase * 0.55, p.flowRad * 1.6, 2, p.dAngle, p.dRadius, 1.6, 2.0, 3.7) - 0.5;
   // warpB is deliberately short-wavelength in AZIMUTH: a warp that is smooth all
   // the way around only slides the threads sideways and keeps the silky-ring
   // look. This is the layer that actually shreds the rim.
-  let warpB = streakFbm(angle + 2.4, radius * 1.13, p.angBase * 2.8, p.radBase * 0.45, 3, p.dAngle, p.dRadius, 1.7, 2.0, 61.3) - 0.5;
+  let warpB = streakFbm(tex, samp, lattice, angle + 2.4, radius * 1.13, p.angBase * 2.8, p.radBase * 0.45, 3, p.dAngle, p.dRadius, 1.7, 2.0, 61.3) - 0.5;
   let radiusW = radius + (warpA * 1.9 + warpB * 1.25 * p.outward) * p.chaos;
   let angleW = angle + (warpB * 0.9 - warpA * 0.35) * p.chaos * 0.55 / max(radius * 0.22, 0.35);
 
@@ -215,11 +274,11 @@ fn smokeField(angle: f32, radius: f32, p: FieldParams) -> vec2f {
   // `flow`: angular-dominant, nearly flat radially. Its level sets run ACROSS
   // the flow, so it must stay low frequency — it is the slow bright/dark
   // modulation along the band, the only structure that survives edge-on.
-  let flow = streakFbm(angleW, radiusW, p.angBase, p.flowRad, 3, p.dAngle, p.dRadius, 2.0, 1.12, 131.7);
+  let flow = streakFbm(tex, samp, lattice, angleW, radiusW, p.angBase, p.flowRad, 3, p.dAngle, p.dRadius, 2.0, 1.12, 131.7);
   // `threads`: ridged and radial-dominant -> the long tangential filaments.
   // Level sets of a radius-dominated field are curves of nearly constant
   // radius, which is what "stretched along the rotation" means geometrically.
-  let threads = ridgeFbm(angleW, radiusW, p.angBase * 0.85, p.radBase, 5, p.dAngle, p.dRadius, 1.26, 2.05, 0.0);
+  let threads = ridgeFbm(tex, samp, lattice, angleW, radiusW, p.angBase * 0.85, p.radBase, 5, p.dAngle, p.dRadius, 1.26, 2.05, 0.0);
 
   // How much of the thread layer this pixel can actually resolve. Blending with
   // `mix` instead of a fixed sum matters: an unresolved fBm decays to a flat
@@ -248,7 +307,23 @@ const TWO_PI = 6.283185307;
  * Shades one disk pixel from the baked G-buffer sample.
  * `g.isHit` is guaranteed true when the entry shader calls this.
  */
-export fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32) -> DiskSample {
+export fn shadeDisk(
+  g: GBufferSample,
+  look: DiskLook,
+  time: f32,
+  footprint: f32,
+  /** Tiled value-noise lattice; see `noise3` and noise-volume.mjs. */
+  noiseTex: texture_3d<f32>,
+  /** Must be linear min/mag with `repeat` on U, V and W. */
+  noiseSampler: sampler,
+) -> DiskSample {
+  // Read the lattice period ONCE per pixel. `textureDimensions` is uniform, so
+  // hoisting it here (instead of letting `noise3` ask for it 26 times) costs
+  // nothing and keeps the shader agnostic to 64^3 vs 128^3 — the volume can be
+  // resized from TypeScript alone.
+  var lattice: NoiseLattice;
+  lattice.invSize = 1.0 / f32(textureDimensions(noiseTex).x);
+
   let plane = vec2f(g.position.x, g.position.z);
   let radius = g.diskPolar.x;
   let azimuth = g.diskPolar.y;
@@ -357,8 +432,8 @@ export fn shadeDisk(g: GBufferSample, look: DiskLook, time: f32, footprint: f32)
   params.outward = outward;
   params.dAngle = dAngle;
   params.dRadius = dRadius;
-  let lobe0 = smokeField(angle0, radius, params);
-  let lobe1 = smokeField(angle1, radius, params);
+  let lobe0 = smokeField(noiseTex, noiseSampler, lattice, angle0, radius, params);
+  let lobe1 = smokeField(noiseTex, noiseSampler, lattice, angle1, radius, params);
   let blended = mix(lobe1, lobe0, w0);
 
   // A plain cross-dissolve of two decorrelated fields loses contrast exactly at
