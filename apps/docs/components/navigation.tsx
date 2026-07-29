@@ -48,7 +48,9 @@ export function Navigation() {
               <svg className="w-3.5 h-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
                 <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
               </svg>
-              <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
+              {/* Serif wordmark, matching the homepage header; the nav below
+                  it stays sans. */}
+              <span className="font-serif text-[15px] font-semibold text-gray-12">vgpu</span>
               <span className="text-xs text-gray-9 bg-gray-2 px-1.5 py-0.5 rounded">Docs</span>
             </Link>
           </div>

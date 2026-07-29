@@ -134,16 +134,16 @@ module.exports = {
         },
       },
       fontFamily: {
-        // Site-wide serif: `sans` deliberately resolves to Geist Serif so that
-        // every existing `font-sans` (the root body, and anything that opted in
-        // explicitly) renders serif without touching each call site. The face
-        // ships Regular only, so bold/semibold are synthesised — accepted.
-        // To go back to a sans site, restore `var(--font-geist-sans)` here; the
-        // variable is still declared on <html> in app/layout.tsx.
-        sans: ['var(--font-geist-serif)', 'Georgia', 'Times New Roman', 'serif'],
+        sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
         mono: ['var(--font-geist-mono)', 'Menlo', 'Monaco', 'monospace'],
-        // Same face under its own name, for places that ask for serif directly
-        // (the homepage wrapper). Declared as a CSS variable in app/fonts.ts.
+        // Geist Serif is a display face used by OPT-IN only — never as the body
+        // font. Applying it site-wide (by pointing `sans` here) was tried and
+        // rejected: it ships Regular alone, so every font-semibold heading and
+        // UI label came out synthetically bolded and muddy. It is now spelled
+        // out per element with `font-serif`: the wordmark in the three headers
+        // (home-header, navigation, examples-sidebar), plus the homepage
+        // tagline and the Prompt/Skill selector. Declared in app/fonts.ts and
+        // exposed as a variable on <html> in app/layout.tsx.
         serif: ['var(--font-geist-serif)', 'Georgia', 'Times New Roman', 'serif'],
       },
       fontSize: {

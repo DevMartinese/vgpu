@@ -6,7 +6,6 @@ import { HeroTabs } from '@/components/hero-tabs';
 import { HeroBlackHole } from '@/components/hero/hero-black-hole';
 import { InlineCode } from '@/components/inline-code';
 import { exampleMetadataBySlug } from '@/lib/examples-metadata';
-import { geistSerif } from './fonts';
 
 const featuredExamples = [
   exampleMetadataBySlug['black-hole'],
@@ -42,8 +41,10 @@ const docLinks = [
 
 export default function HomePage() {
   return (
-    // Geist Serif for the whole homepage; code fragments opt out with font-mono.
-    <div className={`${geistSerif.variable} font-serif`}>
+    // Sans, like the rest of the site. Geist Serif is opted into per element
+    // (the wordmark in HomeHeader, the tagline below, HeroTabs) — it is a
+    // display face and reads badly on body copy and section headings.
+    <div>
       <HomeHeader />
       <main className="pb-16 lg:pb-20">
         {/* Hero: the shader is the full section and the copy is positioned on
@@ -96,7 +97,7 @@ export default function HomePage() {
             className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 px-6"
           >
             <h1
-              className="pointer-events-auto mx-auto max-w-[798px] text-center font-normal leading-[1.4] text-white"
+              className="pointer-events-auto mx-auto max-w-[798px] text-center font-serif font-normal leading-[1.4] text-white"
               /* Sized off the viewport HEIGHT, not the width: the tagline has
                  to stay inside the black hole's shadow, and the shadow is a
                  circle scaled by the shorter axis. 2.4svh = 21.6px at 900px
