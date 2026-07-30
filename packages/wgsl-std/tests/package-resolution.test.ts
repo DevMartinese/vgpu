@@ -111,6 +111,52 @@ fn main() -> f32 {
   expect(compact).not.toMatch(/inverseLerp|remap|safeNormalize|rotate2d/u);
 });
 
+test("importing @vgpu/wgsl-std/noise/perlin does not pull in simplex, and vice versa", async () => {
+  const dir = await workspaceFixture();
+
+  const perlinEntry = join(dir, "app", "perlin.wgsl");
+  await writeFile(perlinEntry, `import { perlin2d } from "@vgpu/wgsl-std/noise/perlin";
+fn main() -> f32 { return perlin2d(vec2f(0.25, 0.75)); }`);
+  const perlinResult = await resolveShader({ entry: perlinEntry, validate: false });
+
+  expect(perlinResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/perlin/index.wgsl"))).toBe(true);
+  expect(perlinResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/internal/gradient.wgsl"))).toBe(true);
+  expect(perlinResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/hash/index.wgsl"))).toBe(true);
+  expect(perlinResult.deps.some((dep) => dep.includes("/noise/simplex/"))).toBe(false);
+  expect(stripWgslComments(perlinResult.wgsl).toLowerCase()).not.toContain("simplex");
+
+  const simplexEntry = join(dir, "app", "simplex.wgsl");
+  await writeFile(simplexEntry, `import { simplex2d } from "@vgpu/wgsl-std/noise/simplex";
+fn main() -> f32 { return simplex2d(vec2f(0.25, 0.75)); }`);
+  const simplexResult = await resolveShader({ entry: simplexEntry, validate: false });
+
+  expect(simplexResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/simplex/index.wgsl"))).toBe(true);
+  expect(simplexResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/internal/gradient.wgsl"))).toBe(true);
+  expect(simplexResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/hash/index.wgsl"))).toBe(true);
+  expect(simplexResult.deps.some((dep) => dep.includes("/noise/perlin/"))).toBe(false);
+  expect(stripWgslComments(simplexResult.wgsl).toLowerCase()).not.toContain("perlin");
+});
+
+test("importing both noise/perlin and noise/simplex resolves each module's declarations exactly once", async () => {
+  const dir = await workspaceFixture();
+  const entry = join(dir, "app", "main.wgsl");
+  await writeFile(entry, `import { perlin2d } from "@vgpu/wgsl-std/noise/perlin";
+import { simplex2d } from "@vgpu/wgsl-std/noise/simplex";
+fn main() -> f32 { return perlin2d(vec2f(0.25, 0.75)) + simplex2d(vec2f(0.25, 0.75)); }`);
+
+  const result = await resolveShader({ entry, validate: false });
+  const wgsl = stripWgslComments(result.wgsl);
+
+  for (const symbol of ["gradIndex2", "gradDot2", "gradIndex3", "gradDot3", "noiseFade2", "noiseFade3"]) {
+    const occurrences = wgsl.match(new RegExp(`fn _vgsl_[0-9a-f]{8}__${symbol}\\(`, "gu")) ?? [];
+    expect(occurrences.length).toBe(1);
+  }
+});
+
+function stripWgslComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//gu, " ").replace(/\/\/[^\n]*/gu, " ");
+}
+
 async function workspaceFixture(): Promise<string> {
   const dir = await mkdirTemp();
   await mkdir(join(dir, "app"), { recursive: true });
