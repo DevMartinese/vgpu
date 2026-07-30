@@ -18,7 +18,9 @@ This guide is the bundler half of [Getting started](getting-started.docs.md): in
 npm install vgpu
 ```
 
-That is the whole install. `@vgpu/wgsl` (the loaders) and `@vgpu/wgsl-std` (the pure-WGSL standard modules) are dependencies of `vgpu`, so WGSL package imports such as `import { voronoi3d } from "@vgpu/wgsl-std/noise";` resolve with no second install step. If the resolver ever reports `VGPU-WGSL-PKG-NOTFOUND: Package @vgpu/wgsl-std was not found`, that package really is missing from `node_modules` — install it explicitly (`npm install @vgpu/wgsl-std`) and check the specifier spelling.
+That is the whole install. `@vgpu/wgsl` (the loaders) and `@vgpu/wgsl-std` (the pure-WGSL standard modules) are dependencies of `vgpu`, so WGSL package imports such as `import { voronoi3d } from "@vgpu/wgsl-std/noise";` resolve with no second install step — under npm, pnpm, and Yarn alike, including pnpm's isolated `node_modules` and Yarn PnP, where transitive packages never appear in your project's `node_modules` tree.
+
+A WGSL package import resolves in two steps: your project's own `node_modules` first, so a copy you installed yourself always wins, and then next to `@vgpu/wgsl` itself, which is what makes a transitive install work. `VGPU-WGSL-PKG-NOTFOUND` therefore means the package is reachable from neither — install it (`npm install <pkg>`) and check the specifier spelling.
 
 ## Next.js with Turbopack
 
