@@ -22,13 +22,25 @@ export async function publishArtifactSet(
 ): Promise<void> {
   const immutable = set.artifacts.filter((artifact) => artifact.immutable);
   for (const artifact of immutable) {
+    let writeError: unknown;
     try {
       await publisher.putImmutable(artifact);
-    } catch {
-      // A retry may encounter an already retained object. It is acceptable only
-      // when a fresh read proves it is byte-identical.
+    } catch (error) {
+      // The store is create-only, so a retry may legitimately encounter an already retained
+      // object. That is acceptable only when the fresh read below proves it is byte-identical.
+      // Any other failure is real, so keep it and report it as the cause rather than letting the
+      // verification surface a bare "mismatch" that hides why the write actually failed.
+      writeError = error;
     }
-    await verifyPublishedObject(publisher, artifact);
+    try {
+      await verifyPublishedObject(publisher, artifact);
+    } catch (verifyError) {
+      if (writeError === undefined) throw verifyError;
+      throw new Error(
+        `Immutable write failed for ${artifact.key}: ${(verifyError as Error).message}`,
+        { cause: writeError },
+      );
+    }
   }
   const discovery = set.artifacts.find((artifact) => artifact.key === set.discoveryKey)!;
   const latest = set.artifacts.find((artifact) => artifact.key === set.latestKey)!;
