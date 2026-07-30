@@ -18,7 +18,7 @@ npm install vgpu
 
 That is the whole install. `@vgpu/wgsl` (the loaders) and `@vgpu/wgsl-std` (the pure-WGSL standard modules) are dependencies of `vgpu`, so WGSL package imports such as `import { voronoi3d } from "@vgpu/wgsl-std/noise";` resolve with no second install step — under npm, pnpm, and Yarn alike, including pnpm's isolated `node_modules` and Yarn PnP, where transitive packages never appear in your project's `node_modules` tree.
 
-A WGSL package import resolves in two steps: your project's own `node_modules` first, so a copy you installed yourself always wins, and then next to `@vgpu/wgsl` itself, which is what makes a transitive install work. `VGPU-WGSL-PKG-NOTFOUND` therefore means the package is reachable from neither — install it (`npm install <pkg>`) and check the specifier spelling.
+A WGSL package import resolves from your project's own `node_modules` first, so a copy you installed yourself always wins, and then next to `@vgpu/wgsl` itself, which is what makes a transitive install of `@vgpu/wgsl-std` work. `VGPU-WGSL-PKG-NOTFOUND` therefore means the package is reachable from neither — install it (`npm install <pkg>`) and check the specifier spelling. Third-party and workspace packages work the same way, including `import { customNoise } from "@packages/shaders";` for a `workspace:*` package in a monorepo: see [Publishing WGSL module packages](publishing-wgsl-packages.docs.md) for the full resolution order and the `exports` map a package needs.
 
 ## Next.js with Turbopack
 
@@ -195,3 +195,4 @@ Then prove the pixels in Node instead of squinting at a browser tab: [Getting st
 - `npx vgpu docs cat /@vgpu/wgsl/loader-vite/index.docs.md` — the Vite plugin
 - `npx vgpu docs cat /@vgpu/wgsl/runtime/resolve-shader.docs.md` — resolving import graphs without a bundler
 - `npx vgpu docs cat /@vgpu/wgsl-std/noise/index.docs.md` — WGSL modules you can import by package name
+- [Publishing WGSL module packages](publishing-wgsl-packages.docs.md) — ship your own `.wgsl` modules as a package, or share them across a monorepo
