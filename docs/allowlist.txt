@@ -120,6 +120,10 @@ vgpu/scene srgb packages/vgpu-api/src/scene/srgb.docs.md
 @vgpu/wgsl-std/noise VoronoiSample3 packages/wgsl-std/src/noise/index.docs.md
 @vgpu/wgsl-std/noise voronoi2d packages/wgsl-std/src/noise/index.docs.md
 @vgpu/wgsl-std/noise voronoi3d packages/wgsl-std/src/noise/index.docs.md
+@vgpu/wgsl-std/noise/perlin fbmPerlin2d packages/wgsl-std/src/noise/perlin/index.docs.md
+@vgpu/wgsl-std/noise/perlin fbmPerlin3d packages/wgsl-std/src/noise/perlin/index.docs.md
+@vgpu/wgsl-std/noise/perlin perlin2d packages/wgsl-std/src/noise/perlin/index.docs.md
+@vgpu/wgsl-std/noise/perlin perlin3d packages/wgsl-std/src/noise/perlin/index.docs.md
 vgpu/scene capsule packages/vgpu-api/src/scene/geometry.docs.md
 vgpu/scene cone packages/vgpu-api/src/scene/geometry.docs.md
 vgpu/scene cylinder packages/vgpu-api/src/scene/geometry.docs.md
