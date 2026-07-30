@@ -124,6 +124,10 @@ vgpu/scene srgb packages/vgpu-api/src/scene/srgb.docs.md
 @vgpu/wgsl-std/noise/perlin fbmPerlin3d packages/wgsl-std/src/noise/perlin/index.docs.md
 @vgpu/wgsl-std/noise/perlin perlin2d packages/wgsl-std/src/noise/perlin/index.docs.md
 @vgpu/wgsl-std/noise/perlin perlin3d packages/wgsl-std/src/noise/perlin/index.docs.md
+@vgpu/wgsl-std/noise/simplex simplex2d packages/wgsl-std/src/noise/simplex/index.docs.md
+@vgpu/wgsl-std/noise/simplex simplex3d packages/wgsl-std/src/noise/simplex/index.docs.md
+@vgpu/wgsl-std/noise/simplex fbmSimplex2d packages/wgsl-std/src/noise/simplex/index.docs.md
+@vgpu/wgsl-std/noise/simplex fbmSimplex3d packages/wgsl-std/src/noise/simplex/index.docs.md
 vgpu/scene capsule packages/vgpu-api/src/scene/geometry.docs.md
 vgpu/scene cone packages/vgpu-api/src/scene/geometry.docs.md
 vgpu/scene cylinder packages/vgpu-api/src/scene/geometry.docs.md

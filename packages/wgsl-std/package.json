@@ -35,6 +35,7 @@
     "./hash": "./src/hash/index.wgsl",
     "./noise": "./src/noise/index.wgsl",
     "./noise/perlin": "./src/noise/perlin/index.wgsl",
+    "./noise/simplex": "./src/noise/simplex/index.wgsl",
     "./fullscreen": "./src/fullscreen/index.wgsl",
     "./light": "./src/light/index.wgsl"
   },
