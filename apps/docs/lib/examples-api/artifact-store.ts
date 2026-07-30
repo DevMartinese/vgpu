@@ -1,4 +1,5 @@
 import { get } from '@vercel/blob';
+import { access } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { sha256 } from './hashing';
 import { readSafeLocalFile } from './safe-local-path';
@@ -76,17 +77,51 @@ function parseRevisionDocument(bytes: Uint8Array, expectedRevision: string): Rev
   return document as RevisionDocument;
 }
 
+/**
+ * Latest-only serving reads the generated tree that ships inside the deployment, so `local` is the
+ * default everywhere -- including on Vercel, where the auto-deploy IS the publish step. `blob` is
+ * still selectable for the dormant versioned-retention mode and stays fail-closed without a token:
+ * serving unverified bytes would be worse than serving nothing.
+ */
 async function readRawObject(key: string, maximumBytes: number): Promise<Uint8Array | undefined> {
-  const mode = process.env.VGPU_EXAMPLES_ARTIFACT_STORE ?? (process.env.VERCEL ? 'blob' : 'local');
+  const mode = process.env.VGPU_EXAMPLES_ARTIFACT_STORE ?? 'local';
   if (mode === 'local') return readLocalObject(key, maximumBytes);
   if (mode === 'blob') return readBlobObject(key, maximumBytes);
   throw new Error(`Unsupported VGPU_EXAMPLES_ARTIFACT_STORE: ${mode}`);
 }
 
-async function readLocalObject(key: string, maximumBytes: number): Promise<Uint8Array | undefined> {
+const LOCAL_ROOT_LAYOUTS = ['generated/examples-api', 'apps/docs/generated/examples-api'] as const;
+let cachedLocalRoot: string | undefined;
+
+/**
+ * Locates the generated tree bundled with the deployment.
+ *
+ * `process.cwd()` is the anchor rather than an absolute runtime path: on Vercel the working
+ * directory is the deployed project root, so hardcoding `/var/task` would break `next dev`,
+ * `next start`, tests, and any future runtime. Two layouts are probed because traced files are
+ * placed relative to the file-tracing root, which is the app directory for a standalone build and
+ * the workspace root for a monorepo build -- the sentinel file decides which one is real instead of
+ * assuming. A negative probe is never cached, so a tree that appears later is still picked up.
+ */
+async function localRoot(): Promise<string> {
   const configuredRoot = process.env.VGPU_EXAMPLES_LOCAL_ROOT;
-  const root = resolve(configuredRoot ?? resolve(process.cwd(), 'generated/examples-api'));
-  return readSafeLocalFile(root, key, maximumBytes);
+  if (configuredRoot) return resolve(configuredRoot);
+  if (cachedLocalRoot) return cachedLocalRoot;
+  for (const layout of LOCAL_ROOT_LAYOUTS) {
+    const candidate = resolve(process.cwd(), layout);
+    try {
+      await access(resolve(candidate, LATEST_ARTIFACT_KEY));
+      cachedLocalRoot = candidate;
+      return candidate;
+    } catch {
+      // Wrong layout for this runtime; try the next one.
+    }
+  }
+  return resolve(process.cwd(), LOCAL_ROOT_LAYOUTS[0]);
+}
+
+async function readLocalObject(key: string, maximumBytes: number): Promise<Uint8Array | undefined> {
+  return readSafeLocalFile(await localRoot(), key, maximumBytes);
 }
 
 async function readBlobObject(key: string, maximumBytes: number): Promise<Uint8Array | undefined> {
