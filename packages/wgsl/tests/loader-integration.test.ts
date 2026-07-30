@@ -21,6 +21,26 @@ test("walking stops at workspace root", async () => {
   await writeFile(join(dir, "node_modules", "pkg", "index.wgsl"), "export fn x(){}");
   await expect(resolveShader({ entry: join(dir, "root", "app", "main.wgsl"), validate: false })).rejects.toMatchObject({ code: "VGPU-WGSL-PKG-NOTFOUND" });
 });
+test("uninstalled package error teaches the install fix", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-"));
+  await mkdir(join(dir, "app"), { recursive: true });
+  const entry = join(dir, "app", "main.wgsl");
+  await writeFile(entry, "import { voronoi3d } from '@vgpu/wgsl-std/noise'; fn main(){}");
+  await expect(resolveShader({ entry, validate: false })).rejects.toMatchObject({
+    code: "VGPU-WGSL-PKG-NOTFOUND",
+    message: "Package @vgpu/wgsl-std was not found. Install the package (npm install @vgpu/wgsl-std) or check the specifier",
+  });
+});
+
+test("unknown package export error names the package and points at its exports map", async () => {
+  const dir = await pkgFixture({ exports: { "./shaders/*": "./dist/*.wgsl" }, files: { "dist/foo.wgsl": "export fn x(){}" } });
+  await writeFile(join(dir, "app", "main.wgsl"), "import { x } from 'pkg/missing'; fn main(){x();}");
+  await expect(resolveShader({ entry: join(dir, "app", "main.wgsl"), validate: false })).rejects.toMatchObject({
+    code: "VGPU-WGSL-PKG-NOTFOUND",
+    message: "Package export ./missing was not found in pkg. Check the package's exports map or fix the import subpath",
+  });
+});
+
 test("conditional exports select default", async () => {
   const dir = await pkgFixture({ exports: { ".": { import: "./bad.wgsl", default: "./good.wgsl" } }, files: { "good.wgsl": "export fn x(){}" } });
   await writeFile(join(dir, "app", "main.wgsl"), "import { x } from 'pkg'; fn main(){x();}");
@@ -104,7 +124,7 @@ async function pkgFixture(opts: { exports: unknown; files: Record<string, string
   const dir = await mkdtemp(join(tmpdir(), "vgsl-"));
   await mkdir(join(dir, "app"), { recursive: true });
   await mkdir(join(dir, "node_modules", "pkg"), { recursive: true });
-  await writeFile(join(dir, "node_modules", "pkg", "package.json"), JSON.stringify({ exports: opts.exports }));
+  await writeFile(join(dir, "node_modules", "pkg", "package.json"), JSON.stringify({ name: "pkg", exports: opts.exports }));
   for (const [file, text] of Object.entries(opts.files)) {
     await mkdir(join(dir, "node_modules", "pkg", file.split("/").slice(0, -1).join("/")), { recursive: true });
     await writeFile(join(dir, "node_modules", "pkg", file), text);

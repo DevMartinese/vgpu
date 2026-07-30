@@ -109,6 +109,13 @@ test("missing package errors", async () => {
   await expect(resolveShader({ entry: "/m.wgsl", modules: { "/m.wgsl": "import { x } from 'missing-pkg';" }, validate: false }))
     .rejects.toMatchObject({ code: "VGPU-WGSL-PKG-NOTFOUND" });
 });
+test("missing package error names the scoped package and teaches the packageMap fix", async () => {
+  await expect(resolveShader({ entry: "/m.wgsl", modules: { "/m.wgsl": "import { voronoi3d } from '@vgpu/wgsl-std/noise';" }, validate: false }))
+    .rejects.toMatchObject({
+      code: "VGPU-WGSL-PKG-NOTFOUND",
+      message: "Package @vgpu/wgsl-std was not found. Map it with packageMap or add the module to modules",
+    });
+});
 test("packageMap takes precedence", async () => expect((await resolveShader({ entry: "/m.wgsl", packageMap: { "missing-pkg": "/pkg/index.wgsl" }, modules: { "/m.wgsl": "import { x } from 'missing-pkg'; fn main(){x();}", "/pkg/index.wgsl": "export fn x(){}" }, validate: false })).wgsl).toContain("/pkg/index.wgsl"));
 
 async function nsValue(expr: string): Promise<void> {
