@@ -30,16 +30,16 @@ const packageRedirects = Array.from(new Set(
     .map((record) => record.package),
 )).map((packageName) => ({
   source: `/packages/${legacyPackageSlug(packageName)}`,
-  destination: `/reference#${slugifyPackage(referencePackageName({ package: packageName }))}`,
-  permanent: true,
+  destination: `/docs/reference#${slugifyPackage(referencePackageName({ package: packageName }))}`,
+  permanent: false,
 }));
 
 const symbolRedirects = docsManifest.records
   .filter((record) => record.kind === 'api')
   .map((record) => ({
     source: `/packages/${legacyPackageSlug(record.package)}/${encodeURIComponent(record.symbol)}`,
-    destination: `/reference/${slugifyPackage(referencePackageName(record))}/${encodeURIComponent(record.topic)}#${record.anchor}`,
-    permanent: true,
+    destination: `/docs/reference/${slugifyPackage(referencePackageName(record))}/${encodeURIComponent(record.topic)}#${record.anchor}`,
+    permanent: false,
   }));
 
 /** @type {import('next').NextConfig} */
@@ -59,12 +59,27 @@ const nextConfig = {
   },
   async redirects() {
     return [
-      { source: '/api', destination: '/reference', permanent: true },
-      { source: '/packages', destination: '/reference', permanent: true },
-      { source: '/packages/vgpu/Pass', destination: '/reference/vgpu/effect#effect', permanent: true },
-      { source: '/packages/vgpu/PassOptions', destination: '/reference/vgpu/effect#effectoptions', permanent: true },
-      { source: '/reference/vgpu/pass', destination: '/reference/vgpu/effect', permanent: true },
-      { source: '/getting-started', destination: '/get-started', permanent: true },
+      { source: '/get-started', destination: '/docs/get-started', permanent: false },
+      { source: '/get-started/:path*', destination: '/docs/get-started/:path*', permanent: false },
+      { source: '/concepts', destination: '/docs/concepts', permanent: false },
+      { source: '/concepts/:path*', destination: '/docs/concepts/:path*', permanent: false },
+      { source: '/guides', destination: '/docs/guides', permanent: false },
+      { source: '/guides/:path*', destination: '/docs/guides/:path*', permanent: false },
+      { source: '/reference/vgpu/pass', destination: '/docs/reference/vgpu/effect', permanent: false },
+      { source: '/reference', destination: '/docs/reference', permanent: false },
+      { source: '/reference/:path*', destination: '/docs/reference/:path*', permanent: false },
+      { source: '/cli', destination: '/docs/cli', permanent: false },
+      // ML shipped after the /docs restructure and never got its pair. The topic
+      // markdown links between its pages with logical paths (/ml/browser and
+      // friends, straight out of docs/topics/ml.docs.md), exactly like every other
+      // section does, so without these it is the one section whose cross-links 404.
+      { source: '/ml', destination: '/docs/ml', permanent: false },
+      { source: '/ml/:path*', destination: '/docs/ml/:path*', permanent: false },
+      { source: '/api', destination: '/docs/reference', permanent: false },
+      { source: '/packages', destination: '/docs/reference', permanent: false },
+      { source: '/packages/vgpu/Pass', destination: '/docs/reference/vgpu/effect#effect', permanent: false },
+      { source: '/packages/vgpu/PassOptions', destination: '/docs/reference/vgpu/effect#effectoptions', permanent: false },
+      { source: '/getting-started', destination: '/docs/get-started', permanent: false },
       ...packageRedirects,
       ...symbolRedirects,
     ];

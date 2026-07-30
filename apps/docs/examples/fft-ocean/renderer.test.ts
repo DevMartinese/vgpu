@@ -23,7 +23,9 @@ afterEach(() => {
 
 test('dispose-before-ready destroys a late GPU and never starts the ocean graph', async () => {
   vi.stubGlobal('window', { devicePixelRatio: 1, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-  const pending = deferred<{ dispose(): void; surface: ReturnType<typeof vi.fn>; frame: { loop: ReturnType<typeof vi.fn> } }>();
+  // Shape of the gpu double resolved below: 0.2.0 has no `gpu.surface` /
+  // `gpu.frame.loop` — the free functions are routed to `fns` by the mock above.
+  const pending = deferred<{ dispose(): void; fns: { surface: ReturnType<typeof vi.fn>; frameLoop: ReturnType<typeof vi.fn> } }>();
   mocks.init.mockReturnValueOnce(pending.promise);
   const canvas = { getBoundingClientRect: () => ({ width: 100, height: 50 }) } as HTMLCanvasElement;
   const renderer = createRenderer({ canvas });

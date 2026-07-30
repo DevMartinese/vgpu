@@ -134,6 +134,11 @@ module.exports = {
         },
       },
       fontFamily: {
+        // Geist Sans everywhere, Geist Mono for code. There is deliberately no
+        // `serif` family: Geist Serif was trialled as a display face for the
+        // wordmark, hero tagline and Prompt/Skill selector and then dropped, so
+        // the font, the CSS variable and this entry all came back out together.
+        // The .otf is still in app/fonts/ if it is ever wanted again.
         sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
         mono: ['var(--font-geist-mono)', 'Menlo', 'Monaco', 'monospace'],
       },

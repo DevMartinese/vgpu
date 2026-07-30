@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import type { NavItem } from '@/lib/nav';
+import { docsHref, type NavItem } from '@/lib/nav';
 
 interface BreadcrumbsProps {
   items: NavItem[];
+  docs?: boolean;
 }
 
-export function Breadcrumbs({ items }: BreadcrumbsProps) {
+export function Breadcrumbs({ items, docs = false }: BreadcrumbsProps) {
   if (items.length === 0) return null;
 
   return (
@@ -18,7 +19,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
             {isLast ? (
               <span className="text-gray-11">{item.title}</span>
             ) : (
-              <Link href={item.href} className="transition-colors hover:text-blue-9">
+              <Link href={docs ? docsHref(item.href) : item.href} className="transition-colors hover:text-blue-9">
                 {item.title}
               </Link>
             )}

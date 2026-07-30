@@ -3,11 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { navSections, type NavGroup, type NavItem, type NavSection } from '@/lib/nav';
+import { docsHref, navSections, type NavGroup, type NavItem, type NavSection } from '@/lib/nav';
 import { PackageNav } from './package-nav';
+import { Wordmark } from './wordmark';
 
 export function Navigation() {
   const pathname = usePathname();
+  const navPathname = pathname.startsWith('/docs') ? pathname.slice('/docs'.length) || '/' : pathname;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -34,18 +36,15 @@ export function Navigation() {
         }`}
       >
         <div className="h-full flex flex-col">
-          <div className="h-16 px-6 flex items-center border-b border-gray-4">
-            <Link
-              href="/"
-              className="flex items-center gap-3 group"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              <svg className="w-5 h-5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
-                <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
-              </svg>
-              <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
+          {/* No border-b here, and none on the GitHub footer below: those two
+              rules were what boxed the menu in with a line top and bottom. The
+              aside keeps its border-r, which is the sidebar's own edge. */}
+          <div className="h-16 px-6 flex items-center">
+            {/* Dropped the `group` class along with the inlined mark: nothing
+                inside was using group-hover. */}
+            <Wordmark onClick={() => setMobileMenuOpen(false)}>
               <span className="text-xs text-gray-9 bg-gray-2 px-1.5 py-0.5 rounded">Docs</span>
-            </Link>
+            </Wordmark>
           </div>
 
           <nav className="flex-1 overflow-y-auto py-6 px-3">
@@ -53,14 +52,17 @@ export function Navigation() {
               <NavSectionBlock
                 key={section.title}
                 section={section}
-                pathname={pathname}
+                pathname={navPathname}
                 onNavigate={() => setMobileMenuOpen(false)}
-                className={idx > 0 ? 'mt-4' : ''}
+                /* mt-3, not mt-4: the section rows grew from py-1 to py-1.5 for a
+                   more forgiving target, and the gap between sections gives that
+                   height back so the menu stays the same length overall. */
+                className={idx > 0 ? 'mt-3' : ''}
               />
             ))}
           </nav>
 
-          <div className="p-4 border-t border-gray-4">
+          <div className="p-4">
             <a
               href="https://github.com/vercel-labs/vgpu"
               target="_blank"
@@ -102,14 +104,16 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
     section.href && pathname === section.href ? 'text-gray-12' : 'text-gray-9'
   }`;
 
-  if (section.href && section.groups.length === 0) {
+  if (section.href === '/examples' || (section.href && section.groups.length === 0)) {
     return (
       <div className={className}>
         <Link
-          href={section.href}
+          href={docsHref(section.href)}
           onClick={onNavigate}
           aria-current={pathname === section.href ? 'page' : undefined}
-          className={`${titleClassName} block px-3 py-1 hover:text-gray-12`}
+          /* Same full-row target and hover as the collapsible sections below,
+             so a flat section does not feel different to hit. */
+          className={`${titleClassName} block rounded-md px-3 py-1.5 transition-colors hover:bg-gray-1 hover:text-gray-12`}
         >
           {section.title}
         </Link>
@@ -119,13 +123,28 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
 
   return (
     <div className={className}>
-      <div className="mb-1 flex items-center justify-between pl-3 pr-1">
+      {/* The whole row is the target, not just the few characters of the label.
+          The row's left padding moved onto the link/button and it flexes to fill
+          the width, so the gap either side of the text hits it too; the row only
+          keeps pr-1 to hold the chevron off the edge. Row navigates (or toggles,
+          for a section with no page of its own), chevron collapses — they stay
+          siblings rather than nesting, since a button inside a link is invalid
+          and would swallow the collapse click. */}
+      <div className="group mb-0.5 flex items-center rounded-md transition-colors hover:bg-gray-1">
         {section.href ? (
-          <Link href={section.href} onClick={onNavigate} className={`${titleClassName} hover:text-gray-12`}>
+          <Link
+            href={docsHref(section.href)}
+            onClick={onNavigate}
+            className={`${titleClassName} flex-1 py-1.5 pl-3 hover:text-gray-12`}
+          >
             {section.title}
           </Link>
         ) : (
-          <button type="button" onClick={() => setManualOpen(!open)} className={`${titleClassName} hover:text-gray-12`}>
+          <button
+            type="button"
+            onClick={() => setManualOpen(!open)}
+            className={`${titleClassName} flex-1 py-1.5 pl-3 text-left hover:text-gray-12`}
+          >
             {section.title}
           </button>
         )}
@@ -134,7 +153,13 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
           onClick={() => setManualOpen(!open)}
           aria-expanded={open}
           aria-label={`${open ? 'Collapse' : 'Expand'} ${section.title}`}
-          className="rounded p-1 text-gray-8 transition-colors hover:bg-gray-1 hover:text-gray-11"
+          /* gray-3, not gray-1: the row underneath is already gray-1 on hover,
+             so the chevron needs a step up to still read as its own target.
+             pr-2 rather than the row carrying pr-1 — that padding used to be a
+             4px dead strip at the very right edge of the row that hit nothing.
+             Folding it into the button keeps the icon at the same inset and
+             makes the row clickable edge to edge. */
+          className="rounded p-1 pr-2 text-gray-8 transition-colors hover:bg-gray-3 hover:text-gray-11"
         >
           <svg
             viewBox="0 0 12 12"

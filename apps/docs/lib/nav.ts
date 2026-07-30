@@ -12,6 +12,24 @@ import {
   type ReferenceTopic,
 } from '@/lib/manifest';
 
+/**
+ * Turns a logical path into the URL it is served at.
+ *
+ * Nav data, markdown frontmatter and the docs manifest all store paths WITHOUT the
+ * `/docs` segment; the prefix is applied exactly once, here, at render time. This
+ * used to be copy-pasted into eight components and pages, which is how the two
+ * variants drifted apart and started producing 404s.
+ *
+ * `/examples` is the one subtree that is not under `/docs` — it has its own
+ * top-level route. Matching the whole subtree, not the bare `/examples` string, is
+ * what keeps an individual example (the Examples section is the CLI page's
+ * `Previous`, so it renders as `/examples/air-painting`) from being sent to
+ * `/docs/examples/...`.
+ */
+export function docsHref(href: string) {
+  return href.startsWith('/examples') ? href : `/docs${href}`;
+}
+
 export type NavBadge = 'Advanced';
 
 export interface NavItem {
@@ -113,21 +131,6 @@ export const navSections: NavSection[] = [
     })).filter((group) => group.items.length > 0),
   },
   {
-    title: 'ML',
-    href: '/ml',
-    groups: [
-      {
-        title: '',
-        items: [
-          { title: 'Overview', href: '/ml' },
-          { title: 'Quickstart: Browser', href: '/ml/browser' },
-          { title: 'Quickstart: Node', href: '/ml/node' },
-          { title: 'Buffers & ownership', href: '/ml/buffers' },
-        ],
-      },
-    ],
-  },
-  {
     title: 'Examples',
     href: '/examples',
     groups: [
@@ -141,6 +144,21 @@ export const navSections: NavSection[] = [
     title: 'CLI',
     href: '/cli',
     groups: [],
+  },
+  {
+    title: 'ML',
+    href: '/ml',
+    groups: [
+      {
+        title: '',
+        items: [
+          { title: 'Overview', href: '/ml' },
+          { title: 'Quickstart: Browser', href: '/ml/browser' },
+          { title: 'Quickstart: Node', href: '/ml/node' },
+          { title: 'Buffers & ownership', href: '/ml/buffers' },
+        ],
+      },
+    ],
   },
   {
     title: 'API Reference',

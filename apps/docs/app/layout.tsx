@@ -6,12 +6,12 @@ import './globals.css';
 export const metadata: Metadata = {
   metadataBase: new URL('https://github.com/vercel-labs/vgpu'),
   title: {
-    default: 'vgpu Docs',
-    template: '%s | vgpu',
+    default: 'vgpu',
+    template: 'vgpu | %s',
   },
   description: 'Agentic-first WebGPU primitives for Node, browsers, and serverless runtimes.',
   openGraph: {
-    title: 'vgpu Docs',
+    title: 'vgpu',
     description: 'Small, composable WebGPU primitives for rendering, WGSL tooling, and adapters.',
     url: 'https://github.com/vercel-labs/vgpu',
     siteName: 'vgpu',
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'vgpu Docs',
+    title: 'vgpu',
     description: 'Small, composable WebGPU primitives for rendering, WGSL tooling, and adapters.',
   },
 };
@@ -35,7 +35,10 @@ export default async function RootLayout({
       : null;
 
   return (
-    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html
+      lang="en"
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+    >
       <body className="bg-black text-gray-12 font-sans antialiased">
         {children}
         {DevInstrumentation ? <DevInstrumentation /> : null}
