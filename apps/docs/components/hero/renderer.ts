@@ -2,31 +2,7 @@ import type { Effect, Frame, Gpu, Surface, Target, Timer, TimerSpan } from 'vgpu
 
 import bakeWgsl from './bake.wgsl';
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
-import { shadeVariantSource, variantNeedsF16 } from './precision.mjs';
 import shadeWgsl from './shade.wgsl';
-
-/**
- * What a `*.wgsl` import actually is.
- *
- * The webpack/turbopack loader emits the `{ version, wgsl }` artifact, while the
- * Node resolver (`debug-render.mjs`) hands back a bare string — and `gpu.effect`
- * takes either, which is why the difference normally goes unnoticed. It stops
- * being invisible the moment you want to READ the source, so both shapes are
- * handled here rather than assumed.
- */
-type ShaderModule = string | { readonly version: 1; readonly wgsl: string };
-
-/**
- * One variant's shade source, returned in the same shape it came in.
- *
- * The rewrites themselves live in `precision.mjs` so the headless harness runs
- * the exact same specialization; everything they can get wrong throws there.
- */
-function variantSource(source: ShaderModule, variant: DiskNoiseVariant): ShaderModule {
-  const text = typeof source === 'string' ? source : source.wgsl;
-  const rewritten = shadeVariantSource(text, variant);
-  return typeof source === 'string' ? rewritten : { ...source, wgsl: rewritten };
-}
 
 /**
  * Disk look, uploaded verbatim as the `disk` uniform (see disk.wgsl `DiskLook`).
@@ -100,45 +76,11 @@ export interface HeroSettings {
    * shade.wgsl for the sign convention and the symmetry precondition.
    */
   mouseYaw: number;
-  /**
-   * Which shade variant is compiled and drawn. Perf A/B only — see
-   * `precision.mjs` and `measure()`.
-   *
-   * NOT a look setting, and not neutral either: `analytic` vs `tiled` draw the
-   * same noise from different realizations, so the filaments rearrange when you
-   * flip between them (GBUFFER.md, "Why the lattice has a seed"), while
-   * `tiled-f16` draws the SAME realization at half precision. A variant the
-   * device cannot provide falls back to `tiled` (see `resolveVariant`).
-   */
-  diskNoise: DiskNoiseVariant;
   /** Owned by disk.wgsl. */
   disk: DiskLook;
   /** Owned by stars.wgsl. */
   stars: StarLook;
 }
-
-/**
- * The shade variants the ONE shade source can be specialized into.
- *
- * `tiled` is what ships (one trilinear fetch into the baked lattice);
- * `analytic` is the pre-optimization control, eight inline hashes per sample,
- * kept verbatim in disk.wgsl so "before" can be measured on the reader's own
- * machine instead of taken on faith; `tiled-f16` is `tiled` with the noise and
- * emission arithmetic narrowed to half precision (disk.wgsl's alias block).
- *
- * All three are rewrites of the same file — never separate shaders. See
- * `precision.mjs`.
- */
-export type DiskNoiseVariant = 'analytic' | 'tiled' | 'tiled-f16';
-
-/**
- * Panel order: control, shipped, spike — so the A/B reads left to right.
- *
- * This is what CAN exist. What a given device can actually run is
- * `HeroRenderer.availableVariants()`, which drops `tiled-f16` when the adapter
- * lacks `shader-f16`.
- */
-export const DISK_NOISE_VARIANTS: readonly DiskNoiseVariant[] = ['analytic', 'tiled', 'tiled-f16'];
 
 /**
  * Defaults picked by the user in the panel (via "copy JSON"). Keep them in sync
@@ -155,7 +97,6 @@ export function defaultHeroSettings(): HeroSettings {
     centerY: 0,
     debugView: 0,
     diskLayers: 2,
-    diskNoise: 'tiled',
     // ~8.6 degrees each way: enough to read as a living, turnable scene without
     // ever swinging the disk far enough to look like a camera cut.
     mouseYaw: 0.15,
@@ -219,9 +160,9 @@ const MEASURE_FRAMES = 180;
 /**
  * Frames rendered and thrown away before sampling starts.
  *
- * Covers the pipeline switch, any pending re-bake, and the first-frame cost of a
- * freshly bound variant. It is also why `measure()` can be pressed immediately
- * after moving a geometry slider without the bake landing in the samples.
+ * Covers any pending re-bake and the first-frame cost of a freshly bound
+ * pipeline. It is also why `measure()` can be pressed immediately after moving a
+ * geometry slider without the bake landing in the samples.
  */
 const MEASURE_WARMUP = 30;
 /** Hard cap on one measurement, so a slow machine still answers promptly. */
@@ -259,11 +200,6 @@ export interface HeroRendererOptions {
    * requests exactly the same device it always did. Requesting a feature the
    * adapter lacks makes `init` throw, so this is best-effort: the renderer
    * checks adapter support first and silently falls back to wall-clock.
-   *
-   * It also gates `shader-f16`, and therefore the existence of the `tiled-f16`
-   * variant, for the same reason: half precision is a SPIKE being measured, not
-   * something the shipped hero has decided to use, so production must not even
-   * request the feature. Flip the default only after the numbers say to.
    */
   profiling?: boolean;
 }
@@ -280,14 +216,6 @@ export interface MeasureOptions {
 
 /** One `measure()` result. Times are milliseconds. */
 export interface MeasureResult {
-  /**
-   * Which pipeline was actually timed.
-   *
-   * Resolved against the pipelines that EXIST, not copied from the settings: on
-   * a device without `shader-f16` selecting `tiled-f16` draws `tiled`, and a
-   * result labelled with the variant that was merely requested would be a lie.
-   */
-  variant: DiskNoiseVariant;
   /** Frame intervals behind the stats. */
   samples: number;
   /** Median wall-clock interval between presented frames. The headline number. */
@@ -299,16 +227,16 @@ export interface MeasureResult {
    * GPU time of the shade pass alone, when `timestamp-query` was available.
    *
    * This is the number that survives a vsync cap, and it excludes the bake, the
-   * present and all CPU-side submit cost — so it is also the one that isolates
-   * what the noise change actually did.
+   * present and all CPU-side submit cost — so it is the one that isolates what
+   * a change to the shade shader actually did.
    */
   gpuMedianMs?: number;
   gpuMeanMs?: number;
   method: 'wall-clock' | 'wall-clock + timestamp-query';
   /**
    * Wall-clock median sits on a display refresh interval while the GPU number is
-   * comfortably below it: the frame is waiting for the display, so the wall-clock
-   * comparison between variants is meaningless. Trust `gpuMedianMs` instead.
+   * comfortably below it: the frame is waiting for the display, so wall-clock
+   * cannot see a change in the shader at all. Trust `gpuMedianMs` instead.
    */
   vsyncCapped: boolean;
   /** Physical pixels actually shaded, for the record. */
@@ -320,17 +248,8 @@ export interface HeroRenderer {
   /** Re-runs the one-shot geodesic bake with the current settings. */
   rebake(): void;
   /**
-   * The variants this device actually compiled, in `DISK_NOISE_VARIANTS` order.
-   *
-   * Only meaningful after `ready` resolves — before that the pipelines do not
-   * exist yet and it returns an empty array. The panel builds its dropdown from
-   * this, which is what keeps `tiled-f16` off machines that cannot run it
-   * instead of offering an option that silently draws something else.
-   */
-  availableVariants(): readonly DiskNoiseVariant[];
-  /**
    * Times the REAL frame loop for a few hundred frames and resolves with the
-   * stats. Used by the `?debug` panel to A/B `settings.diskNoise`.
+   * stats. Used by the `?debug` panel to time a change to the shade shader.
    *
    * Measures whatever is currently selected — it never changes settings itself,
    * so the caller stays in control of what is being compared. Rejects if a
@@ -346,7 +265,6 @@ export interface HeroRenderer {
  * and its mere existence forces the render loop to run (see `reconcileLoop`).
  */
 interface Measurement {
-  readonly variant: DiskNoiseVariant;
   readonly targetFrames: number;
   readonly warmupFrames: number;
   readonly maxMs: number;
@@ -369,20 +287,8 @@ type Output = Surface | Target;
 
 interface Effects {
   bake: Effect;
-  /**
-   * One compiled shade pipeline per AVAILABLE variant, all built and warmed at
-   * init so switching in the panel is instant and the first measured frame never
-   * pays for a shader compile.
-   *
-   * Independently compiled pipelines rather than one branching pipeline is what
-   * makes the A/B honest — see `precision.mjs` and the `const` gate in disk.wgsl.
-   *
-   * Partial because `tiled-f16` only exists when the adapter offers
-   * `shader-f16` and the renderer was created with `profiling`. `tiled` is
-   * always present and is the fallback for a variant that is not: nothing in the
-   * frame path may assume a key exists (see `resolveVariant`).
-   */
-  shade: Partial<Record<DiskNoiseVariant, Effect>>;
+  /** Compiled and warmed at init, so the first measured frame never pays for it. */
+  shade: Effect;
   /**
    * Tiled 3D value-noise lattice for disk.wgsl, plus its sampler.
    *
@@ -446,12 +352,6 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   // `timestampsAvailable` is decided at init from the adapter's feature list;
   // `timer` is created lazily on the first measurement and owned until dispose.
   let timestampsAvailable = false;
-  /**
-   * Whether `shader-f16` was requested AND granted, i.e. whether the `tiled-f16`
-   * pipeline exists. Decided at init from the adapter's feature list, exactly
-   * like `timestampsAvailable`, and only ever true under `profiling`.
-   */
-  let f16Available = false;
   let timer: Timer | undefined;
   let unsubscribeTimer: (() => void) | undefined;
   let measurement: Measurement | undefined;
@@ -684,9 +584,6 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     }
     return new Promise<MeasureResult>((resolve, reject) => {
       const m: Measurement = {
-        // The variant that will actually DRAW, not the one selected: they differ
-        // when the settings ask for a pipeline this device could not build.
-        variant: resolveVariant(effects!, settings),
         targetFrames: Math.max(8, Math.round(measureOptions?.frames ?? MEASURE_FRAMES)),
         warmupFrames: Math.max(0, Math.round(measureOptions?.warmupFrames ?? MEASURE_WARMUP)),
         maxMs: Math.max(200, measureOptions?.maxMs ?? MEASURE_MAX_MS),
@@ -811,31 +708,22 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     // Device features have to be requested at device creation, and requesting one
     // the adapter lacks makes init() throw — so ask the adapter first. Only the
     // ?debug panel sets `profiling`, which keeps the shipped hero on exactly the
-    // device it has always created: no timestamps, no f16, no `tiled-f16`.
+    // device it has always created: no timestamps.
+    //
+    // Probed rather than try/catch-and-retry: an init() that throws would already
+    // have logged a device-creation failure.
     if (options.profiling) {
       try {
         const probe = await navigator.gpu?.requestAdapter();
         timestampsAvailable = probe?.features.has('timestamp-query') ?? false;
-        f16Available = probe?.features.has('shader-f16') ?? false;
-      } catch { timestampsAvailable = false; f16Available = false; }
+      } catch { timestampsAvailable = false; }
     }
     if (disposed) return;
-    // Probed rather than try/catch-and-retry: one adapter query answers both, and
-    // an init() that throws would already have logged a device-creation failure.
-    const requiredFeatures: GPUFeatureName[] = [];
-    if (timestampsAvailable) requiredFeatures.push('timestamp-query');
-    if (f16Available) requiredFeatures.push('shader-f16');
-    const nextGpu = await init(requiredFeatures.length > 0 ? { requiredFeatures } : {});
+    const nextGpu = await init(timestampsAvailable ? { requiredFeatures: ['timestamp-query'] } : {});
     if (disposed) { nextGpu.dispose(); return; }
     gpu = nextGpu;
     surface = gpu.surface(options.canvas, { dpr: [1, MAX_DPR] });
-    // The adapter can offer a feature the DEVICE then declines, so the pipeline
-    // list is built from what the device actually reports — asking the device is
-    // the only claim that cannot be wrong when `gpu.effect` compiles the f16
-    // source. Without it the variant is simply not built, and the panel never
-    // offers it (`availableVariants`).
-    f16Available = f16Available && gpu.device.features.has('shader-f16');
-    effects = createEffects(gpu, 'black-hole-live', f16Available ? DISK_NOISE_VARIANTS : DISK_NOISE_VARIANTS.filter((variant) => !variantNeedsF16(variant)));
+    effects = createEffects(gpu, 'black-hole-live');
     targets = createTargets(gpu, surface.size, 'black-hole-live');
     setBindings(effects, targets);
     await prewarm(effects, targets, surface);
@@ -884,28 +772,13 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     throw error;
   });
 
-  const availableVariants = (): readonly DiskNoiseVariant[] =>
-    effects === undefined ? [] : DISK_NOISE_VARIANTS.filter((variant) => effects!.shade[variant] !== undefined);
-
-  return { ready, rebake, availableVariants, measure: measureFrameTime, dispose };
+  return { ready, rebake, measure: measureFrameTime, dispose };
 }
 
-/**
- * @param variants which shade variants to compile. Always contains `tiled`; the
- * caller drops the ones this device cannot build (see `initialize`).
- */
-function createEffects(gpu: Gpu, label: string, variants: readonly DiskNoiseVariant[]): Effects {
-  const shade: Partial<Record<DiskNoiseVariant, Effect>> = {};
-  for (const variant of variants) {
-    // One `gpu.effect` per variant, each from its own rewritten source. The
-    // rewrite throws instead of returning the input unchanged, so a broken
-    // substitution fails HERE, at init, rather than producing two pipelines that
-    // measure the same program (see precision.mjs).
-    shade[variant] = gpu.effect(variantSource(shadeWgsl, variant), { label: `${label}-shade-${variant}` });
-  }
+function createEffects(gpu: Gpu, label: string): Effects {
   return {
     bake: gpu.effect(bakeWgsl, { label: `${label}-bake` }),
-    shade,
+    shade: gpu.effect(shadeWgsl, { label: `${label}-shade` }),
     // Built and uploaded here, synchronously, before the first bind: the
     // lattice is a pure function of its size, so there is nothing to await and
     // nothing that can change later.
@@ -936,20 +809,8 @@ function destroyTarget(target: Target | undefined): void {
 function setBindings(effects: Effects, targets: Targets): void {
   const [hit1, hit2, sky, view] = targets.gbuffer.colors;
   effects.bake.set({ bake: { resolution: targets.gbuffer.size } });
-  // EVERY variant gets the same bind group: each pipeline owns its own, and the
-  // ones that are not currently drawing still have to be ready to draw instantly.
-  //
-  // The analytic variant never reads `noiseVolume`, and binding it anyway is
-  // deliberate: reflection is built from the shader's DECLARATIONS, not from its
-  // uses, so the binding survives the dead-code elimination of the tiled path
-  // and `set` would throw on an unknown name if we skipped it. Verified on every
-  // variant — do not "optimize" this into a conditional.
-  //
-  // The uniform layouts are identical across variants by construction: f16 stops
-  // at the module boundary, so `Shade`, `DiskLook` and `StarLook` stay f32 in all
-  // three (see disk.wgsl's alias block).
-  for (const shade of Object.values(effects.shade)) {
-    shade.set({
+  {
+    effects.shade.set({
       gHit1: hit1,
       gHit2: hit2,
       gSky: sky,
@@ -985,11 +846,7 @@ function setShadeUniforms(
   time: number,
   sceneYaw: number,
 ): void {
-  // Only the variant that is about to draw. The other one is re-armed on the
-  // frame after a switch, which is soon enough: `renderFrame` always sets
-  // uniforms before it draws, so the newly selected pipeline can never draw with
-  // a stale clock.
-  activeShade(effects, settings).set({
+  effects.shade.set({
     shade: {
       resolution: targets.gbuffer.size,
       time,
@@ -1035,7 +892,6 @@ function summarizeMeasurement(m: Measurement, resolution: readonly [number, numb
   const hasGpu = m.gpuSamples.length > 0;
   const gpuMedianMs = hasGpu ? median(m.gpuSamples) : undefined;
   return {
-    variant: m.variant,
     samples: m.frameSamples.length,
     medianMs,
     meanMs: mean(m.frameSamples),
@@ -1053,32 +909,12 @@ function summarizeMeasurement(m: Measurement, resolution: readonly [number, numb
   };
 }
 
-/**
- * The variant that will actually be drawn.
- *
- * Selecting a variant this device could not compile (`tiled-f16` without
- * `shader-f16`) draws `tiled` instead of throwing — but everything that REPORTS
- * a variant goes through here, so a measurement is never labelled with a
- * pipeline that did not run.
- */
-function resolveVariant(effects: Effects, settings: HeroSettings): DiskNoiseVariant {
-  return effects.shade[settings.diskNoise] ? settings.diskNoise : 'tiled';
-}
-
-/** The shade pipeline the current settings select. */
-function activeShade(effects: Effects, settings: HeroSettings): Effect {
-  return effects.shade[resolveVariant(effects, settings)]!;
-}
-
 async function prewarm(effects: Effects, targets: Targets, output: Output): Promise<void> {
   await Promise.all([
     effects.bake.compile(targets.gbuffer),
-    // EVERY shade variant, compiled against the OUTPUT format (the swap chain),
-    // not an HDR target: shade is the last pass and writes display-referred
-    // unorm. Warming the variant that is not selected costs one extra compile at
-    // init and buys two things: flipping the panel switch never stutters, and a
-    // measurement started right after a flip is not timing a compile.
-    ...Object.values(effects.shade).map((shade) => shade.compile({ colors: [output.format] })),
+    // Compiled against the OUTPUT format (the swap chain), not an HDR target:
+    // shade is the last pass and writes display-referred unorm.
+    effects.shade.compile({ colors: [output.format] }),
   ]);
 }
 
@@ -1094,8 +930,7 @@ function renderChain(
 ): void {
   if (bake) frame.pass({ target: targets.gbuffer, clear: CLEAR }, (pass) => pass.draw(effects.bake));
   // Two passes, not three: shade reads the G-buffer and writes the swap chain.
-  const shade = activeShade(effects, settings);
-  frame.pass({ target: output, clear: CLEAR, timer }, (pass) => pass.draw(shade));
+  frame.pass({ target: output, clear: CLEAR, timer }, (pass) => pass.draw(effects.shade));
 }
 
 /** Wall clock for the bake throttle; independent of the animation clock. */

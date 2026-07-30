@@ -33,16 +33,6 @@
 //   --stars.<key> <v>    any StarLook field (brightness, density, twinkle, ...)
 //   --noiseSize <n>      edge of the tiled 3D noise lattice (default 64; try 128 to
 //                        A/B whether the tiling repeats visibly)
-//   --diskNoise <which>  shade variant: `tiled` (default, one trilinear fetch),
-//                        `analytic` (the pre-optimization control, eight inline
-//                        hashes) or `tiled-f16` (tiled with the noise/emission
-//                        arithmetic in half precision; needs the `shader-f16`
-//                        device feature and fails loudly without it). Same A/B the
-//                        ?debug panel exposes; note that analytic draws a
-//                        DIFFERENT realization, so the filaments rearrange between
-//                        it and the other two (see GBUFFER.md), while `tiled-f16`
-//                        draws the same realization and should differ only by
-//                        rounding.
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
 //   --json               print the resolved settings and per-image stats as JSON
 //
@@ -58,7 +48,6 @@ import { resolveShader } from '@vgpu/wgsl/runtime';
 import { init } from 'vgpu/node';
 
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
-import { SHADE_VARIANTS, shadeVariantSource, variantNeedsF16 } from './precision.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -114,7 +103,7 @@ const VIEWS = {
 const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
 
 function parseArgs(argv) {
-  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE, diskNoise: 'tiled' };
+  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE };
   const patch = {};
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -133,11 +122,6 @@ function parseArgs(argv) {
     }
     if (key === 'time') { options.time = Number(value); continue; }
     if (key === 'noiseSize') { options.noiseSize = Math.max(2, Number(value) | 0); continue; }
-    if (key === 'diskNoise') {
-      if (!SHADE_VARIANTS.includes(value)) throw new Error(`--diskNoise must be one of ${SHADE_VARIANTS.join(', ')}, got '${value}'`);
-      options.diskNoise = value;
-      continue;
-    }
     // Scene yaw vs camera yaw: `--yaw t` rotates the scene in the frame pass and
     // must produce the same image as `--bakeYaw -t`, which rotates the camera and
     // re-bakes. That equivalence is the whole justification for the feature.
@@ -215,17 +199,7 @@ async function main() {
   ]);
 
   await mkdir(options.out, { recursive: true });
-  // The f16 variant needs the feature AT DEVICE CREATION, so the request depends
-  // on which variant was asked for. Deliberately NOT best-effort here: a harness
-  // that quietly rendered f32 while the filename said f16 would poison the RMSE
-  // comparison this tool exists to produce. The browser renderer does the
-  // opposite (silently drops the variant), because there the fallback path is the
-  // product and the panel reports what it actually built.
-  const needsF16 = variantNeedsF16(options.diskNoise);
-  const gpu = await init(needsF16 ? { requiredFeatures: ['shader-f16'] } : {});
-  if (needsF16 && !gpu.device.features.has('shader-f16')) {
-    throw new Error(`--diskNoise ${options.diskNoise} needs the "shader-f16" device feature, which this adapter does not provide`);
-  }
+  const gpu = await init();
   const [width, height] = options.size;
 
   const gbuffer = gpu.target({
@@ -238,11 +212,9 @@ async function main() {
   const output = gpu.target({ size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
 
   const bake = gpu.effect(bakeWgsl, { label: 'hero-debug-bake' });
-  // The SAME specialization the browser renderer applies (precision.mjs, one
-  // shared module — not a copy), so a PNG from this harness and a frame from the
-  // page are the same program. Every rewrite in there asserts what it matched: a
-  // silent no-op would render `tiled` and label it `analytic` or `tiled-f16`.
-  const shade = gpu.effect(shadeVariantSource(shadeWgsl, options.diskNoise), { label: `hero-debug-shade-${options.diskNoise}` });
+  // The same shade.wgsl the browser renderer compiles, from the same imports:
+  // a PNG from this harness and a frame from the page are the same program.
+  const shade = gpu.effect(shadeWgsl, { label: 'hero-debug-shade' });
 
   // Same lattice bytes the browser uploads (shared module, not a copy), so the
   // harness renders the disk the page renders. Node/Dawn takes the 3D texture
@@ -305,10 +277,10 @@ async function main() {
   gpu.dispose();
 
   if (options.json) {
-    console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, diskNoise: options.diskNoise, settings, images: results }, null, 2));
+    console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, settings, images: results }, null, 2));
     return;
   }
-  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.diskNoise === 'analytic' ? 'analytic' : `${options.noiseSize}^3 ${options.diskNoise}`} -> ${options.out}`);
+  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
   for (const result of results) {
     console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
   }

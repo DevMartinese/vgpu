@@ -33,7 +33,6 @@ handful of ALU ops. See [Tone mapping](#tone-mapping-lives-at-the-end-of-shadewg
 | ~~`composite.wgsl`~~ | — | **deleted** — absorbed into `shade.wgsl::tonemap` |
 | `debug-render.mjs` | shared harness | run it, extend it if useful |
 | `noise-volume.mjs` | shared (renderer + harness) | only to change the lattice |
-| `precision.mjs` | shared (renderer + harness) | only to add a shade variant |
 
 Two agents can work at the same time: the disk agent touches only `disk.wgsl`,
 the stars agent only `stars.wgsl`. Neither needs `shade.wgsl` or `renderer.ts`.
@@ -278,7 +277,7 @@ pixel is now one trilinear fetch instead of eight inline hashes (~215 ALU).
 Tiling re-rolls which *realization* of the noise you get, because wrapping the
 radial axis re-slices every octave. That is not a small effect: the disk's
 large-scale contrast is set by the `flow` layer, which spans only about three
-lattice planes, so it is a very small sample. Re-rolling the **analytic** noise
+lattice planes, so it is a very small sample. Re-rolling the inline-hash noise
 of the previous implementation (shifting every octave's z by a constant) moves
 the frame's masked luma std over 0.092..0.117 and the blown-out-crest fraction
 over 0.61%..2.13% — and the look the hero shipped with sits at the very top of
@@ -290,143 +289,54 @@ it was not selected on. If you ever regenerate the volume, expect to re-pick it,
 and expect the filaments to be *arranged* differently — that is realization
 noise, not a regression.
 
-##### Measuring it yourself — the runtime A/B
+##### Measuring it yourself
 
 The tiled volume was landed WITHOUT a real-GPU measurement (the machine it was
 developed on has no GPU: everything ran on lavapipe, where a trilinear fetch is
-eight dependent scalar loads and the tiled path is ~28% *slower*). So every
-implementation lives in the same source and the `?debug` panel can switch and
-time them, under **perf A/B (disk noise + precision)**:
+eight dependent scalar loads and the tiled path is ~28% *slower*). It has one
+now, and the number is why this section is short: on a real GPU the lattice is
+**1.24x faster** than the eight inline hashes it replaced (4.10 ms → 3.30 ms of
+shade-pass GPU time). Both implementations used to live in this file behind a
+`const` gate so the `?debug` panel could switch and time them; once the number
+came in, the loser was deleted. Same story for a half-precision arm, which came
+out **1.18x slower** than plain f32 (3.88 ms) and is likewise gone.
+
+What remains is the timer, under **perf (frame time)** in the `?debug` panel:
 
 | Control | What it does |
 |---|---|
-| **`▶ measure (A/B all)`** | The whole harness, one click. Times ~180 frames of the real loop for every arm the device can run, back to back, then prints the chained verdict (`analytic → tiled` is the volume win, `tiled → tiled+f16` is the precision one) plus the full JSON, and puts that JSON on the clipboard. Nothing else needs to be touched to produce a reportable number. |
-| `last measurement` | The verdict, with `(copied)` when the clipboard has it. If the page lost focus during the run the browser refuses the write, so it says `(click the page to copy)` and the next click anywhere does it. |
-| `one variant at a time` (closed) | `shade variant` switches arms — `analytic (control)` = eight inline hashes (the pre-optimization code, verbatim); `tiled volume` = one trilinear fetch (ships); `tiled + f16` = the tiled path with the noise/emission arithmetic in half precision. Instant, no re-bake. `measure this variant` times only that one. For LOOKING at an arm; two arms measured minutes apart, at different thermal states, are not a comparison. |
+| **`▶ measure frame time`** | Times ~180 frames of the real loop, prints the full JSON and puts it on the clipboard. One click, nothing to configure. |
+| `last measurement` | The headline, with `(copied)` when the clipboard has it. If the page lost focus during the run the browser refuses the write, so it says `(click the page to copy)` and the next click anywhere does it. |
 
-What lands on the clipboard is the pasteable form of the whole run: the verdict
-string, every arm's full `MeasureResult` (both medians, both means, sample count,
-method, resolution), and the context nobody remembers to include — timestamp,
-user agent, `devicePixelRatio` and which variants the adapter could compile. The
-console gets the identical text: `JSON.stringify(..., null, 2)`, never the raw
-object, because Chrome copies a logged object as the literal string `{...}`.
+What lands on the clipboard is the pasteable form of the run: the full
+`MeasureResult` (both medians, both means, sample count, method, resolution) plus
+the context nobody remembers to include — timestamp, user agent and
+`devicePixelRatio`. The console gets the identical text:
+`JSON.stringify(..., null, 2)`, never the raw object, because Chrome copies a
+logged object as the literal string `{...}`.
 
-`tiled + f16` only appears when the adapter offers the `shader-f16` device
-feature. When it does not, the dropdown lists two arms and the panel says so in a
-disabled `tiled + f16` field instead of silently dropping the option — see
-[Half precision](#half-precision--the-tiled--f16-variant).
+**Prefer the GPU number when it is there.** With `timestamp-query` available
+(requested only under `?debug`) the result includes the shade pass's own GPU
+time, which excludes the bake, the present and all CPU submit cost. Wall-clock
+ms/frame is capped by the display: anything faster than vsync reads ~16.7 ms and
+cannot show a shader change at all. The panel detects that case and flags it as
+`VSYNC-CAPPED`.
 
-Three things make the numbers trustworthy, and all of them are easy to break:
+`measure()` renders 30 warmup frames first (absorbing any pending re-bake), then
+suppresses the bake entirely while sampling, so a geodesic re-bake can never land
+inside a sample. It also forces the loop to run even when the hero is scrolled out
+of view — but it cannot beat a hidden tab, where the browser stops
+`requestAnimationFrame` outright, so it rejects after 6 s of no frames instead of
+hanging.
 
-- **One separately compiled pipeline per arm, not one branching shader.**
-  `disk.wgsl` gates on `const DISK_NOISE_ANALYTIC` and declares its precision as
-  type aliases; `precision.mjs` builds each variant by rewriting those
-  declarations. Because the gate is a `const` and the aliases are types, the
-  untaken arm is dead-code eliminated *before* register allocation, so no variant
-  is billed for another's live values. A uniform `if` would have kept both arms
-  resident and quietly flattened the difference. Every rewrite throws if it stops
-  matching — a silent no-op would compare the tiled arm against itself and report
-  a dead heat.
-- **`precision.mjs` is shared by the renderer and the harness.** The browser and
-  `debug-render.mjs` call the same specialization, so a PNG from the harness and a
-  frame on the page are the same program. There is deliberately no
-  `disk-f16.wgsl`: a hand-kept copy drifts the first time someone tunes the look,
-  and then the A/B measures two different shaders and calls it "precision".
-- **Prefer the GPU number when it is there.** With `timestamp-query` available
-  (requested only under `?debug`) the result includes the shade pass's own GPU
-  time, which excludes the bake, the present and all CPU submit cost. Wall-clock
-  ms/frame is capped by the display: if both arms are faster than vsync, both
-  read ~16.7 ms and the comparison is meaningless. The panel detects that case,
-  flags it as `VSYNC-CAPPED`, and the A/B verdict switches to the GPU number.
-
-`measure()` renders 30 warmup frames first (absorbing the pipeline switch and any
-pending re-bake), then suppresses the bake entirely while sampling, so a geodesic
-re-bake can never land inside a sample. It also forces the loop to run even when
-the hero is scrolled out of view — but it cannot beat a hidden tab, where the
-browser stops `requestAnimationFrame` outright, so it rejects after 6 s of no
-frames instead of hanging.
-
-Headless equivalent: `--diskNoise analytic|tiled|tiled-f16` in
-`debug-render.mjs`. That one is for comparing *images*, not times.
-
-Expect the filaments to REARRANGE between `analytic` and the two tiled arms: they
-draw different realizations of the same noise (see above). Judge cost, not layout.
-`tiled` and `tiled + f16` draw the SAME realization, so there the difference is
-rounding and nothing else — which is exactly what makes it gateable by RMSE.
-
-##### Half precision — the `tiled + f16` variant
-
-A spike, not a shipped decision: the default stays `tiled` at f32 until a real
-GPU says half precision is worth it (`shader-f16` buys packed math on some
-architectures and nothing at all on others). The variant exists so that
-"is it worth it" is a measurement on the reader's machine rather than an opinion.
-
-**How it is built.** `disk.wgsl` and `stars.wgsl` declare precision aliases —
-`alias hreal = f32; alias hreal3 = vec3f;` — and use them for the values whose
-precision is not load-bearing. `precision.mjs` rewrites those declarations to
-`f16` / `vec3h` and prepends `enable f16;`. That is the entire diff between the
-arms, it is reviewable at every declaration, and it cannot half-apply: the rewrite
-throws if it finds no alias, if an alias survives at 32-bit width, or if the gate
-rewrite stops matching.
-
-**Where half is allowed, and where it is not.** The second column is the failure
-mode, not a preference:
-
-| Quantity | Precision | Why |
-|---|---|---|
-| Lattice fetch result, fBm octave accumulation, ridge fold | **f16** | Bounded 0..1 values in the hottest loop in the shader (~26 evaluations per pixel per layer). |
-| Smoke remap, emissivity, thermal color, optical depth, emission | **f16** | All bounded and radiometric; f16's 11-bit mantissa is below the 8-bit output. |
-| Star coverage, per-star magnitude, summed luminance | **f16** | Same: bounded emission, and the output is `rgba8unorm`. |
-| Noise COORDINATES (`cos(angle) * a`, `radius * r + offset`) | f32 | The finest octaves reach ~2e3 noise units, where f16 resolves ~1 unit — a whole lattice cell. Filaments would quantize into blocks. |
-| Texture sample coordinate | f32 | Same reason, plus the sampler's own filter weights are the real precision floor (~1/256 texel). |
-| `time`, the rigid/sawtooth phases, lobe weights, `fract`/`floor` | f32 | Clocks. f16 resolves ~0.03 s at t = 60 s and tops out at 65504: the wind-up fix would stutter and its crossfade would pop. |
-| Advection warps (they move `radiusW` / `angleW`) | f32 | They are coordinates: quantizing them steps the whole field instead of dithering its value. |
-| `fwidth` footprints and the `visible` octave fades | f32 | They decide which octaves are skipped. Kept f32 in BOTH arms so the two variants skip exactly the same octaves. |
-| G-buffer positions, radius, azimuth and their decode | f32 | Unchanged by this variant; f16 hit positions already contoured the disk (see the layout section). |
-| Relativistic gains (beaming, redshift, flux, lift, core), normalized directions | f32 | Evaluated once per pixel per layer, so narrowing buys nothing measurable and would move the Doppler lobe. |
-| `Shade` / `DiskLook` / `StarLook` uniforms, `DiskSample` | f32 | Contracts. Precision stops at the module boundary, so the bind groups are identical across variants. |
-
-**Why the variant carries its own vertex entry.** `enable f16;` must precede every
-global declaration, but `gpu.effect` prepends its full-screen vertex entry to the
-source it is handed, which would push the directive into the middle of the module
-(`error: directives must come before all global declarations`). A source that
-already declares a vertex entry is passed through untouched, so `precision.mjs`
-prepends a verbatim copy of vgpu's own entry along with the directive. Verified,
-not assumed: the same shade source with that preamble and nothing else renders
-**bit-identical** output (max diff 0/255).
-
-**What it measured, headlessly (lavapipe/Dawn, which does expose `shader-f16`).**
-`tiled` vs `tiled-f16` at 640×360, final + density views:
-
-| t | final RMSE | final max | density RMSE | density max |
-|---|---|---|---|---|
-| 0 | 0.13/255 | 2/255 | 0.40/255 | 6/255 |
-| 2.5 | 0.12/255 | 2/255 | 0.34/255 | 4/255 |
-| 4.9 / 5.1 (lobe reset) | 0.13/255 | 3/255 | 0.39/255 | 6/255 |
-| 9.9 / 10.1 (period reset) | 0.13/255 | 3/255 | 0.39/255 | 8/255 |
-| 300 | 0.14/255 | 3/255 | 0.50/255 | 12/255 |
-
-Within the ≤1/255 RMSE, ≤3/255 max gate on the final image; the difference is
-isolated pixel dither with no structure (checked at ×48 amplification), and the
-masked density statistics track the f32 arm to the fourth decimal at every time,
-including across both sawtooth resets — i.e. the wind-up fix is untouched. The
-`density` view is raw pre-tone-map coverage, which is why its numbers are larger;
-it is a diagnostic, not the shipped image.
-
-**The f32 arm did not move.** Introducing the aliases is a no-op for the shipped
-shader: `tiled` renders bit-identical (RMSE 0, max 0/255) to the pre-alias commit
-at t = 0, 2.5, 9.9 and 300.
-
-**Fallback.** `shader-f16` is requested at device creation and only under
-`?debug` (like `timestamp-query`), so the shipped hero asks for exactly the device
-it always did. Without the feature the variant is never compiled, never offered,
-and `resolveVariant` maps a stale `tiled-f16` setting back to `tiled` — a
-measurement is therefore never labelled with a pipeline that did not run. The
-harness does the opposite on purpose: `--diskNoise tiled-f16` on a device without
-the feature FAILS, because a PNG silently rendered in f32 under an f16 filename
-would poison exactly the RMSE table above. Verified on Chrome/SwiftShader, which
-does not expose `shader-f16`: two arms in the dropdown, a disabled `tiled + f16`
-field explaining why, hero rendering normally, zero console errors.
+**To measure a change to the shade shader**, measure before and after: there is
+one pipeline now, so the A/B is across two builds rather than two arms in the
+same build. If you need them side by side in one session again, the mechanism
+that was deleted is worth re-reading in git history (`a93cdf6` and its parent):
+one separately compiled pipeline per arm, selected by rewriting a `const` gate or
+a type alias in the shared source, never a uniform `if` — a uniform branch keeps
+both arms resident and the register allocator bills the cheap one for the
+expensive one's live values.
 
 ### `stars.wgsl`
 
@@ -852,10 +762,8 @@ switches between `front hit only` (what the renderer did before the second hit
 existed) and `front + hidden hit` (the default) — the quickest way to see what
 the second layer contributes.
 
-A separate **perf A/B (disk noise + precision)** folder switches and times the
-shade variants (`analytic`, `tiled`, and `tiled + f16` where the adapter allows
-it) — see [Measuring it yourself](#measuring-it-yourself--the-runtime-ab) and
-[Half precision](#half-precision--the-tiled--f16-variant).
+A separate **perf (frame time)** folder times ~180 frames of the real loop and
+copies the result as JSON — see [Measuring it yourself](#measuring-it-yourself).
 
 While a debug view is active `shade.wgsl` **returns before `tonemap`**, so the
 channels are the raw values — no exposure, no ACES, no vignette, no gamma, no

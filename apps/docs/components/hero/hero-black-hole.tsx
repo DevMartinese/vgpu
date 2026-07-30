@@ -5,7 +5,6 @@ import {
   BAKE_KEYS,
   createRenderer,
   defaultHeroSettings,
-  type DiskNoiseVariant,
   type HeroRenderer,
   type MeasureResult,
 } from './renderer';
@@ -21,45 +20,8 @@ const HERO_SOLO_CLASS = 'hero-solo';
 function formatMeasurement(r: MeasureResult): string {
   const gpu = r.gpuMedianMs === undefined ? '' : ` · gpu ${r.gpuMedianMs.toFixed(2)}ms`;
   const capped = r.vsyncCapped ? ' · VSYNC-CAPPED, use gpu' : '';
-  return `${r.variant} ${r.medianMs.toFixed(2)}ms (${r.fps.toFixed(0)} fps)${gpu} n=${r.samples}${capped}`;
+  return `${r.medianMs.toFixed(2)}ms (${r.fps.toFixed(0)} fps)${gpu} n=${r.samples}${capped}`;
 }
-
-/**
- * The A/B verdict over every measured arm, each compared to the one before it.
- *
- * Reports the GPU number whenever EVERY arm has one: wall-clock cannot separate
- * variants that are all faster than the display, and reporting a "1.00x" that
- * only means "they all hit vsync" would be worse than reporting nothing.
- *
- * Chained ratios rather than everything against the control, because that is how
- * the decisions are actually made: `analytic → tiled` is the volume lane's win,
- * `tiled → tiled+f16` is the one that decides whether half precision ships.
- */
-function formatComparison(results: readonly MeasureResult[]): string {
-  if (results.length === 0) return 'nothing measured';
-  const useGpu = results.every((r) => r.gpuMedianMs !== undefined);
-  const ms = (r: MeasureResult) => (useGpu ? r.gpuMedianMs! : r.medianMs);
-  const parts = results.map((r, index) => {
-    const time = `${r.variant} ${ms(r).toFixed(2)}ms`;
-    if (index === 0) return time;
-    const previous = results[index - 1]!;
-    const ratio = ms(previous) / ms(r);
-    const verdict = ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1 / ratio).toFixed(2)}x SLOWER`;
-    return `${time} (${verdict} than ${previous.variant})`;
-  });
-  const caveat = !useGpu && results.some((r) => r.vsyncCapped) ? ' (vsync-capped, unreliable)' : '';
-  return `${parts.join(' → ')} [${useGpu ? 'gpu' : 'wall'}]${caveat}`;
-}
-
-/**
- * Dropdown labels for the shade variants. Kept next to the panel rather than in
- * renderer.ts: the ids are the contract, the wording is UI.
- */
-const VARIANT_LABELS: Record<DiskNoiseVariant, string> = {
-  analytic: 'analytic (control)',
-  tiled: 'tiled volume',
-  'tiled-f16': 'tiled + f16',
-};
 
 export function HeroBlackHole() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -126,12 +88,9 @@ export function HeroBlackHole() {
     applyHideUi();
 
     void import('lil-gui').then(async ({ default: GUI }) => {
-      // Built only once the renderer is ready, because the perf folder's dropdown
-      // is populated from the pipelines that actually COMPILED
-      // (`availableVariants`), which is not known until the device exists. The
-      // panel therefore appears a few hundred ms after the hero, which is the
-      // right trade: a dropdown offering an option the device cannot run would
-      // report a measurement of something else entirely.
+      // Built only once the renderer is ready: `measure()` rejects before the
+      // pipelines exist, so a panel that appeared first would offer a button
+      // that fails. It therefore shows up a few hundred ms after the hero.
       await rendererRef.current?.ready.catch(() => undefined);
       if (cancelled) return;
       const settings = settingsRef.current;
@@ -139,21 +98,12 @@ export function HeroBlackHole() {
       const panel = new GUI({ title: 'black hole' });
       panel.domElement.style.top = '72px';
 
-      // --- perf A/B ---------------------------------------------------------
+      // --- perf ---------------------------------------------------------
       // Deliberately the FIRST folder: everything below it is a knob you go
       // looking for, and this is the one control whose entire value is that you
       // do not have to. Open `?debug`, click the button at the top, paste.
-      //
-      // One independently compiled shade pipeline per variant (see
-      // precision.mjs). Switching is a pipeline swap, not a re-bake: the G-buffer
-      // is pure geometry and knows nothing about the disk's noise or precision.
-      //
-      // The list comes from the RENDERER, not from this file: `tiled-f16` only
-      // exists if the adapter offered `shader-f16`, and offering an option that
-      // silently draws `tiled` instead would fake a measurement.
-      const variants = rendererRef.current?.availableVariants() ?? [];
-      const perf = panel.addFolder('perf A/B (disk noise + precision)');
-      const readout = { result: 'press "measure (A/B all)"' };
+      const perf = panel.addFolder('perf (frame time)');
+      const readout = { result: 'press "measure frame time"' };
       let busy = false;
       /** A copy waiting for the page to be clicked back into focus (see `publish`). */
       let pendingCopy: (() => void) | null = null;
@@ -162,13 +112,12 @@ export function HeroBlackHole() {
        * Pasted measurements come from machines nobody here can inspect, and the
        * first two questions are always "which GPU" and "at what resolution".
        * The second is in every `MeasureResult`; this answers the first as far as
-       * a page is allowed to, and records which arms the device could even run.
+       * a page is allowed to.
        */
       const measurementContext = () => ({
         when: new Date().toISOString(),
         userAgent: navigator.userAgent,
         devicePixelRatio: window.devicePixelRatio,
-        variantsAvailable: variants,
       });
 
       /**
@@ -221,8 +170,8 @@ export function HeroBlackHole() {
        *
        * The clipboard write is best effort and SAYS SO when it fails instead of
        * claiming a copy that did not happen: `writeText` rejects on a document
-       * that lost focus, and a full A/B run takes several seconds per arm —
-       * plenty of time to click away. The console line is the fallback.
+       * that lost focus, and a run takes ~20 s — plenty of time to click away.
+       * The console line is the fallback.
        */
       const publish = async (headline: string, payload: unknown): Promise<void> => {
         const json = JSON.stringify(payload, null, 2);
@@ -232,8 +181,8 @@ export function HeroBlackHole() {
           return;
         }
         // The clipboard refuses to write for a page that is not the focused one,
-        // and a full A/B run takes ~20 s — clicking away during it is normal, so
-        // this is a routine outcome rather than an error. Instead of sending the
+        // and a run takes ~20 s — clicking away during it is normal, so this is
+        // a routine outcome rather than an error. Instead of sending the
         // reader to DevTools, arm a one-shot retry on the next click anywhere:
         // that click restores focus, and the copy the reader asked for happens
         // one gesture later instead of not at all.
@@ -250,78 +199,42 @@ export function HeroBlackHole() {
       };
 
       /**
-       * Runs one measurement of whatever variant is currently selected.
+       * Times the real loop and publishes the result.
        *
-       * Reports the headline into the panel field and returns the result; it
-       * does NOT publish, because during an A/B run the thing worth putting on
-       * the clipboard is the whole comparison, not its last arm.
+       * `busy` rather than disabling the button: lil-gui buttons have no
+       * disabled state that survives `.listen()` repaints, and a second click
+       * would otherwise start a measurement inside the first one's warmup.
        */
-      const runMeasure = async (label?: string): Promise<MeasureResult | undefined> => {
-        const renderer = rendererRef.current;
-        if (!renderer || busy) return undefined;
-        busy = true;
-        readout.result = `measuring ${label ?? settings.diskNoise}…`;
-        try {
-          const result = await renderer.measure();
-          readout.result = formatMeasurement(result);
-          if (result.vsyncCapped) {
-            console.warn(
-              '[hero] wall-clock is vsync-capped — the frame is waiting for the display, so ms/frame ' +
-              'cannot separate the variants. Compare the GPU number instead.',
-            );
-          }
-          return result;
-        } catch (error) {
-          readout.result = 'failed — see console';
-          console.error('[hero] measure failed', error);
-          return undefined;
-        } finally {
-          busy = false;
-        }
-      };
-
       const perfActions = {
-        /**
-         * The whole harness in one click: measures every arm this device can
-         * actually run, back to back, and publishes the chained verdict.
-         *
-         * Worth having over "switch, measure, write it down, switch back": it
-         * removes the transcription step and, more importantly, it measures all
-         * arms seconds apart on the same thermal state, which is the main way a
-         * hand-run A/B goes wrong.
-         */
-        measureAll: () => {
+        measure: () => {
           void (async () => {
-            const restore = settings.diskNoise;
-            const refresh = () => panel.controllersRecursive().forEach((c) => c.updateDisplay());
-            const results: MeasureResult[] = [];
-            for (const variant of variants) {
-              settings.diskNoise = variant;
-              refresh();
-              const result = await runMeasure(variant);
-              if (!result) { settings.diskNoise = restore; refresh(); return; }
-              // Progress only — the full JSON is published once, at the end.
-              console.log(`[hero] ${formatMeasurement(result)}`);
-              results.push(result);
+            const renderer = rendererRef.current;
+            if (!renderer || busy) return;
+            busy = true;
+            readout.result = 'measuring…';
+            try {
+              const result = await renderer.measure();
+              if (result.vsyncCapped) {
+                console.warn(
+                  '[hero] wall-clock is vsync-capped — the frame is waiting for the display, so ms/frame ' +
+                  'cannot see a change in the shader. Compare the GPU number instead.',
+                );
+              }
+              await publish(formatMeasurement(result), { ...measurementContext(), result });
+            } catch (error) {
+              readout.result = 'failed — see console';
+              console.error('[hero] measure failed', error);
+            } finally {
+              busy = false;
             }
-            settings.diskNoise = restore;
-            refresh();
-            const verdict = formatComparison(results);
-            await publish(`A/B ${verdict}`, { ...measurementContext(), verdict, results });
-          })();
-        },
-        /** One arm, for staring at a variant while tuning it. */
-        measureOne: () => {
-          void (async () => {
-            const result = await runMeasure();
-            if (result) await publish(formatMeasurement(result), { ...measurementContext(), result });
           })();
         },
       };
 
-      // Styled as the primary action rather than being one of three equal rows:
-      // the previous layout made a one-click flow look like a three-step one.
-      const primary = perf.add(perfActions, 'measureAll').name('▶ measure (A/B all)');
+      // Styled as the primary action rather than as one more row: it is the only
+      // thing in this folder that does anything, and the flow it exists for is
+      // open `?debug`, click once, paste.
+      const primary = perf.add(perfActions, 'measure').name('▶ measure frame time');
       const primaryButton = primary.domElement.querySelector('button');
       if (primaryButton) {
         Object.assign(primaryButton.style, {
@@ -334,25 +247,6 @@ export function HeroBlackHole() {
       // Disabled = read-only text field. `.listen()` polls the object, so the
       // async handlers above can just assign to `readout.result`.
       perf.add(readout, 'result').name('last measurement').disable().listen();
-      // Say WHY the f16 arm is missing rather than leaving a hole in the list: on
-      // an adapter without `shader-f16` the variant cannot be compiled at all,
-      // and a reader comparing notes with someone else's machine needs to know
-      // that is the reason and not a mistake.
-      if (!variants.includes('tiled-f16')) {
-        const note = { f16: 'unavailable — this adapter has no `shader-f16`' };
-        perf.add(note, 'f16').name('tiled + f16').disable();
-      }
-
-      // Secondary and closed: picking one arm by hand is the old flow. It is
-      // kept because it is the only way to LOOK at a single variant, but it is
-      // not how you get a number worth reporting — two arms measured minutes
-      // apart, with the machine in different thermal states, are not comparable.
-      const perfSingle = perf.addFolder('one variant at a time').close();
-      perfSingle
-        .add(settings, 'diskNoise', Object.fromEntries(variants.map((variant) => [VARIANT_LABELS[variant], variant])))
-        .name('shade variant');
-      perfSingle.add(perfActions, 'measureOne').name('measure this variant');
-
       // Geometry invalidates the baked G-buffer. No onChange wiring needed: the
       // renderer polls BAKE_KEYS every frame and re-bakes on a throttle with a
       // trailing edge, so dragging a slider stays smooth and the released value
