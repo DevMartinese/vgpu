@@ -26,6 +26,7 @@
     "bump:major": "pnpm -r exec npm version major --no-git-tag-version"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
     "@types/node": "^22.10.7",
     "@types/pngjs": "^6.0.5",
     "@vgpu/cli": "workspace:*",
