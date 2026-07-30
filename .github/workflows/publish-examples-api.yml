@@ -1,3 +1,9 @@
+# Dormant: only needed for the versioned blob mode, see apps/docs/examples-api.md.
+#
+# The examples API serves latest-only from the files that ship with the docs deployment, so the
+# deploy itself is the publication step and this workflow is not part of that path. It is kept
+# because it is complete and tested: it stays the entry point for versioned artifact retention
+# (permanent revisions, create-only writes, latest-pointer-last transaction) when that is enabled.
 name: Publish examples API
 
 on:
