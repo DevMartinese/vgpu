@@ -73,8 +73,10 @@ console.log(shader.version);
 
 ## Notes
 
+- **Framework setup lives in a guide, not here.** For `next.config.ts` (Turbopack rules or the `webpack()` hook), the ambient `.d.ts` that types `import shader from "./x.wgsl"`, and the client component that owns the canvas, read `npx vgpu docs cat nextjs.md`.
+- TypeScript needs an ambient declaration before it accepts a `.wgsl` import. `@vgpu/wgsl` ships one: add `/// <reference types="@vgpu/wgsl/wgsl-types" />` to any `.d.ts` in your project.
 - Loader output is `ShaderSource` v1: default export `{ version: 1, wgsl: "..." }`, not a bare string and not a reflection/binding map.
 - A leaf WGSL file may declare entry resources. The imported-module purity rule is enforced only when the file imports other modules and `resolveShader()` sees a graph.
 - The loader calls `resolveShader({ validate: false })` for imported graphs; it still performs parsing, purity checks, DCE, mangling, and optional minification.
 - Do not put `@group/@binding` declarations in shared WGSL modules. Put resources in the entry file and export shared structs/functions from modules.
-- **See also:** `ShaderSource`, `resolveShader`, `wgslVitePlugin`.
+- **See also:** `ShaderSource`, `resolveShader`, `wgslVitePlugin`, and the `nextjs` guide (`npx vgpu docs cat nextjs.md`).
