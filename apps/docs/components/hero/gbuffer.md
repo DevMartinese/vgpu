@@ -6,12 +6,17 @@ raymarch, runs only when the camera/geometry changes) and a **cheap frame pass**
 the infrastructure and the two shading workstreams.
 
 ```
-bake.wgsl ──► G-buffer (MRT, 4 attachments) ──► shade.wgsl ──► canvas
- one-shot                                       every frame
-                                                   ├── disk.wgsl   (disk pixels)
-                                                   ├── stars.wgsl  (escaped rays)
-                                                   └── tonemap()   (ACES + vignette, in place)
+bake.wgsl ──► G-buffer (MRT, 4 attachments) ──┬─► shade.wgsl ──► canvas
+ one-shot      │                              │   every frame
+               │                              │      ├── disk.wgsl   (disk pixels)
+               ▼                              │      ├── stars.wgsl  (escaped rays)
+        refine.wgsl ──► AA target (rg8unorm) ─┘      └── tonemap()   (ACES + vignette, in place)
+         one-shot        (coverage, span)
 ```
+
+Both `bake.wgsl` and `refine.wgsl` are ONE-SHOT and share the geodesic integrator
+in `geodesic.wgsl`; only `shade.wgsl` runs per frame. See
+[The AA target](#the-aa-target--photon-ring-coverage-and-span).
 
 **Two passes, not three.** `shade.wgsl` tone maps in a register and writes the
 swap chain directly. There is no intermediate `scene` target and no
@@ -24,6 +29,8 @@ handful of ALU ops. See [Tone mapping](#tone-mapping-lives-at-the-end-of-shadewg
 | File | Owner | Edit? |
 |---|---|---|
 | `bake.wgsl` | infrastructure | no |
+| `geodesic.wgsl` | infrastructure | no (the shared null-geodesic integrator) |
+| `refine.wgsl` | infrastructure | no (one-shot photon-ring coverage/span) |
 | `gbuffer.wgsl` | infrastructure | no (read it — it defines `GBufferSample`) |
 | `shade.wgsl` | infrastructure | no (thin dispatcher + debug views + tone map) |
 | `renderer.ts` | infrastructure | only to add a new look field (see below) |
@@ -75,6 +82,11 @@ If you need another channel, take it from redundancy the same way, or measure
 `maxColorAttachmentBytesPerSample` on the target hardware first. Simply appending
 an attachment will validate fine on a desktop GPU and fail on a spec-minimum
 device.
+
+This budget is exactly why the photon-ring AA data lives in its **own pass and
+own target** rather than as a 5th attachment here — see
+[The AA target](#the-aa-target--photon-ring-coverage-and-span). The limit is
+per-PASS, so a second pass gets a fresh 32 B.
 
 ## G-buffer layout
 
@@ -162,8 +174,13 @@ struct GBufferLayers {
   front: GBufferSample,  // crossing nearest the camera
   back: GBufferSample,   // the crossing it hides; isHit only if front.isHit
 }
-fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32) -> GBufferLayers
+fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32, aa: vec2f) -> GBufferLayers
 ```
+
+`aa` is the matching texel of the [AA target](#the-aa-target--photon-ring-coverage-and-span)
+— `(covFront, spanFront)`. It describes the **front** crossing only; the back
+layer is handed `(1, 0)` and therefore decodes exactly as it did before the AA
+target existed. Pass `vec2f(1.0, 0.0)` to opt out entirely.
 
 Each layer is the same `GBufferSample` the single-hit version used — `shadeDisk`
 shades one layer at a time and never has to know which one it got. Values that
@@ -179,11 +196,174 @@ struct GBufferSample {
   rayDirection: vec3f,  // final lensed direction — for the sky
   viewDirection: vec3f, // direction at the disk hit — for Doppler
   side: f32,            // +1 / -1 / 0
+  coverage: f32,        // fraction of the pixel this crossing covers (1 outside the AA band)
+  span: f32,            // disk radius the pixel spans here, in normalized annulus units
   isHit: bool,
   isBlackHole: bool,
   escaped: bool,
 }
 ```
+
+## The AA target — photon ring coverage and span
+
+A second one-shot pass, `refine.wgsl`, writes a **2 B/px `rg8unorm`** target next
+to the G-buffer:
+
+| Channel | Name | Meaning |
+|---|---|---|
+| `x` | `covFront` | fraction of the pixel the FIRST disk crossing covers, from 16 sub-rays (`n/16`) |
+| `y` | `spanFront` | how much DISK RADIUS the pixel spans at that crossing, in normalized annulus units, **centred on the pixel's own radius** |
+
+Outside the refined band it is exactly `(isHit ? 1 : 0, 0)`. `1.0` is exact in
+`rg8unorm`, so every unrefined pixel multiplies its alpha by a literal one and its
+final colour is **bit-for-bit** what it was before this target existed (verified
+with `cmp` on all eight debug views).
+
+### What the artifact actually is (measure before you tune)
+
+The visible "line around the shadow" is **not** the shadow silhouette. The
+shadow/sky step measures `0 -> 4/255` — invisible. The line is the **lensed
+photon-ring image of the disk**: at the shipped defaults the entire
+`[ISCO, diskOuter]` annulus is compressed into ~1.5 px at screen radius
+r ≈ 190 px (720p). Debug view 2 shows `diskUv.x` going **0.12 -> 0.71 between two
+adjacent pixels** at constant azimuth. One ray per pixel therefore draws a random
+radius out of the whole annulus, and every analytic softness in `disk.wgsl`
+(`innerEdge`, `outerEdge`, `flux`) is soft in *disk* space and a hard step in
+*screen* space there.
+
+Measured tangential profile of the ring (max luma over the radial band,
+20°..70° in 1° steps, harness at 1280x720, t = 2.5):
+
+| | min | max | std | neighbour steps > 2x |
+|---|---|---|---|---|
+| 1x, no AA | 10 | 112 | 25.6 | 21 / 50 |
+| 1x, AA on | 14 | 63 | 9.97 | 4 / 50 |
+| 3x SSAA reference | 26 | 70 | 8.53 | 1 / 50 |
+
+So the artifact is a **dotted, brightness-jittering 1 px wire**, and the fix has
+to antialias disk-hit coverage *and* disk attribute variation — not a silhouette.
+
+### Why a separate pass and a separate target
+
+- The bake's MRT already spends exactly the 32 B/sample WebGPU guarantees
+  (`maxColorAttachmentBytesPerSample`), so there is no 5th attachment to take.
+  The limit is per-pass, so a second pass gets a fresh budget.
+- It is **additive and deletable**: one uniform (`Shade.aa`) disables it, one
+  target and one pass remove it.
+- MSAA cannot do this job: `shade.wgsl` is a fullscreen quad, so every sample of
+  a pixel has identical coverage and identical `textureLoad` — a 4x resolve
+  returns the same colour for 4x the cost. A 4x MSAA G-buffer would also cost
+  265 MB at 1080p.
+- Supersampling the G-buffer itself is the mathematically best answer and dies on
+  memory: 32 B/px x 4 subsamples x 1920x1080 = 265 MB (3x: 597 MB).
+
+### The refine pass
+
+1. **Band detection**, per pixel: a **5x5** neighbourhood that differs in `isHit`,
+   differs in the shadow flag, or spans more than 0.12 of the annulus in radius.
+   5x5 rather than 3x3 because the ring is thinner than a pixel: a pixel whose
+   *centre* ray misses it entirely still has to be refined. 25 texel loads,
+   one-shot.
+2. **16 sub-rays** on a regular 4x4 grid inside the pixel, through
+   `geodesic.wgsl::cameraRay` + `traceRay` — the *same* integrator, from the *same*
+   geometry uniform (`renderer.ts::setBakeUniforms` uploads one struct to both
+   passes), so the sub-rays can never describe a different ray bundle than the
+   G-buffer's centre rays. A fixed grid, not a jittered one: a fixed pattern makes
+   the residual quantisation of `coverage` vary *smoothly* along the ring, which is
+   the entire goal, where per-pixel jitter would trade a bias for noise.
+3. `span` is measured **symmetrically about the centre ray**, i.e. the smallest
+   interval centred on `r0` containing every sub-ray crossing — not `rmax - rmin`.
+   The frame pass can only anchor its taps at `r0` (the only radius it has), so a
+   raw range would let a centre ray sitting at one end shift the whole tap set off
+   the measured span and bias the radial mean. The price is a span up to 2x wider
+   than the raw range: a slightly wider prefilter, never a shifted one.
+
+**Shadow coverage is deliberately not stored.** It was measured at `0 -> 4/255`
+(invisible), and consuming a fractional shadow would composite stars from the
+*truncated* `gSky.xyz` of a swallowed ray — new speckle in a 1 px rim, plus a
+perturbed derivative field under the star prefilter. If it is ever wanted it needs
+an escaped sub-sample's **direction** stored next to it, and a third channel.
+
+### The tap protocol (`sampleAtRadius`) — read before touching `disk.wgsl`
+
+Where `spanFront > 0.15`, `shade.wgsl` replaces its single `shadeDisk` call with
+**K = 6** calls at radii spanning the measured span at the same azimuth, via
+`gbuffer.wgsl::sampleAtRadius`, and averages. `disk.wgsl` and `stars.wgsl` are
+**not touched**: the disk owns the look, not the filtering.
+
+- Mean of `color * alpha` and mean of `alpha` are accumulated **separately** and
+  recombined, because emission-absorption is linear in exactly those two.
+- Taps outside `[ISCO, diskOuter]` are dropped from the sum **and** the divisor.
+  Clamping instead would pile weight on the two edge radii and bias the mean.
+- **`footprint` is now sometimes explicit rather than fwidth-derived.** The taps
+  are *not* the pixel: each stands for a slice `span / K` wide, so the tap
+  footprint is rebuilt from the same two terms `disk.wgsl` inverts at its
+  `pixelWorld` line — `max(angular term of the pixel, disk.detail * span / K)` —
+  with the radial term replaced. If you change how `disk.wgsl` inverts
+  `footprint`, this is the second caller you have to keep in step. Passing the
+  pixel's collapsed fwidth footprint here instead measures worse: it prefilters
+  every tap across the whole annulus.
+- No `fwidth` in the tap branch, ever: the loop runs in non-uniform control flow.
+  All derivatives stay in `fs_main`'s uniform prologue (`diskFootprintAxes`,
+  which now returns the two axes separately for exactly this reason).
+- Do **not** "fix" the ring by attenuating it where the footprint is large. That
+  is the `starLod` fade-to-black mistake documented above, in a new place:
+  radiance is conserved, so prefilter it.
+- Do **not** average the baked hit *positions* across sub-rays. It lies about the
+  geometry and it shrinks the fwidth footprints, making the noise aliasing worse.
+
+### Rotation invariance
+
+`covFront` and `spanFront` are properties of the ray bundle and of the
+axisymmetric geometry (Schwarzschild gravity + a ring centred on `y = 0`), so
+`sceneYaw` leaves them exact — the same argument that makes the G-buffer itself
+rotation-invariant. `sampleAtRadius` only moves the radial coordinates and
+commutes with `rotateSample`. Verified: `--yaw 0.15` and `--bakeYaw -0.15` still
+agree (frame mean 0.0238 both), and the AA view is unchanged by scene rotation.
+
+### Cost and the thermal gate
+
+The AA data costs the frame pass **+2 B/px** of read (~6% of the 32 B/px the shade
+pass already reads, and that pass is ALU-bound, not bandwidth-bound) plus the tap
+loop. Static counts at 1280x720, shipped defaults:
+
+| Set | Pixels | Share |
+|---|---|---|
+| refined band (partial coverage or non-zero span) | 19 946 | 2.16% |
+| **tap path actually taken** (`isHit && span > 0.15`) | **1 986** | **0.215%** |
+| 8x8 tiles (~one 64-lane wave) containing any tap pixel | 202 / 14 400 | 1.40% |
+
+So even in the worst case — a whole wave paying K x the disk cost because one lane
+straddles the ring — the tap loop adds `5 extra shadeDisk x 1.40% of waves` ≈
+**7% of the disk-shading work**, and the disk is only part of the shade pass.
+**Hard gate: shade GPU time <= 1.45 ms at DPR 1 (from 1.3 ms), measured with the
+`?debug` panel's `measure` button on real hardware.** Numbers from the Node
+harness in a container are CPU/SwiftShader and say nothing about GPU time.
+
+The refine pass itself is one-shot and lives *inside* `renderChain`'s
+`if (bake)` block, after the G-buffer pass. That placement is load-bearing: the
+bake is suppressed while `measure()` is sampling, so none of the refine cost can
+be attributed to the shade pass, exactly as for the bake. It is also why the AA
+target can never go stale — it is regenerated by the same throttled bake that
+invalidated it.
+
+If the gate ever fails at K = 4, the documented fallback is a **single**
+`shadeDisk` call at the span's mid-radius with an explicit footprint equal to the
+whole span, scaled by coverage: smooth and continuous at ~1 tap, at the price of a
+radial-profile bias.
+
+### Known gap (do not rediscover it)
+
+Coverage can only ever *scale* a sample that exists. A pixel whose centre ray
+misses the ring has no radius, azimuth or view direction to rebuild a sample from,
+so it cannot be shaded no matter what `covFront` says. Within the 5x5 mask this
+does not happen (measured: 0 such pixels at the shipped defaults). What *does*
+happen is one step further out: a sub-pixel arc that lives entirely **inside** the
+shadow silhouette, where no centre ray in a 5x5 neighbourhood sees the disk, so
+the mask never fires. Example at 720p, 45°, r = 188: the 3x reference has luma 58,
+the 1x frame and `covFront` are both 0. Closing it needs the crossing geometry
+stored per pixel (promote the target to `rgba8unorm`/`rgba16float` with radius +
+azimuth), not a wider dilation.
 
 ## The two shading entry points
 
@@ -632,9 +812,10 @@ directions right where the prefilter now keeps the sky alive.
 | `@group(0) @binding(6)` | `stars` | `StarLook` uniform | `settings.stars` (verbatim) |
 | `@group(0) @binding(7)` | `noiseVolume` | `texture_3d<f32>` (`r8unorm`) | `noise-volume.mjs::createNoiseVolume` |
 | `@group(0) @binding(8)` | `noiseSampler` | `sampler` (linear, `repeat` xyz) | `noise-volume.mjs::noiseVolumeSampler` |
+| `@group(0) @binding(9)` | `gAa` | `texture_2d<f32>` (`rg8unorm`) | `targets.aa.colors[0]`, written by `refine.wgsl` |
 
-`Shade` carries `resolution`, `time`, `diskOuter`, `debugView`, `diskLayers` and
-`sceneYaw` — nothing camera-related, the bake froze it (`sceneYaw` rotates the
+`Shade` carries `resolution`, `time`, `diskOuter`, `debugView`, `diskLayers`, `aa`
+and `sceneYaw` — nothing camera-related, the bake froze it (`sceneYaw` rotates the
 *scene*, not the camera; see below). G-buffer textures are read with
 `textureLoad` (no sampler): the 32-bit float formats are not filterable, and
 interpolating G-buffer values across silhouettes would be wrong anyway.
@@ -1036,11 +1217,14 @@ The lil-gui panel has a **debug** folder with a *g-buffer view* dropdown:
 | 5 | disk density | `DiskSample.density` |
 | 6 | sky footprint / star prefilter | R = star cells crossed per pixel ÷ 16, G = `starPrefilterRatio` (1 = star at least a pixel wide and at full brightness, → 0 = one pixel swallows many cells and every star is dimmed by the square of it), B = 1 where stars are sampled. G → 0 no longer means "no sky here": the flux is still rendered, spread out. |
 | 7 | second disk hit | **B = 1 exactly where a hidden second crossing exists**, R/G = its normalized disk coords (radius, azimuth) |
+| 8 | ring aa (cov/span/taps) | R = `covFront`, G = `spanFront`, B = 1 where the K-tap radial prefilter ran. Yellow + blue = the compressed photon-ring band. A pixel with R > 0, G = 0, no B **and** a black final image is the known gap: the 5×5 dilation found coverage the centre ray missed, and there is no radius to rebuild a sample from (see [The AA target](#the-aa-target--photon-ring-coverage-and-span)). |
 
 Views 1–5 describe the **front** crossing. Next to the dropdown, **disk layers**
 switches between `front hit only` (what the renderer did before the second hit
 existed) and `front + hidden hit` (the default) — the quickest way to see what
-the second layer contributes.
+the second layer contributes. **photon-ring aa** is the other A/B: `off` is
+bit-for-bit the pre-AA image (verified with `cmp`), because the frame pass forces
+`coverage` to a literal 1 and never enters the tap loop.
 
 A separate **perf (frame time)** folder times ~180 frames of the real loop and
 copies the result as JSON — see [Measuring it yourself](#measuring-it-yourself).
@@ -1096,11 +1280,29 @@ node apps/docs/components/hero/debug-render.mjs --views final,hit2              
 node apps/docs/components/hero/debug-render.mjs --views final --diskLayers 1 --out /tmp/before
 node apps/docs/components/hero/debug-render.mjs --views final,raydir --yaw 0.15        # scene rotation
 node apps/docs/components/hero/debug-render.mjs --views final,raydir --bakeYaw -0.15   # its ground truth
+node apps/docs/components/hero/debug-render.mjs --views final,aa --aa 0                # ring AA A/B (off)
+node apps/docs/components/hero/debug-render.mjs --views final --ssaa 3 --out /tmp/ref3x # the AA reference
+node apps/docs/components/hero/debug-render.mjs --views final --crop 740,225,60,60,10   # 10x ring zoom
 ```
 
+- `--ssaa n` renders `n x --size` and box-downsamples **in linear light** (decode
+  2.2, average, re-encode), with the BAKE running at the supersampled resolution
+  too — real geodesics per sub-sample, not a post filter. This is the reference
+  the photon-ring AA is judged against; `n = 1` is the shipped path, bit-for-bit.
+  Note that mean luma of a supersampled frame is **not** an energy measurement:
+  ACES + gamma are concave, so averaging tone-mapped sub-samples reads brighter
+  than a point sample on ANY high-contrast content (measured uniformly across the
+  star field, the resolved disk and the ring band). Use it to compare structure,
+  not to conclude that light was "lost".
+- `--crop x,y,w,h[,scale]` also writes `<view>-crop.png`: that rect of the FINAL
+  image, nearest-neighbour zoomed (default 10x). Coordinates are in `--size`
+  pixels, so the same rect lands on the same features at any `--ssaa`.
+- `--aa 0|1` is the ring-antialiasing A/B (default 1). At `0` the refine pass
+  still runs and the frame pass ignores it, which reproduces the pre-AA frame
+  byte-for-byte.
 - Output directory: `--out` (default `/home/user/reports/hero-debug/`), one PNG
   per view: `final.png`, `normals.png`, `diskuv.png`, `flags.png`,
-  `raydir.png`, `density.png`, `skylod.png`, `hit2.png`.
+  `raydir.png`, `density.png`, `skylod.png`, `hit2.png`, `aa.png`.
 - It prints `mean` and `std` luminance per image — use them as objective
   regression numbers (a black frame is `mean=0`, a blown-out one is `mean≈1`).
 - The script resolves the WGSL import graph with `resolveShader`, exactly like

@@ -14,6 +14,14 @@
 // light away. After the second hit the ray still continues to the horizon or to
 // infinity, so the G-buffer also keeps the background (stars / black) both
 // layers are composited against.
+//
+// THE INTEGRATOR ITSELF LIVES IN `geodesic.wgsl`. This file is camera setup, one
+// `traceRay` call and the flag folding: the antialiasing refine pass has to trace
+// sub-pixel rays with exactly this integrator, and two copies of a Verlet loop
+// would drift apart. The extraction was verbatim and gated on byte-identical
+// debug renders.
+
+import { TraceResult, cameraRay, escapeRadiusFor, traceRay } from "./geodesic.wgsl";
 
 struct Bake {
   resolution: vec2f,
@@ -26,10 +34,6 @@ struct Bake {
 }
 
 @group(0) @binding(0) var<uniform> bake: Bake;
-
-const HORIZON: f32 = 1.0;
-const ISCO: f32 = 3.0;
-const MAX_STEPS: i32 = 768;
 
 /**
  * sky.w bit 0 — the ray is SHADOW: it ended inside the event horizon, or it was
@@ -63,6 +67,10 @@ const FLAG_ESCAPED: f32 = 2.0;
 // the f32 precision on the hit positions preserved (f16 quantizes to ~0.6 px at
 // r ~ 15 and visibly contours the disk noise).
 //
+// The sub-pixel COVERAGE and SPAN of the ring are NOT here: they are a separate
+// one-shot pass into a separate 2-byte target, precisely because this budget is
+// spent. See `refine.wgsl` and the "AA target" section of gbuffer.md.
+//
 // hit1: xy = FIRST  disk crossing, position in the y=0 plane (world x, z)
 // hit2: xy = SECOND disk crossing, same encoding; only written if hit1 exists
 //       For both: no crossing is encoded as (0, 0) — the annulus starts at
@@ -78,131 +86,9 @@ struct GBuffer {
   @location(3) view: vec4f,
 }
 
-/**
- * Packs a unit direction into 2 floats: y, plus the azimuth of the xz part.
- * Lossless enough that f16 storage beats the old 3x f16 cartesian form, and it
- * keeps the sign of y exact, which is what `side` is reconstructed from.
- */
-fn encodeDirection(direction: vec3f) -> vec2f {
-  return vec2f(direction.y, atan2(direction.z, direction.x));
-}
-
-fn geodesicAcceleration(position: vec3f, velocity: vec3f) -> vec3f {
-  let r2 = max(dot(position, position), 0.0001);
-  let angularMomentum = cross(position, velocity);
-  let h2 = dot(angularMomentum, angularMomentum);
-  return -1.5 * h2 * position / (r2 * r2 * sqrt(r2));
-}
-
 @fragment fn fs_main(@location(0) uv: vec2f) -> GBuffer {
-  let aspect = bake.resolution.x / max(bake.resolution.y, 1.0);
-  // ORIENTATION — vgpu's generated fullscreen vertex shader emits uv (0,0) at the
-  // TOP-LEFT of the target and (1,1) at the bottom-right (the WebGPU texture
-  // convention). Camera space is +Y up, so uv.y MUST be flipped here; feeding
-  // `uv.y * 2 - 1` straight into `up` renders the whole scene upside down.
-  // Every other pass is a 1:1 pass-through (shade textureLoads uv*dims, composite
-  // samples uv), so this is the single place the convention is converted, and it
-  // fixes the browser and the node harness at once. See gbuffer.md.
-  let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-  // centerY shifts the image vertically, in NDC units: positive moves the black
-  // hole UP on screen. Kept at 0 now that the canvas covers the whole hero.
-  let screen = (ndc - vec2f(0.0, bake.centerY)) * vec2f(aspect, 1.0);
-
-  let yaw = bake.yaw;
-  let pitch = clamp(bake.pitch, -1.319, 1.319);
-  let orbitRadius = bake.orbitRadius;
-  let cameraPosition = vec3f(
-    sin(yaw) * cos(pitch) * orbitRadius,
-    sin(pitch) * orbitRadius,
-    cos(yaw) * cos(pitch) * orbitRadius,
-  );
-  let forward = normalize(vec3f(0.0) - cameraPosition);
-  let right = normalize(cross(forward, vec3f(0.0, 1.0, 0.0)));
-  let up = cross(right, forward);
-
-  var position = cameraPosition;
-  var velocity = normalize(forward * bake.fov + right * screen.x + up * screen.y);
-
-  var hit1Plane = vec2f(0.0);
-  var hit1Direction = vec2f(0.0);
-  var hit2Plane = vec2f(0.0);
-  var hit2Direction = vec2f(0.0);
-  var hitCount = 0;
-  var swallowed = 0.0;
-  var escaped = 0.0;
-  // Where the ray is declared to have reached infinity. Pushed out from 30 to
-  // 120 r_s: the deflection is already converged at 30 (raising it to 120 moves
-  // the outgoing direction by 0.002 deg at b = 3), but the far field is where
-  // the adaptive step below buys its budget back, so a farther cutoff costs
-  // almost no extra steps and makes the direction unambiguously asymptotic.
-  let escapeRadius = max(120.0, orbitRadius + 8.0);
-
-  for (var stepIndex = 0; stepIndex < MAX_STEPS; stepIndex++) {
-    let radius = length(position);
-    if (radius < HORIZON * 1.004) {
-      swallowed = 1.0;
-      break;
-    }
-    if (radius > escapeRadius && dot(position, velocity) > 0.0) {
-      escaped = 1.0;
-      break;
-    }
-
-    // Adaptive to gravity: finer near the horizon where the geodesic curves
-    // hardest. Much finer than the live version could afford (one-shot cost).
-    //
-    // The ceiling grows LINEARLY with radius past r = 6 instead of staying
-    // pinned at 0.075. The acceleration falls off as h^2 / r^5, so out there a
-    // 0.075 step resolves a straight line 20x more finely than needed and the
-    // fixed cap was burning ~20% of MAX_STEPS on the flight in and out. Inside
-    // r = 6 the factor is exactly 1, so the strong-field part of every geodesic
-    // — everything that produces the deflection, the shadow edge and the disk
-    // crossings — integrates bit-for-bit as before. Measured effect of the
-    // relaxation (evidence/geo3.mjs): deflection unchanged to <= 0.03 deg, and
-    // the freed budget shrinks the out-of-steps band from 8.6 px to 2.3 px at
-    // 720p.
-    let stepSize = clamp((radius - HORIZON) * 0.035, 0.0045, 0.075 * max(1.0, radius / 6.0));
-
-    let previousPosition = position;
-    let previousVelocity = velocity;
-
-    // Velocity-Verlet style integration of the light geodesic.
-    let acceleration0 = geodesicAcceleration(position, velocity);
-    velocity += acceleration0 * (0.5 * stepSize);
-    position += velocity * stepSize;
-    let acceleration1 = geodesicAcceleration(position, velocity);
-    velocity += acceleration1 * (0.5 * stepSize);
-    velocity = normalize(velocity);
-
-    // Hard disk: exact intersection with the y=0 annulus. No slab, no volume,
-    // no oversampling heuristics -> no concentric ring aliasing either.
-    //
-    // The crossing test is a strict side change rather than `prevY * y <= 0`:
-    // now that two hits are recorded, a step that lands exactly on y = 0 would
-    // otherwise satisfy the product test twice and register the same crossing
-    // as both hits. Folding y == 0 into the positive side makes every sign flip
-    // fire exactly once, and keeps the interpolation denominator non-zero.
-    if (hitCount < 2) {
-      let previousSide = select(-1.0, 1.0, previousPosition.y >= 0.0);
-      let currentSide = select(-1.0, 1.0, position.y >= 0.0);
-      if (previousSide != currentSide) {
-        let t = clamp(previousPosition.y / (previousPosition.y - position.y), 0.0, 1.0);
-        let crossing = mix(previousPosition, position, t);
-        let planeRadius = length(crossing.xz);
-        if (planeRadius >= ISCO && planeRadius <= bake.diskOuter) {
-          let direction = encodeDirection(normalize(mix(previousVelocity, velocity, t)));
-          if (hitCount == 0) {
-            hit1Plane = crossing.xz;
-            hit1Direction = direction;
-          } else {
-            hit2Plane = crossing.xz;
-            hit2Direction = direction;
-          }
-          hitCount += 1;
-        }
-      }
-    }
-  }
+  let ray = cameraRay(uv, bake.resolution, bake.yaw, bake.pitch, bake.orbitRadius, bake.fov, bake.centerY);
+  var traced = traceRay(ray.position, ray.velocity, bake.diskOuter, escapeRadiusFor(bake.orbitRadius));
 
   // OUT-OF-STEPS RAYS ARE SHADOW, NOT SKY.
   //
@@ -220,19 +106,19 @@ fn geodesicAcceleration(position: vec3f, velocity: vec3f) -> vec3f {
   // more slowly than any escaping ray: black is a much better approximation of
   // its (infinitely thin, infinitely wound) contribution than a truncated
   // direction, so it is folded into the shadow. With the relaxed far-field step
-  // above this band is ~2.3 px at 720p, just outside the shadow edge.
+  // in geodesic.wgsl this band is ~2.3 px at 720p, just outside the shadow edge.
   //
   // The loop can only end three ways — fell in, escaped, ran out of steps — so
   // "neither flag set" identifies the third case exactly, and after this the
   // G-buffer never contains a sample with both flags clear.
-  if (swallowed < 0.5 && escaped < 0.5) {
-    swallowed = 1.0;
+  if (traced.swallowed < 0.5 && traced.escaped < 0.5) {
+    traced.swallowed = 1.0;
   }
 
   return GBuffer(
-    hit1Plane,
-    hit2Plane,
-    vec4f(velocity, swallowed * FLAG_HOLE + escaped * FLAG_ESCAPED),
-    vec4f(hit1Direction, hit2Direction),
+    traced.hit1Plane,
+    traced.hit2Plane,
+    vec4f(traced.finalVelocity, traced.swallowed * FLAG_HOLE + traced.escaped * FLAG_ESCAPED),
+    vec4f(traced.hit1Direction, traced.hit2Direction),
   );
 }

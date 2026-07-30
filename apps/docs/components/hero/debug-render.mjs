@@ -21,7 +21,9 @@
 //   --out <dir>          output directory (default /home/user/reports/hero-debug)
 //   --size <WxH>         render size in pixels (default 1280x720)
 //   --time <seconds>     animation clock handed to the shaders (default 2.5)
-//   --views <list>       comma list of: final,normals,diskuv,flags,raydir,density,skylod,hit2,all
+//   --views <list>       comma list of: final,normals,diskuv,flags,raydir,density,skylod,hit2,aa,all
+//   --aa <0|1>           1 = consume the refine pass's ring coverage/span (default),
+//                        0 = ignore it, i.e. exactly the pre-AA image. The A/B.
 //   --<key> <value>      any geometry setting: cameraY, distance, diskRadius, fov, centerY
 //   --diskLayers <1|2>   1 = front disk hit only, 2 = also the hidden second hit (A/B)
 //   --yaw <radians>      SCENE yaw applied by the frame pass (default 0). This is the
@@ -33,6 +35,17 @@
 //   --stars.<key> <v>    any StarLook field (brightness, density, contrast, warmth, twinkle)
 //   --noiseSize <n>      edge of the tiled 3D noise lattice (default 64; try 128 to
 //                        A/B whether the tiling repeats visibly)
+//   --ssaa <n>           render n x size and box-downsample IN LINEAR LIGHT (decode
+//                        2.2, average, re-encode) to `--size`. n = 1 is the shipped
+//                        path, bit-for-bit. This is the AA REFERENCE: n = 3 is what
+//                        the photon-ring antialiasing is judged against, and n = 2
+//                        already agrees closely with it (~9 samples/px is converged).
+//                        Note the bake runs at the supersampled resolution too, so
+//                        this is true SSAA, not a post filter.
+//   --crop <x,y,w,h[,s]> after downsampling, also write `<view>-crop.png`: the given
+//                        rect of the FINAL image, nearest-neighbour zoomed by s
+//                        (default 10). Coordinates are in `--size` pixels, so the
+//                        same rect lands on the same features at any `--ssaa`.
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
 //   --json               print the resolved settings and per-image stats as JSON
 //
@@ -63,6 +76,9 @@ const DEFAULT_SETTINGS = {
   centerY: 0,
   debugView: 0,
   diskLayers: 2,
+  // Photon-ring antialiasing A/B: `--aa 0` reproduces the pre-AA image exactly
+  // (the refine pass still runs; the frame pass just ignores its target).
+  aa: 1,
   // Mouse amplitude in the browser. The harness has no pointer: use --yaw to set
   // an instantaneous scene rotation instead.
   mouseYaw: 0.15,
@@ -100,13 +116,16 @@ const VIEWS = {
   density: 5,
   skylod: 6,
   hit2: 7,
+  aa: 8,
 };
 
 /** hit1, hit2, sky, view. Must match GBUFFER_FORMATS in renderer.ts. */
 const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
+/** Photon-ring AA target (coverage, span). Must match AA_FORMAT in renderer.ts. */
+const AA_FORMAT = 'rg8unorm';
 
 function parseArgs(argv) {
-  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE };
+  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE, ssaa: 1, crop: undefined };
   const patch = {};
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -125,6 +144,12 @@ function parseArgs(argv) {
     }
     if (key === 'time') { options.time = Number(value); continue; }
     if (key === 'noiseSize') { options.noiseSize = Math.max(2, Number(value) | 0); continue; }
+    if (key === 'ssaa') { options.ssaa = Math.max(1, Number(value) | 0); continue; }
+    if (key === 'crop') {
+      const [x, y, w, h, scale] = value.split(/[x,]/).map(Number);
+      options.crop = { x: x | 0, y: y | 0, w: Math.max(1, w | 0), h: Math.max(1, h | 0), scale: Math.max(1, (scale || 10) | 0) };
+      continue;
+    }
     // Scene yaw vs camera yaw: `--yaw t` rotates the scene in the frame pass and
     // must produce the same image as `--bakeYaw -t`, which rotates the camera and
     // re-bakes. That equivalence is the whole justification for the feature.
@@ -174,6 +199,65 @@ function writePng(path, width, height, rgba) {
   });
 }
 
+/**
+ * Box-downsamples an `n`x supersampled RGBA image IN LINEAR LIGHT.
+ *
+ * The gamma round trip is the whole point: `shade.wgsl` writes display-referred
+ * sRGB-ish bytes (`pow(color, 1/2.2)`), and averaging those directly is
+ * averaging the wrong quantity — it under-weights the bright sub-samples, which
+ * is exactly the light the reference is supposed to prove is missing. Decode
+ * 2.2, average, re-encode.
+ */
+function downsampleLinear(rgba, width, height, n) {
+  if (n <= 1) return rgba;
+  const outWidth = Math.floor(width / n);
+  const outHeight = Math.floor(height / n);
+  const out = Buffer.alloc(outWidth * outHeight * 4);
+  const inverse = 1 / (n * n);
+  for (let y = 0; y < outHeight; y++) {
+    for (let x = 0; x < outWidth; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let sy = 0; sy < n; sy++) {
+        for (let sx = 0; sx < n; sx++) {
+          const i = ((y * n + sy) * width + (x * n + sx)) * 4;
+          r += (rgba[i] / 255) ** 2.2;
+          g += (rgba[i + 1] / 255) ** 2.2;
+          b += (rgba[i + 2] / 255) ** 2.2;
+          a += rgba[i + 3];
+        }
+      }
+      const o = (y * outWidth + x) * 4;
+      out[o] = Math.round(255 * (r * inverse) ** (1 / 2.2));
+      out[o + 1] = Math.round(255 * (g * inverse) ** (1 / 2.2));
+      out[o + 2] = Math.round(255 * (b * inverse) ** (1 / 2.2));
+      out[o + 3] = Math.round(a * inverse);
+    }
+  }
+  return out;
+}
+
+/** Nearest-neighbour zoom of a rect — the only honest way to look at a 1 px ring. */
+function cropZoom(rgba, width, height, rect) {
+  const { x, y, w, h, scale } = rect;
+  const out = Buffer.alloc(w * scale * h * scale * 4);
+  for (let dy = 0; dy < h * scale; dy++) {
+    const sy = Math.min(height - 1, Math.max(0, y + Math.floor(dy / scale)));
+    for (let dx = 0; dx < w * scale; dx++) {
+      const sx = Math.min(width - 1, Math.max(0, x + Math.floor(dx / scale)));
+      const i = (sy * width + sx) * 4;
+      const o = (dy * w * scale + dx) * 4;
+      out[o] = rgba[i];
+      out[o + 1] = rgba[i + 1];
+      out[o + 2] = rgba[i + 2];
+      out[o + 3] = rgba[i + 3];
+    }
+  }
+  return { rgba: out, width: w * scale, height: h * scale };
+}
+
 function stats(rgba) {
   let sum = 0;
   let sumSquares = 0;
@@ -196,25 +280,36 @@ async function main() {
     if (!(name in VIEWS)) throw new Error(`unknown view "${name}"; expected ${Object.keys(VIEWS).join(', ')} or all`);
   }
 
-  const [bakeWgsl, shadeWgsl] = await Promise.all([
+  const [bakeWgsl, refineWgsl, shadeWgsl] = await Promise.all([
     loadShader('bake.wgsl'),
+    loadShader('refine.wgsl'),
     loadShader('shade.wgsl'),
   ]);
 
   await mkdir(options.out, { recursive: true });
   const gpu = await init();
-  const [width, height] = options.size;
+  // True SSAA: the BAKE runs at the supersampled resolution too, so every
+  // sub-sample is a real geodesic. That is what makes `--ssaa 3` a reference the
+  // photon-ring antialiasing can be judged against rather than a post filter.
+  const [outWidth, outHeight] = options.size;
+  const ssaa = options.ssaa;
+  const width = outWidth * ssaa;
+  const height = outHeight * ssaa;
 
   const gbuffer = vgpu.target(gpu, {
     size: [width, height],
     colors: GBUFFER_FORMATS.map((format) => ({ format })),
     label: 'hero-debug-gbuffer',
   });
+  // Photon-ring AA data: one-shot, written by the refine pass right after the
+  // bake, read 1:1 by shade. Same size as the G-buffer, 2 B/px.
+  const aaTarget = vgpu.target(gpu, { size: [width, height], colors: [{ format: AA_FORMAT }], label: 'hero-debug-aa' });
   // Display-referred, exactly what the swap chain gets in the browser: shade
   // tone maps in place, so this is the only pass target after the G-buffer.
   const output = vgpu.target(gpu, { size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
 
   const bake = vgpu.effect(gpu, bakeWgsl, { label: 'hero-debug-bake' });
+  const refine = vgpu.effect(gpu, refineWgsl, { label: 'hero-debug-refine' });
   // The same shade.wgsl the browser renderer compiles, from the same imports:
   // a PNG from this harness and a frame from the page are the same program.
   const shade = vgpu.effect(gpu, shadeWgsl, { label: 'hero-debug-shade' });
@@ -226,7 +321,8 @@ async function main() {
   const noiseSampler = noiseVolumeSampler(vgpu, gpu);
 
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
-  bake.set({ bake: {
+  const [aaTexture] = aaTarget.colors;
+  const geometry = {
     resolution: gbuffer.size,
     // Camera yaw. The page always bakes with 0 and rotates the scene in the frame
     // pass instead; this exists only as the ground truth for that rotation.
@@ -236,21 +332,29 @@ async function main() {
     diskOuter: settings.diskRadius,
     fov: settings.fov,
     centerY: settings.centerY,
-  } });
+  };
+  // One geometry description for both one-shot passes, exactly like renderer.ts:
+  // the sub-rays must come from the same camera as the centre rays.
+  bake.set({ bake: geometry });
+  refine.set({ gHit1: hit1Texture, gSky: skyTexture, refine: geometry });
   shade.set({
     gHit1: hit1Texture,
     gHit2: hit2Texture,
     gSky: skyTexture,
     gView: viewTexture,
+    gAa: aaTexture,
     noiseVolume,
     noiseSampler,
     disk: settings.disk,
     stars: settings.stars,
   });
 
-  // One bake for every view: that is the whole point of the split.
+  // One bake (and one refine) for every view: that is the whole point of the
+  // split. The refine pass reads the G-buffer, so it goes in the same frame,
+  // after it — the same ordering renderer.ts uses.
   vgpu.frame(gpu, (frame) => {
     frame.pass({ target: gbuffer, clear: [0, 0, 0, 1] }, (pass) => pass.draw(bake));
+    frame.pass({ target: aaTarget, clear: [0, 0, 0, 1] }, (pass) => pass.draw(refine));
   });
 
   const results = [];
@@ -262,6 +366,7 @@ async function main() {
       diskOuter: settings.diskRadius,
       debugView,
       diskLayers: settings.diskLayers,
+      aa: settings.aa,
       // Instantaneous scene rotation; the browser smooths it from the pointer.
       sceneYaw: options.yaw,
     } });
@@ -270,20 +375,29 @@ async function main() {
     vgpu.frame(gpu, (frame) => {
       frame.pass({ target: output, clear: [0, 0, 0, 1] }, (pass) => pass.draw(shade));
     });
-    const pixels = await output.read();
+    const rendered = await output.read();
+    // At --ssaa 1 this is the identity (same Buffer), so the shipped path stays
+    // bit-for-bit what it always was.
+    const pixels = downsampleLinear(rendered, width, height, ssaa);
     const path = join(options.out, `${name}.png`);
-    await writePng(path, width, height, pixels);
-    results.push({ view: name, debugView, path, ...stats(pixels) });
+    await writePng(path, outWidth, outHeight, pixels);
+    const result = { view: name, debugView, path, ...stats(pixels) };
+    if (options.crop) {
+      const zoom = cropZoom(pixels, outWidth, outHeight, options.crop);
+      result.crop = join(options.out, `${name}-crop.png`);
+      await writePng(result.crop, zoom.width, zoom.height, zoom.rgba);
+    }
+    results.push(result);
   }
 
   noiseVolume.destroy();
   gpu.dispose();
 
   if (options.json) {
-    console.log(JSON.stringify({ size: options.size, time: options.time, noiseSize: options.noiseSize, settings, images: results }, null, 2));
+    console.log(JSON.stringify({ size: options.size, ssaa, time: options.time, noiseSize: options.noiseSize, settings, images: results }, null, 2));
     return;
   }
-  console.log(`hero debug render ${width}x${height} @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
+  console.log(`hero debug render ${outWidth}x${outHeight} (ssaa ${ssaa}x -> rendered ${width}x${height}) @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
   for (const result of results) {
     console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
   }

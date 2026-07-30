@@ -10,6 +10,7 @@ type VgpuApi = typeof import('vgpu');
 
 import bakeWgsl from './bake.wgsl';
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
+import refineWgsl from './refine.wgsl';
 import shadeWgsl from './shade.wgsl';
 
 /**
@@ -72,8 +73,18 @@ export interface HeroSettings {
   centerY: number;
 
   // --- Frame-only settings. No re-bake. ---
-  /** 0 = final image, 1..7 = G-buffer debug views. */
+  /** 0 = final image, 1..8 = G-buffer debug views. */
   debugView: number;
+  /**
+   * Photon-ring antialiasing: 1 consumes the one-shot refine pass's
+   * coverage/span target, 0 ignores it. A/B knob, not a look setting — 1 is the
+   * intended result.
+   *
+   * Frame-only despite depending on baked data: the refine pass runs with the
+   * bake either way (it is one-shot and throttled with it), so flipping this
+   * costs one uniform and no re-bake.
+   */
+  aa: number;
   /**
    * How many baked disk crossings to composite: 1 = front band only,
    * 2 = also the second, lensed image hidden behind it. A/B knob, not a look
@@ -110,6 +121,7 @@ export function defaultHeroSettings(): HeroSettings {
     centerY: 0,
     debugView: 0,
     diskLayers: 2,
+    aa: 1,
     // ~8.6 degrees each way: enough to read as a living, turnable scene without
     // ever swinging the disk far enough to look like a camera cut.
     mouseYaw: 0.15,
@@ -367,6 +379,11 @@ type Output = Surface | Target;
 
 interface Effects {
   bake: Effect;
+  /**
+   * One-shot sub-pixel coverage/span of the photon ring; runs right after the
+   * bake, in the same throttled block, and never per frame. See refine.wgsl.
+   */
+  refine: Effect;
   /** Compiled and warmed at init, so the first measured frame never pays for it. */
   shade: Effect;
   /**
@@ -387,6 +404,16 @@ type NoiseVolume = ReturnType<typeof createNoiseVolume>;
 interface Targets {
   /** G-buffer written once by the bake pass (MRT: hit1 / hit2 / sky / view). */
   gbuffer: Target;
+  /**
+   * Photon-ring AA data, written once by the refine pass: 2 B/px of
+   * (coverage, span) for the front disk crossing.
+   *
+   * A separate target and a separate pass rather than a 5th bake attachment,
+   * because `maxColorAttachmentBytesPerSample` is only guaranteed to be 32 and
+   * the G-buffer already spends exactly 32. Created, resized and destroyed with
+   * the G-buffer — it is indexed 1:1 by the same texel.
+   */
+  aa: Target;
 }
 
 /**
@@ -422,6 +449,15 @@ const RENDER_DPR = 1;
  * stored as (y, azimuth) pairs and lose nothing.
  */
 const GBUFFER_FORMATS: readonly GPUTextureFormat[] = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
+/**
+ * Photon-ring AA target: 2 bytes per pixel, (coverage, span).
+ *
+ * `rg8unorm`, not a float format: coverage is 16 sub-rays (5 bits would do) and
+ * span is a filter width, where 1/255 of the annulus is far below what the disk
+ * look can resolve. It is also the smallest format that keeps 1.0 EXACT, which is
+ * what makes every non-band pixel bit-for-bit unchanged.
+ */
+const AA_FORMAT: GPUTextureFormat = 'rg8unorm';
 const CLEAR: readonly [number, number, number, number] = [0, 0, 0, 1];
 
 export function createRenderer(options: HeroRendererOptions): HeroRenderer {
@@ -919,6 +955,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
 function createEffects(vgpu: VgpuApi, gpu: Gpu, label: string): Effects {
   return {
     bake: vgpu.effect(gpu, bakeWgsl, { label: `${label}-bake` }),
+    refine: vgpu.effect(gpu, refineWgsl, { label: `${label}-refine` }),
     shade: vgpu.effect(gpu, shadeWgsl, { label: `${label}-shade` }),
     // Built and uploaded here, synchronously, before the first bind: the
     // lattice is a pure function of its size, so there is nothing to await and
@@ -936,11 +973,13 @@ function createTargets(vgpu: VgpuApi, gpu: Gpu, size: readonly [number, number],
       colors: GBUFFER_FORMATS.map((format) => ({ format })),
       label: `${label}-gbuffer`,
     }),
+    aa: vgpu.target(gpu, { size: full, colors: [{ format: AA_FORMAT }], label: `${label}-aa` }),
   };
 }
 
 function destroyTargets(targets: Targets): void {
   destroyTarget(targets.gbuffer);
+  destroyTarget(targets.aa);
 }
 
 function destroyTarget(target: Target | undefined): void {
@@ -949,13 +988,24 @@ function destroyTarget(target: Target | undefined): void {
 
 function setBindings(effects: Effects, targets: Targets): void {
   const [hit1, hit2, sky, view] = targets.gbuffer.colors;
+  const [aa] = targets.aa.colors;
   effects.bake.set({ bake: { resolution: targets.gbuffer.size } });
+  // The refine pass reads the two G-buffer channels it needs (first crossing +
+  // flags) and writes the AA target. Same geometry uniform as the bake, uploaded
+  // by `setBakeUniforms`, so the sub-rays can never come from a different camera
+  // than the centre rays.
+  effects.refine.set({
+    gHit1: hit1,
+    gSky: sky,
+    refine: { resolution: targets.gbuffer.size },
+  });
   {
     effects.shade.set({
       gHit1: hit1,
       gHit2: hit2,
       gSky: sky,
       gView: view,
+      gAa: aa,
       // Resize-invariant, but re-bound with the rest: `setBindings` rebuilds the
       // whole shade bind group when the G-buffer is recreated, and a bind group
       // is all-or-nothing.
@@ -969,7 +1019,7 @@ function setBindings(effects: Effects, targets: Targets): void {
 }
 
 function setBakeUniforms(effects: Effects, targets: Targets, settings: HeroSettings): void {
-  effects.bake.set({ bake: {
+  const geometry = {
     resolution: targets.gbuffer.size,
     yaw: 0,
     pitch: settings.cameraY,
@@ -977,7 +1027,13 @@ function setBakeUniforms(effects: Effects, targets: Targets, settings: HeroSetti
     diskOuter: settings.diskRadius,
     fov: settings.fov,
     centerY: settings.centerY,
-  } });
+  };
+  effects.bake.set({ bake: geometry });
+  // ONE geometry description, uploaded to both one-shot passes: `Refine` mirrors
+  // `Bake` field for field precisely so this cannot drift. The AA target is
+  // therefore always regenerated by the same bake that invalidated it — a rebake
+  // with a different yaw or diskRadius can never leave stale coverage behind.
+  effects.refine.set({ refine: geometry });
 }
 
 function setShadeUniforms(
@@ -994,6 +1050,7 @@ function setShadeUniforms(
       diskOuter: settings.diskRadius,
       debugView: settings.debugView,
       diskLayers: settings.diskLayers,
+      aa: settings.aa,
       // Active rotation of the SCENE (camera yaw would be -sceneYaw). Smoothed
       // from the pointer by the render loop; the bake never sees it.
       sceneYaw,
@@ -1059,6 +1116,7 @@ function summarizeMeasurement(m: Measurement, resolution: readonly [number, numb
 async function prewarm(effects: Effects, targets: Targets, output: Output): Promise<void> {
   await Promise.all([
     effects.bake.compile(targets.gbuffer),
+    effects.refine.compile(targets.aa),
     // Compiled against the OUTPUT format (the swap chain), not an HDR target:
     // shade is the last pass and writes display-referred unorm.
     effects.shade.compile({ colors: [output.format] }),
@@ -1075,8 +1133,16 @@ function renderChain(
   /** Set only while `measure()` is sampling; otherwise the pass is untimed. */
   timer?: TimerSpan,
 ): void {
-  if (bake) frame.pass({ target: targets.gbuffer, clear: CLEAR }, (pass) => pass.draw(effects.bake));
-  // Two passes, not three: shade reads the G-buffer and writes the swap chain.
+  if (bake) {
+    frame.pass({ target: targets.gbuffer, clear: CLEAR }, (pass) => pass.draw(effects.bake));
+    // The refine pass reads what the bake just wrote, so it MUST stay in this
+    // block and after it: same throttle, same invalidation, and — because
+    // `renderFrame` suppresses the bake while `measure()` is sampling — the same
+    // guarantee that none of its cost is attributed to the shade pass.
+    frame.pass({ target: targets.aa, clear: CLEAR }, (pass) => pass.draw(effects.refine));
+  }
+  // Two passes per frame, still: shade reads the G-buffer plus 2 B/px of AA data
+  // and writes the swap chain. The two above are one-shot.
   frame.pass({ target: output, clear: CLEAR, timer }, (pass) => pass.draw(effects.shade));
 }
 

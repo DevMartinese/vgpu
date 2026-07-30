@@ -314,7 +314,15 @@ export function HeroBlackHole() {
         'disk density': 5,
         'sky footprint / prefilter': 6,
         'second disk hit': 7,
+        'ring aa (cov/span/taps)': 8,
       }).name('g-buffer view');
+      // A/B for the photon-ring antialiasing. `off` is exactly the pre-AA image:
+      // the one-shot refine pass still runs, the frame pass just ignores its
+      // coverage/span target, so this is a pure shading switch with no re-bake.
+      debug.add(settings, 'aa', {
+        'off (point sampled)': 0,
+        'on (coverage + radial prefilter)': 1,
+      }).name('photon-ring aa');
       // A/B for the second baked disk crossing: 1 shows what the renderer looked
       // like when a ray stopped at its first hit, 2 is the intended result.
       debug.add(settings, 'diskLayers', {

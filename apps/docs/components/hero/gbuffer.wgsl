@@ -37,6 +37,26 @@ export struct GBufferSample {
   viewDirection: vec3f,
   /** +1 hit from above, -1 from below, 0 no hit. Same sign as `normal.y`. */
   side: f32,
+  /**
+   * Fraction of the pixel this crossing actually covers, 0..1, measured by the
+   * refine pass (`refine.wgsl`) with 16 sub-rays. `1` everywhere outside the
+   * ~2% compressed band, and `1` on the back layer, which is not refined.
+   *
+   * It is a FRACTIONAL AREA: multiply `alpha` by it, never the colour — the
+   * radiance of the covered part does not change because the part is small.
+   */
+  coverage: f32,
+  /**
+   * How much DISK RADIUS this pixel spans at this crossing, in normalized
+   * annulus units (the same scale as `diskUv.x`), and centred on `diskPolar.x`:
+   * the crossing radii of the pixel's ray bundle all lie inside
+   * `diskPolar.x +/- span/2 * (diskOuter - ISCO)`.
+   *
+   * `0` outside the band. Where it is large the pixel is a radial AVERAGE of the
+   * disk, not a sample of it, which is what `sampleAtRadius` + a tap loop in the
+   * frame pass turn it into.
+   */
+  span: f32,
   /** True when this pixel sees the accretion disk. */
   isHit: bool,
   /** True when the ray ended inside the event horizon (render black). */
@@ -72,7 +92,7 @@ fn decodeDirection(encoded: vec2f) -> vec3f {
 }
 
 /** Decodes one crossing. `flags` and `sky` are shared by both layers. */
-fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, diskOuter: f32) -> GBufferSample {
+fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, diskOuter: f32, aa: vec2f) -> GBufferSample {
   var sample: GBufferSample;
   let planeRadius = length(plane);
   // The bake only ever writes crossings inside [ISCO, diskOuter] and leaves a
@@ -101,6 +121,8 @@ fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, di
   sample.rayDirection = sky.xyz;
   sample.viewDirection = direction;
   sample.side = select(0.0, side, isHit);
+  sample.coverage = clamp(aa.x, 0.0, 1.0);
+  sample.span = clamp(aa.y, 0.0, 1.0);
   sample.isHit = isHit;
   sample.isBlackHole = (flags & 1) != 0;
   sample.escaped = (flags & 2) != 0;
@@ -110,12 +132,18 @@ fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, di
 /**
  * Decodes the four raw G-buffer texels written by `bake.wgsl` into both disk
  * layers. `diskOuter` must be the same disk radius the bake ran with.
+ *
+ * `aa` is the matching texel of the refine pass's target — `(covFront,
+ * spanFront)`, see refine.wgsl. It describes the FRONT crossing only: the back
+ * layer is handed `(1, 0)`, i.e. "fully covered, not compressed", so it decodes
+ * exactly as it did before the AA target existed. Pass `vec2f(1.0, 0.0)` to opt
+ * out entirely.
  */
-export fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32) -> GBufferLayers {
+export fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32, aa: vec2f) -> GBufferLayers {
   let flags = i32(sky.w + 0.5);
   var layers: GBufferLayers;
-  layers.front = decodeLayer(hit1, view.xy, sky, flags, diskOuter);
-  layers.back = decodeLayer(hit2, view.zw, sky, flags, diskOuter);
+  layers.front = decodeLayer(hit1, view.xy, sky, flags, diskOuter, aa);
+  layers.back = decodeLayer(hit2, view.zw, sky, flags, diskOuter, vec2f(1.0, 0.0));
   // The bake already guarantees this ordering; enforcing it here too means a
   // second layer can never be shaded without a first one in front of it.
   if (!layers.front.isHit) {
@@ -124,4 +152,36 @@ export fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskO
     layers.back.normal = vec3f(0.0);
   }
   return layers;
+}
+
+/**
+ * The same crossing, moved to a different DISK RADIUS at the same azimuth.
+ *
+ * This is the tap generator for the frame pass's radial prefilter: where the
+ * refine pass measured a large `span`, one pixel covers a wide range of disk
+ * radii, and the honest value for it is the MEAN of `shadeDisk` over that range
+ * rather than a point sample at whichever radius the centre ray happened to hit.
+ * `shade.wgsl` calls this K times and averages; `disk.wgsl` never learns that it
+ * is being oversampled, which is what keeps the look's ownership intact.
+ *
+ * Only the radial coordinates move. Azimuth, view direction, normal, side and
+ * the flags are properties of the ray bundle and the axisymmetric geometry, so
+ * they are shared by every tap — and because they are, this is exact under
+ * `sceneYaw`: it commutes with `rotateSample`.
+ *
+ * The position is rebuilt from (radius, azimuth) rather than scaled, so it stays
+ * consistent with `diskPolar` after a rotation to within float rounding of the
+ * cos/sin pair the rotation itself used.
+ */
+export fn sampleAtRadius(g: GBufferSample, radius: f32, diskOuter: f32) -> GBufferSample {
+  var moved = g;
+  let clamped = clamp(radius, ISCO, max(diskOuter, ISCO));
+  let azimuth = g.diskPolar.y;
+  moved.position = vec3f(cos(azimuth) * clamped, 0.0, sin(azimuth) * clamped);
+  moved.diskPolar = vec2f(clamped, azimuth);
+  moved.diskUv = vec2f(
+    clamp((clamped - ISCO) / max(diskOuter - ISCO, 0.001), 0.0, 1.0),
+    g.diskUv.y,
+  );
+  return moved;
 }

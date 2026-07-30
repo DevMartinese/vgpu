@@ -19,7 +19,7 @@
 // No raymarching happens here: the geodesics were solved once by bake.wgsl.
 // See gbuffer.md for the full contract.
 
-import { GBufferSample, GBufferLayers, decodeGBuffer, ISCO, PI_CONST, TAU } from "./gbuffer.wgsl";
+import { GBufferSample, GBufferLayers, decodeGBuffer, sampleAtRadius, ISCO, PI_CONST, TAU } from "./gbuffer.wgsl";
 import { DiskLook, DiskSample, shadeDisk, SHEAR_PERIOD } from "./disk.wgsl";
 import { StarLook, shadeStars, starPrefilterRatio } from "./stars.wgsl";
 
@@ -29,8 +29,18 @@ struct Shade {
   time: f32,
   /** Outer disk radius the G-buffer was baked with. */
   diskOuter: f32,
-  /** 0 = final image, 1..7 = G-buffer debug views (see gbuffer.md). */
+  /** 0 = final image, 1..8 = G-buffer debug views (see gbuffer.md). */
   debugView: f32,
+  /**
+   * Photon-ring antialiasing: 1 consumes the refine pass's coverage/span target,
+   * 0 ignores it completely.
+   *
+   * The A/B knob, and it is a real one: at 0 every pixel is shaded exactly as it
+   * was before the AA target existed (`coverage` is forced to a literal 1 and the
+   * tap loop is never entered), so the two settings differ only inside the ~2% of
+   * pixels the refine pass flagged.
+   */
+  aa: f32,
   /** 1 = front disk crossing only, 2 = also composite the second crossing. */
   diskLayers: f32,
   /**
@@ -104,14 +114,37 @@ const SATURATION: f32 = 0.0;
  */
 @group(0) @binding(7) var noiseVolume: texture_3d<f32>;
 @group(0) @binding(8) var noiseSampler: sampler;
+/**
+ * Photon-ring AA data from the one-shot refine pass: `rg8unorm`, x = coverage of
+ * the front crossing, y = the disk radius the pixel spans there (normalized
+ * annulus units, centred on the pixel's own radius). See refine.wgsl.
+ *
+ * 2 B/px on top of the 32 B/px the G-buffer already costs this pass, read with
+ * the same 1:1 `textureLoad` as everything else. It is a separate target rather
+ * than a 5th bake attachment because the bake's MRT already spends the full
+ * 32 B/sample WebGPU guarantees.
+ */
+@group(0) @binding(9) var gAa: texture_2d<f32>;
 
 /**
  * Screen-space footprint of the disk noise for one layer, in noise units per
- * pixel. MUST be called from uniform control flow: it takes derivatives, which
- * are undefined inside the `isHit` branches, so both layers are measured for
- * every pixel and the results are only *used* on hits.
+ * pixel, SPLIT INTO ITS TWO AXES: `x` = the angular term (`disk.stretch` x the
+ * azimuth a pixel covers), `y` = the radial term (`disk.detail` x the disk radius
+ * a pixel covers).
+ *
+ * MUST be called from uniform control flow: it takes derivatives, which are
+ * undefined inside the `isHit` branches, so both layers are measured for every
+ * pixel and the results are only *used* on hits.
+ *
+ * The two axes are kept apart because the ring prefilter needs exactly one of
+ * them. Inside the compressed band the radial term is enormous (the pixel spans
+ * most of the annulus) and it is the term each TAP replaces with its own, much
+ * narrower slice — while the angular term is the pixel's and stays the pixel's.
+ * Collapsing them here first, and then handing the collapsed value to the taps,
+ * would prefilter every tap over the whole span and flatten precisely the
+ * emission crests the tap loop exists to average.
  */
-fn diskFootprint(g: GBufferSample) -> f32 {
+fn diskFootprintAxes(g: GBufferSample) -> vec2f {
   let angular = max(disk.stretch, 0.05);
   let noiseAngle = g.diskPolar.y - min(shade.time, SHEAR_PERIOD * 0.5) * (disk.speed * 0.55 / pow(g.diskPolar.x, 1.5));
   let noiseCoords = vec3f(
@@ -119,10 +152,18 @@ fn diskFootprint(g: GBufferSample) -> f32 {
     sin(noiseAngle) * angular,
     g.diskPolar.x * disk.detail,
   );
-  return min(
-    max(max(fwidth(noiseCoords.x), fwidth(noiseCoords.y)), fwidth(noiseCoords.z)),
-    4.0,
+  return vec2f(
+    max(fwidth(noiseCoords.x), fwidth(noiseCoords.y)),
+    fwidth(noiseCoords.z),
   );
+}
+
+/**
+ * The scalar `shadeDisk` takes: the wider of the two axes, capped. Unchanged —
+ * this is bit-for-bit the value `diskFootprint` returned before it was split.
+ */
+fn diskFootprint(axes: vec2f) -> f32 {
+  return min(max(axes.x, axes.y), 4.0);
 }
 
 /**
@@ -176,6 +217,117 @@ fn rotateLayers(layers: GBufferLayers, angle: f32) -> GBufferLayers {
   rotated.front = rotateSample(layers.front, angle);
   rotated.back = rotateSample(layers.back, angle);
   return rotated;
+}
+
+// --- Photon-ring radial prefilter --------------------------------------------
+//
+// The artifact this exists for is NOT a jaggy silhouette. At screen radius
+// r ~ 190 px (720p) the whole [ISCO, diskOuter] annulus is compressed into
+// ~1.5 px, so one ray per pixel draws a random disk radius out of the entire
+// annulus: measured on debug view 2, `diskUv.x` jumps 0.12 -> 0.71 between two
+// adjacent pixels. Every softness in disk.wgsl (`innerEdge`, `outerEdge`, `flux`)
+// is soft in DISK space and therefore a hard step in SCREEN space there. The
+// visible result is a dotted 1 px wire whose brightness jitters 10x between
+// neighbouring degrees of azimuth (measured tangential profile: min 9, max 112,
+// against 28..70 for a 3x supersampled reference).
+//
+// Coverage alone does not fix that — it makes the wire continuous and leaves it
+// jittering. The fix is to PREFILTER: where the refine pass measured a large
+// radial span, evaluate `shadeDisk` at K radii across the span and average, which
+// is the disk's analogue of `starPrefilterRatio`. Radiance is conserved; do not
+// fade the ring out, ever (gbuffer.md documents `starLod` as exactly that
+// mistake).
+
+/**
+ * Taps across the measured span. 6, not 8: the sub-pixel span is at most the
+ * whole annulus and 6 samples of a smooth radial profile already put the residual
+ * well under the 8-bit output quantisation, while the thermal budget scales
+ * linearly with this number. Drop to 4 before dropping the whole loop.
+ */
+const AA_TAPS: i32 = 6;
+/**
+ * Span (normalized annulus units) above which a pixel is treated as compressed.
+ *
+ * Below it the single centre sample is already representative and the taps would
+ * be six evaluations of nearly the same radius. It is also the static gate on the
+ * thermal cost: on the shipped defaults ~1.4% of pixels clear it.
+ */
+const AA_SPAN_MIN: f32 = 0.15;
+
+/**
+ * `shadeDisk` for the front layer, radially prefiltered where the pixel is
+ * compressed.
+ *
+ * Mean of `color * alpha` and mean of `alpha` are accumulated SEPARATELY and
+ * recombined, because emission-absorption is linear in exactly those two (see
+ * `compositeDisk`): averaging `color` instead would weight the transparent taps
+ * as heavily as the opaque ones and wash the ring out.
+ *
+ * Taps that fall outside [ISCO, diskOuter] are dropped from BOTH the sum and the
+ * divisor rather than clamped: the fractional area of the annulus inside the pixel
+ * is already carried by `coverage`, so clamping would pile weight onto the two
+ * edge radii and bias the mean toward them.
+ *
+ * `footprint` comes from the caller's uniform prologue — no derivative is taken
+ * in here, and none can be: this runs in non-uniform control flow. `shadeDisk`
+ * samples the noise volume through `textureSampleLevel` (explicit LOD), which is
+ * legal here for the same reason the existing `isHit` branches are.
+ */
+fn shadeFront(g: GBufferSample, footprint: f32, angularFootprint: f32) -> DiskSample {
+  let annulus = max(shade.diskOuter - ISCO, 0.001);
+  let spanWorld = g.span * annulus;
+  if (shade.aa < 0.5 || g.span <= AA_SPAN_MIN) {
+    return shadeDisk(g, disk, shade.time, footprint, noiseVolume, noiseSampler);
+  }
+
+  // Per-tap footprint, EMPHATICALLY NOT the pixel's. `disk.wgsl` inverts
+  // `footprint = max(detail * dRadius, stretch * dAngle)` for its anisotropic
+  // pixel ellipse, so the footprint is rebuilt here from the same two terms with
+  // the radial one replaced: each tap stands for a slice `spanWorld / K` wide, not
+  // for the whole span, while the angular term is still the pixel's own measured
+  // one (`frontAxes.x`, from uniform control flow).
+  //
+  // Passing the pixel's collapsed `footprint` here instead — which is what the
+  // radial term of the fwidth measurement dominates inside the band — measures
+  // MEASURABLY worse: it prefilters every tap over the entire annulus, and because
+  // the disk's emissivity is a 5th power of the noise field, flattening the field
+  // destroys the crest energy the taps are supposed to be averaging. Measured on
+  // the shipped defaults: the ring band's mean luma came out at 0.0324 (the
+  // un-antialiased value) with the collapsed footprint, versus a 0.0425 reference.
+  let tapFootprint = min(max(angularFootprint, max(disk.detail, 0.05) * (spanWorld / f32(AA_TAPS))), 4.0);
+  let step = spanWorld / f32(AA_TAPS);
+  let start = g.diskPolar.x - spanWorld * 0.5;
+
+  var sumEmission = vec3f(0.0);
+  var sumAlpha = 0.0;
+  var sumDensity = 0.0;
+  var taps = 0.0;
+  for (var i = 0; i < AA_TAPS; i++) {
+    let radius = start + (f32(i) + 0.5) * step;
+    if (radius < ISCO || radius > shade.diskOuter) {
+      continue;
+    }
+    let tap = shadeDisk(sampleAtRadius(g, radius, shade.diskOuter), disk, shade.time, tapFootprint, noiseVolume, noiseSampler);
+    sumEmission += tap.color * tap.alpha;
+    sumAlpha += tap.alpha;
+    sumDensity += tap.density;
+    taps += 1.0;
+  }
+  // Every tap outside the annulus: only reachable if the centre radius itself is
+  // at an edge with a full-annulus span, and the honest answer then is the sample
+  // we actually have.
+  if (taps < 0.5) {
+    return shadeDisk(g, disk, shade.time, footprint, noiseVolume, noiseSampler);
+  }
+
+  var sample: DiskSample;
+  let meanAlpha = sumAlpha / taps;
+  sample.alpha = meanAlpha;
+  // Reconstruct the colour that reproduces the mean EMISSION through
+  // `compositeDisk`'s `color * alpha`.
+  sample.color = select(vec3f(0.0), (sumEmission / taps) / max(meanAlpha, 1e-6), meanAlpha > 1e-6);
+  sample.density = sumDensity / taps;
+  return sample;
 }
 
 /** A layer that contributes nothing, so it can be composited unconditionally. */
@@ -246,12 +398,19 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   let dimensions = vec2f(textureDimensions(gHit1, 0));
   let texel = vec2i(clamp(uv * dimensions, vec2f(0.0), dimensions - vec2f(1.0)));
 
+  // Photon-ring AA data for THIS pixel: (coverage, span) of the front crossing,
+  // written by the one-shot refine pass. Outside its ~2% band it is exactly
+  // (1, 0) — an exact 1 in rg8unorm — so those pixels multiply their alpha by a
+  // literal one and stay bit-for-bit what they were.
+  let aa = textureLoad(gAa, texel, 0).xy;
+
   let baked = decodeGBuffer(
     textureLoad(gHit1, texel, 0).xy,
     textureLoad(gHit2, texel, 0).xy,
     textureLoad(gSky, texel, 0),
     textureLoad(gView, texel, 0),
     shade.diskOuter,
+    aa,
   );
 
   // Both footprints, in uniform control flow. The second layer sits at a
@@ -263,8 +422,10 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   // measuring after the rotation would make the LOD breathe by up to ~sqrt(2)
   // as the mouse moves. The physical (angular / radial) footprint is invariant,
   // so the pre-rotation measurement is the correct one.
-  let frontFootprint = diskFootprint(baked.front);
-  let backFootprint = diskFootprint(baked.back);
+  let frontAxes = diskFootprintAxes(baked.front);
+  let backAxes = diskFootprintAxes(baked.back);
+  let frontFootprint = diskFootprint(frontAxes);
+  let backFootprint = diskFootprint(backAxes);
 
   // Angular footprint of the LENSED direction map, in cube-face units per pixel
   // (the units `stars.wgsl` measures its point radius in). Also derivatives, so
@@ -331,7 +492,15 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
     backSample = shadeDisk(layers.back, disk, shade.time, backFootprint, noiseVolume, noiseSampler);
   }
   if (layers.front.isHit) {
-    frontSample = shadeDisk(layers.front, disk, shade.time, frontFootprint, noiseVolume, noiseSampler);
+    frontSample = shadeFront(layers.front, frontFootprint, frontAxes.x);
+    // Fractional area, applied to alpha ONLY: the covered part of the pixel keeps
+    // its full radiance, it simply covers less of the pixel, so the background
+    // (stars, or the hidden second image) shows through the rest. Scaling the
+    // colour instead would be the `starLod` fade-to-black mistake in a new place.
+    // `density` follows because it IS the opacity debug view 5 reads.
+    let coverage = select(1.0, layers.front.coverage, shade.aa > 0.5);
+    frontSample.alpha *= coverage;
+    frontSample.density *= coverage;
   }
 
   // Back to front. Both composites are unconditional: an empty layer has
@@ -386,6 +555,23 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   // disk coordinates (radius, azimuth) to confirm the geometry is sane.
   if (mode == 7) {
     return vec4f(select(vec3f(0.0), vec3f(layers.back.diskUv, 1.0), layers.back.isHit), 1.0);
+  }
+  // Photon-ring AA diagnostic (the refine pass's whole output plus what the frame
+  // pass did with it). R = coverage of the front crossing, G = the radial span the
+  // pixel covers in normalized annulus units, B = 1 exactly where the K-tap
+  // prefilter ran. So:
+  //   dark red rim, B = 0  -> partial coverage, no compression: coverage only.
+  //   yellow + blue        -> the compressed band; this is the ring being fixed.
+  //   R > 0 with G = 0 and no B on a pixel that renders black -> the failure mode
+  //     to look for: the 5x5 dilation found coverage the centre ray missed, and
+  //     there is no radius to rebuild the sample from (see refine.wgsl).
+  if (mode == 8) {
+    return vec4f(
+      aa.x,
+      aa.y,
+      select(0.0, 1.0, shade.aa > 0.5 && g.isHit && g.span > AA_SPAN_MIN),
+      1.0,
+    );
   }
 
   // Display-referred output, written straight to the swap chain: the linear HDR
