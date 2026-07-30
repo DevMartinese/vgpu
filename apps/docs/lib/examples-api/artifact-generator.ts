@@ -9,7 +9,7 @@ import {
   EXAMPLES_PROTOCOL,
   EXAMPLES_SCHEMA_SHA256,
 } from './contracts';
-import { canonicalExampleBytes, canonicalRevisionBytes, sha256, validatePath } from './hashing';
+import { artifactSetRevision, canonicalExampleBytes, canonicalRevisionBytes, sha256, validatePath } from './hashing';
 
 export interface GeneratedArtifact {
   readonly key: string;
@@ -41,7 +41,11 @@ export function generateExampleArtifacts(
   verifyGraph(graph);
   const normalizedOrigin = origin.replace(/\/$/, '');
   validateUri(normalizedOrigin, 'Artifact origin');
-  const base = `${EXAMPLES_BLOB_PREFIX}/revisions/${graph.revision}`;
+  // The published revision identifies the ARTIFACT SET, not just the source snapshot: these bytes
+  // embed `normalizedOrigin` in every absolute URL, so a different origin must yield a different
+  // revision. See artifactSetRevision().
+  const revision = artifactSetRevision(graph.revision, normalizedOrigin);
+  const base = `${EXAMPLES_BLOB_PREFIX}/revisions/${revision}`;
   const artifacts: GeneratedArtifact[] = [];
   const add = (key: string, bytes: Uint8Array, contentType: string, immutable: boolean) => {
     if (artifacts.some((artifact) => artifact.key === key)) throw new Error(`Duplicate artifact key: ${key}`);
@@ -58,7 +62,7 @@ export function generateExampleArtifacts(
       return { path: file.path, contentType: file.contentType, size: file.size, sha256: file.sha256, url: url(normalizedOrigin, key) };
     });
     const document = {
-      schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision,
+      schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision,
       id: example.id, ...example.metadata, aggregateSha256: example.aggregateSha256, files,
     };
     const key = `${base}/examples/${example.id}/manifest.json`;
@@ -68,7 +72,7 @@ export function generateExampleArtifacts(
   });
 
   const indexDocument = {
-    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision, source: graph.source,
+    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision, source: graph.source,
     examples: manifests.map(({ example, key, sha256: manifestSha256 }) => ({
       id: example.id, ...example.metadata, fileCount: example.files.length,
       aggregateSha256: example.aggregateSha256, manifestUrl: url(normalizedOrigin, key), manifestSha256,
@@ -79,7 +83,7 @@ export function generateExampleArtifacts(
   add(indexKey, indexBytes, 'application/json; charset=utf-8', true);
 
   const revisionDocument = {
-    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision,
+    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision,
     objects: artifacts.map(({ key, bytes, sha256: objectSha256, contentType }) => ({ key, size: bytes.byteLength, sha256: objectSha256, contentType })),
   };
   add(`${base}/revision.json`, json(revisionDocument), 'application/json; charset=utf-8', true);
@@ -96,11 +100,11 @@ export function generateExampleArtifacts(
 
   const latestKey = `${EXAMPLES_BLOB_PREFIX}/latest.json`;
   add(latestKey, json({
-    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision,
+    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision,
     indexUrl: url(normalizedOrigin, indexKey), indexSha256: sha256(indexBytes),
   }), 'application/json; charset=utf-8', false);
 
-  return { revision: graph.revision, artifacts, discoveryKey, latestKey };
+  return { revision, artifacts, discoveryKey, latestKey };
 }
 
 export async function writeArtifactTree(set: GeneratedArtifactSet, outputDirectory: string): Promise<void> {
