@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { InlineCode, stripBackticks } from './inline-code';
 
@@ -15,6 +15,17 @@ type Tab = keyof typeof tabContent;
 const tabs = Object.keys(tabContent) as Tab[];
 
 /**
+ * How long the outgoing snippet takes to clear, in ms. The incoming one settles
+ * over 200ms (`duration-200` below): the outgoing line leaving a touch faster
+ * reads as a handover rather than a dissolve.
+ *
+ * Keep this in step with the `duration-150` on the leaving layer — it is what
+ * decides when that layer is re-parked below the line, and re-parking early
+ * would cut the fade short.
+ */
+const LEAVE_MS = 150;
+
+/**
  * Hero setup snippet: a text-only tab switcher over a hairline rule.
  *
  * Deliberately not a card — it sits directly on the shader, so the only chrome
@@ -23,8 +34,27 @@ const tabs = Object.keys(tabContent) as Tab[];
  */
 export function HeroTabs() {
   const [activeTab, setActiveTab] = useState<Tab>('Prompt');
+  // The tab that is currently on its way out. Every other inactive tab is
+  // "parked" below the line, which is what makes the next one rise from below.
+  const [leavingTab, setLeavingTab] = useState<Tab | null>(null);
   const [copied, setCopied] = useState(false);
+  const parkTimer = useRef<number | undefined>(undefined);
   const content = tabContent[activeTab];
+
+  const selectTab = (tab: Tab) => {
+    if (tab === activeTab) return;
+    setLeavingTab(activeTab);
+    setActiveTab(tab);
+    // Re-park the outgoing layer below the line once it has faded, so it rises
+    // again on its next turn instead of dropping in from above. It is fully
+    // transparent by then, so the jump back down is invisible. Restarting the
+    // timer on every switch is also the guard against fast alternating clicks:
+    // a layer is only ever re-parked after it has actually finished leaving.
+    window.clearTimeout(parkTimer.current);
+    parkTimer.current = window.setTimeout(() => setLeavingTab(null), LEAVE_MS);
+  };
+
+  useEffect(() => () => window.clearTimeout(parkTimer.current), []);
 
   const copy = async () => {
     try {
@@ -57,7 +87,7 @@ export function HeroTabs() {
               type="button"
               role="tab"
               aria-selected={activeTab === tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => selectTab(tab)}
               className={
                 activeTab === tab ? 'text-white' : 'text-white/50 hover:text-white/80'
               }
@@ -99,7 +129,46 @@ export function HeroTabs() {
         aria-label={copied ? 'Copied' : `Copy: ${stripBackticks(content)}`}
         className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
       >
-        <InlineCode text={content} />
+        {/*
+          Every snippet is rendered, stacked in one grid cell, and crossfaded.
+
+          Stacking rather than swapping a single node is what keeps the block
+          rigid: the cell is always as tall as the LONGEST snippet, so neither
+          the rule above nor the tagline this is centred with can move — not
+          during the transition, and not between tabs either (Prompt wraps to
+          two lines on a phone where Skill fits on one).
+
+          Three states instead of active/inactive, because direction matters:
+          the one leaving lifts UP and the one arriving rises from BELOW, so a
+          tab that is merely idle has to wait below the line. Plain transitions
+          (no keyframes) so an interrupted switch interpolates from wherever it
+          got to instead of snapping back to 0% — mash the tabs and it stays
+          smooth.
+        */}
+        <span className="grid">
+          {tabs.map((tab) => {
+            const state = tab === activeTab ? 'active' : tab === leavingTab ? 'leaving' : 'idle';
+            return (
+              <span
+                key={tab}
+                aria-hidden={state !== 'active'}
+                // motion-reduce drops the transition only: the same end states
+                // still apply, so the swap is instant instead of animated.
+                className={`col-start-1 row-start-1 motion-reduce:transition-none ${
+                  state === 'active'
+                    ? 'translate-y-0 opacity-100 transition duration-200 ease-out'
+                    : state === 'leaving'
+                      ? '-translate-y-1.5 select-none opacity-0 transition duration-150 ease-out'
+                      : // Parked below with no transition, so re-parking after a
+                        // switch costs nothing and is invisible at opacity 0.
+                        'translate-y-1.5 select-none opacity-0'
+                }`}
+              >
+                <InlineCode text={tabContent[tab]} />
+              </span>
+            );
+          })}
+        </span>
         <span
           aria-hidden
           className={`absolute right-0 top-1/2 -translate-y-1/2 transition-opacity ${
