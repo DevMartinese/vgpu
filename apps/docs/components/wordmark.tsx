@@ -37,7 +37,13 @@ export function Wordmark({
       <svg className="h-3.5 w-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
         <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
       </svg>
-      <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
+      {/* 16px to sit level with the homepage nav links, which are
+          text-[13px] sm:text-[15px] lg:text-[16px]. Matching them responsively
+          was the other option and it is wrong for a shared mark: it would drop
+          the two sidebar logos to 13px on mobile, and those sidebars have no
+          such nav to line up with. A flat 16px matches exactly at lg and simply
+          never shrinks. Weight stays 600. */}
+      <span className="text-base font-semibold text-gray-12">vgpu</span>
       {children}
     </Link>
   );
