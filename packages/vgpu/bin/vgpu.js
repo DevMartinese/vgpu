@@ -16,42 +16,23 @@ const VERSION = packageJson.version;
 
 const help = `vgpu ${VERSION}
 
-Official VGPU CLI.
+TypeScript library for WebGPU: typed shader imports, a tiny gpu-first API, and
+the same code running in the browser, headless Node, and your test suite.
 
-New here? Read the guide first:
-  vgpu docs cat getting-started.md
-Rendering in Node? Check the environment first:
-  vgpu doctor
+## Read the docs
+  npx vgpu docs cat getting-started.md    The guide for using the current API correctly
+  npx vgpu docs find "<topic | symbol | VGPU-error-code>"
+  npx vgpu docs cat <path>
 
-Commands:
-  check      Validate and reflect a WGSL file as JSON
-  docs       Explore bundled VGPU documentation
-  examples   Inspect canonical gallery source (never executes code)
-  snapshot   Compare the representative GPU pixel snapshot
-  install-dawn  Download and verify the portable Node Dawn prebuild
-  install-software-renderer  Download and verify the portable CPU renderer
-  doctor     Verify this machine can render headless (JSON verdict + fixes)
-  wgsl       Coming soon
+## Validate shader code
+  npx vgpu check <file.wgsl>              Validate and reflect a WGSL file as JSON
 
-Primary runtime entrypoints:
-  - vgpu
-  - vgpu/node
-  - vgpu/mock
-  - vgpu/scene
-  - vgpu/client
+## Working examples
+  npx vgpu examples search "<topic>"
+  npx vgpu examples pull <slug> --out <dir>
 
-WGSL and adapter packages:
-  - @vgpu/wgsl
-  - @vgpu/adapter-mock
-  - @vgpu/adapter-node
-
-Slim tooling subpaths:
-  - @vgpu/render/inspect
-  - @vgpu/render/utils
-  - @vgpu/render/edit
-  - @vgpu/render/perf
-
-Run \`vgpu docs --help\` for docs commands.
+## Node rendering environment
+  npx vgpu doctor
 `;
 
 const comingSoon = (command) => `vgpu ${command} is coming soon.
@@ -72,7 +53,7 @@ export function runCli(args) {
   if (command === "install-software-renderer") return runInstallSoftwareRenderer(rest);
   if (command === "doctor") return runDoctor(rest);
   if (command === "wgsl") return { code: 1, stderr: comingSoon(command) };
-  return { code: 1, stderr: `Unknown vgpu command: ${command}\n\n${help}` };
+  return { code: 2, stderr: `Unknown command: ${command}\n\n${help}` };
 }
 
 if (isMain()) {
