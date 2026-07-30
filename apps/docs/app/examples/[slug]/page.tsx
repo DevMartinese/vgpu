@@ -53,7 +53,7 @@ export default async function ExampleDetailPage({ params, searchParams }: Exampl
         </div>
 
         <div className="space-y-6">
-          <ExamplePreview slug={example.meta.slug} title={example.meta.title} poster={example.meta.hero} />
+          <ExamplePreview slug={example.meta.slug} title={example.meta.title} />
           <CodeViewer files={example.sources} activeFile={activeFile} />
         </div>
       </div>
