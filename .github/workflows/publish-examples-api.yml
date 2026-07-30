@@ -1,3 +1,9 @@
+# Dormant: only needed for the versioned blob mode, see apps/docs/examples-api.md.
+#
+# The examples API serves latest-only from the files that ship with the docs deployment, so the
+# deploy itself is the publication step and this workflow is not part of that path. It is kept
+# because it is complete and tested: it stays the entry point for versioned artifact retention
+# (permanent revisions, create-only writes, latest-pointer-last transaction) when that is enabled.
 name: Publish examples API
 
 on:
@@ -20,7 +26,7 @@ jobs:
       contents: read
     env:
       VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN: ${{ secrets.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN }}
-      VGPU_EXAMPLES_ORIGIN: ${{ vars.VGPU_EXAMPLES_ORIGIN || 'https://vgpu.labs.vercel.dev' }}
+      VGPU_EXAMPLES_ORIGIN: ${{ vars.VGPU_EXAMPLES_ORIGIN || 'https://vgpu.sh' }}
       VGPU_EXAMPLES_BLOB_PREFIX: ${{ vars.VGPU_EXAMPLES_BLOB_PREFIX || 'examples/v1' }}
       VERCEL_DEPLOYMENT_URL: ${{ inputs.deployment_url }}
     steps:
@@ -38,7 +44,7 @@ jobs:
       - name: Require retained public Blob credentials and official origin
         run: |
           test -n "$VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN" || { echo "::error::Missing VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN"; exit 1; }
-          test "$VGPU_EXAMPLES_ORIGIN" = "https://vgpu.labs.vercel.dev" || { echo "::error::Unexpected production origin"; exit 1; }
+          test "$VGPU_EXAMPLES_ORIGIN" = "https://vgpu.sh" || { echo "::error::Unexpected production origin"; exit 1; }
           test "$VGPU_EXAMPLES_BLOB_PREFIX" = "examples/v1" || { echo "::error::Unexpected blob prefix"; exit 1; }
           test -n "$VERCEL_DEPLOYMENT_URL" || { echo "::error::Missing VERCEL_DEPLOYMENT_URL"; exit 1; }
       - name: Confirm the matching docs deployment is already live

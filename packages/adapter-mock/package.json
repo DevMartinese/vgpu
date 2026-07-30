@@ -1,6 +1,6 @@
 {
   "name": "@vgpu/adapter-mock",
-  "version": "0.1.6",
+  "version": "0.2.0-rc.1",
   "description": "Mock GPU adapter for testing vgpu code without real WebGPU hardware.",
   "keywords": [
     "webgpu",
@@ -35,6 +35,7 @@
   },
   "files": [
     "dist",
+    "!dist/tsconfig.tsbuildinfo",
     "src/**/*.docs.md",
     "README.md",
     "LICENSE"

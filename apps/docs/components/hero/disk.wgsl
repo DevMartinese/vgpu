@@ -3,7 +3,7 @@
 // Owned by the "disk" workstream. You can rewrite everything below `shadeDisk`
 // freely; just keep the exported signatures stable:
 //
-//   struct DiskLook { ... }                                  <- uniform payload, see GBUFFER.md
+//   struct DiskLook { ... }                                  <- uniform payload, see gbuffer.md
 //   struct DiskSample { color: vec3f, alpha: f32, density: f32 }
 //   fn shadeDisk(g, look, time, footprint, noiseTex, noiseSampler) -> DiskSample
 //
@@ -168,7 +168,7 @@ fn streakFbm(
 ) -> f32 {
   // This loop IS the hot path: up to 5 octaves, run ~26 times per pixel per
   // layer. Everything in it was measured in half precision once (1.18x SLOWER
-  // on a real GPU than plain f32 — see GBUFFER.md) and is deliberately f32.
+  // on a real GPU than plain f32 — see gbuffer.md) and is deliberately f32.
   var value: f32 = 0.0;
   var total: f32 = 0.0;
   var amplitude: f32 = 0.5;

@@ -1,6 +1,6 @@
 {
   "name": "docs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-ort-assets.mjs && node scripts/prepare-depth-models.mjs && node scripts/ingest-examples.mjs",
@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "check:example-imports": "node scripts/check-example-imports.mjs",
     "check:example-bundles": "node scripts/check-example-bundles.mjs",
+    "check:examples-api-tracing": "node scripts/check-examples-api-tracing.mjs",
     "build:workspace": "pnpm --dir ../.. run build"
   },
   "dependencies": {

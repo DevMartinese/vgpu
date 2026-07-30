@@ -20,7 +20,8 @@ export async function artifactResponse(
   let artifact: StoredArtifact | undefined;
   try {
     artifact = await load();
-  } catch {
+  } catch (error) {
+    reportStorageFailure(request, method, error);
     return errorResponse(500, 'VGPU-EXAMPLES-STORAGE', 'Artifact storage verification failed');
   }
   if (!artifact) return errorResponse(404, 'VGPU-EXAMPLES-NOT-FOUND', 'Artifact not found');
@@ -48,6 +49,21 @@ export function methodNotAllowedResponse(): Response {
   const response = errorResponse(405, 'VGPU-EXAMPLES-METHOD-NOT-ALLOWED', 'Only GET, HEAD, and OPTIONS are allowed');
   response.headers.set('Allow', 'GET, HEAD, OPTIONS');
   return response;
+}
+
+/**
+ * Storage failures are fail-closed by design (a missing credential or an
+ * integrity mismatch must never degrade into a 404 or into deployment files),
+ * so the response body stays deliberately opaque. Without a server-side record
+ * of the cause, though, every distinct condition — absent
+ * `VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN`, an unsupported
+ * `VGPU_EXAMPLES_ARTIFACT_STORE`, a rejected Blob read, a corrupt revision
+ * manifest — is indistinguishable in production. Log the cause only; the
+ * public response is unchanged.
+ */
+function reportStorageFailure(request: Request, method: ReadMethod, error: unknown): void {
+  const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  console.error(`VGPU-EXAMPLES-STORAGE ${method} ${new URL(request.url).pathname} — ${cause}`);
 }
 
 function errorResponse(status: number, code: string, message: string): Response {

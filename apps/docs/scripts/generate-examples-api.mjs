@@ -33,7 +33,7 @@ try {
         import { readFile } from 'node:fs/promises';
         const sourceIdentity = ${sourceIdentityExpression};
         const graph = adaptCanonicalSourceExport(exampleSources, { repository: 'https://github.com/vgpu/vgpu', gitCommit: sourceIdentity });
-        const set = generateExampleArtifacts(graph, ${JSON.stringify(process.env.VGPU_EXAMPLES_ORIGIN ?? 'https://vgpu.labs.vercel.dev')});
+        const set = generateExampleArtifacts(graph, ${JSON.stringify(process.env.VGPU_EXAMPLES_ORIGIN ?? 'https://vgpu.sh')});
         await writeArtifactTree(set, ${JSON.stringify(output)});
         const verifyDeployed = async ({ artifacts }) => {
           const deployment = new URL(${JSON.stringify(deploymentUrl ? (deploymentUrl.startsWith('http') ? deploymentUrl : `https://${deploymentUrl}`) : 'https://invalid.local')});

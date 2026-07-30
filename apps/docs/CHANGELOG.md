@@ -1,0 +1,35 @@
+# docs
+
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [0026ff2]
+- Updated dependencies [ae3b42c]
+- Updated dependencies [b29b180]
+- Updated dependencies [f526de2]
+- Updated dependencies [69b3f16]
+- Updated dependencies [6426a94]
+- Updated dependencies [1905a0c]
+- Updated dependencies [d57a030]
+- Updated dependencies [ccbdd95]
+- Updated dependencies [8c186ae]
+- Updated dependencies [d030381]
+- Updated dependencies [388477e]
+- Updated dependencies [ea7cd96]
+- Updated dependencies [47f7ec8]
+- Updated dependencies [580b6d5]
+- Updated dependencies [e37f89d]
+- Updated dependencies [213e467]
+- Updated dependencies [bf7c688]
+- Updated dependencies [12aa696]
+- Updated dependencies [4178c6e]
+- Updated dependencies [3da184f]
+- Updated dependencies [f526de2]
+- Updated dependencies [8fc4daf]
+  - vgpu@0.2.0
+  - @vgpu/core@0.2.0
+  - @vgpu/wgsl@0.2.0
+  - @vgpu/adapter-mock@0.2.0
+  - @vgpu/adapter-node@0.1.7
+  - @vgpu/cli@0.1.7

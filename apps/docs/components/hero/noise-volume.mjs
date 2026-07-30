@@ -11,7 +11,7 @@
 // the shader can replace the eight hashes with one trilinear fetch. The texture
 // is sampled with `address_mode = repeat`, i.e. the noise becomes exactly
 // `SIZE`-periodic on every axis. See `noise3` in disk.wgsl for the sampling
-// side and GBUFFER.md for the contract.
+// side and gbuffer.md for the contract.
 //
 // Why it is a plain `.mjs` and not a `.ts`: `debug-render.mjs` must build the
 // byte-identical volume, and it runs on bare Node with no transpiler. A second

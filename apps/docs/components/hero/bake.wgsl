@@ -43,7 +43,7 @@ const FLAG_HOLE: f32 = 1.0;
  */
 const FLAG_ESCAPED: f32 = 2.0;
 
-// G-BUFFER LAYOUT — 4 attachments, 32 bytes per sample. See GBUFFER.md.
+// G-BUFFER LAYOUT — 4 attachments, 32 bytes per sample. See gbuffer.md.
 //
 // The byte budget is the whole reason this is packed rather than simply
 // duplicated: WebGPU only guarantees maxColorAttachmentBytesPerSample = 32, and
@@ -102,7 +102,7 @@ fn geodesicAcceleration(position: vec3f, velocity: vec3f) -> vec3f {
   // `uv.y * 2 - 1` straight into `up` renders the whole scene upside down.
   // Every other pass is a 1:1 pass-through (shade textureLoads uv*dims, composite
   // samples uv), so this is the single place the convention is converted, and it
-  // fixes the browser and the node harness at once. See GBUFFER.md.
+  // fixes the browser and the node harness at once. See gbuffer.md.
   let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
   // centerY shifts the image vertically, in NDC units: positive moves the black
   // hole UP on screen. Kept at 0 now that the canvas covers the whole hero.

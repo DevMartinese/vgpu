@@ -155,7 +155,7 @@ The `vgpu examples` commands let you search and inspect the source code of the v
 ```text
 vgpu examples — inspect canonical gallery source (never executes code)
 
-Official origin: https://vgpu.labs.vercel.dev
+Official origin: https://vgpu.sh
 
 Usage:
   vgpu examples search <query> [--any] [--limit <n>] [--revision <sha256>] [--offline] [--pretty]

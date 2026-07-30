@@ -7,6 +7,16 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const docsDir = resolve(root, 'apps/docs/lib/examples-api/schemas/v1');
 const cliDir = resolve(root, 'packages/vgpu/lib/examples/schemas/v1');
 const names = ['discovery', 'error', 'index', 'manifest'];
+// DO NOT "fix" the `$id` values in schemas/v1/*.schema.json to https://vgpu.sh.
+// EXAMPLES_SCHEMA_SHA256 below is derived from the raw BYTES of those four files, and the
+// client rejects any server whose advertised schemaSha256 differs (client.js -> handshake,
+// VGPU-EXAMPLES-INCOMPATIBLE-API). Rewriting an `$id` changes the bytes, changes the contract
+// hash, and instantly breaks every already-published CLI against a newly deployed server.
+// The `$id` is a decorative identity string: nothing in this repo dereferences it (no ajv, no
+// $ref resolution -- validation is hand-written in packages/vgpu/lib/examples/schema.js), so
+// leaving it on the legacy domain costs nothing. Changing it must be a deliberate, coordinated
+// contract revision, never a drive-by domain rename. Same reason: do not add a `$comment` key
+// to those files -- that also changes the bytes.
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 await mkdir(cliDir, { recursive: true });
 const hashes = {};

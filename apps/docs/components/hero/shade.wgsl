@@ -17,7 +17,7 @@
 // The G-buffer debug views return BEFORE the tone map, so their channels stay raw.
 //
 // No raymarching happens here: the geodesics were solved once by bake.wgsl.
-// See GBUFFER.md for the full contract.
+// See gbuffer.md for the full contract.
 
 import { GBufferSample, GBufferLayers, decodeGBuffer, ISCO, PI_CONST, TAU } from "./gbuffer.wgsl";
 import { DiskLook, DiskSample, shadeDisk, SHEAR_PERIOD } from "./disk.wgsl";
@@ -29,7 +29,7 @@ struct Shade {
   time: f32,
   /** Outer disk radius the G-buffer was baked with. */
   diskOuter: f32,
-  /** 0 = final image, 1..7 = G-buffer debug views (see GBUFFER.md). */
+  /** 0 = final image, 1..7 = G-buffer debug views (see gbuffer.md). */
   debugView: f32,
   /** 1 = front disk crossing only, 2 = also composite the second crossing. */
   diskLayers: f32,

@@ -1,7 +1,7 @@
 // Shared G-buffer contract for the hero black hole.
 //
 // INFRASTRUCTURE MODULE — read it, do not edit it. `disk.wgsl` and `stars.wgsl`
-// are the files meant to be iterated on. See GBUFFER.md for the full contract.
+// are the files meant to be iterated on. See gbuffer.md for the full contract.
 //
 // WGSL modules must stay pure: no @group/@binding here (the entry shader
 // `shade.wgsl` owns every binding), only exported constants, structs and
