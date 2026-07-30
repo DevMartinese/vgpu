@@ -37,13 +37,21 @@ export function Wordmark({
       <svg className="h-3.5 w-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
         <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
       </svg>
-      {/* 16px to sit level with the homepage nav links, which are
-          text-[13px] sm:text-[15px] lg:text-[16px]. Matching them responsively
-          was the other option and it is wrong for a shared mark: it would drop
-          the two sidebar logos to 13px on mobile, and those sidebars have no
-          such nav to line up with. A flat 16px matches exactly at lg and simply
-          never shrinks. Weight stays 600. */}
-      <span className="text-base font-semibold text-gray-12">vgpu</span>
+      {/* text-lg, one step above the homepage nav links (16px at lg). It used to
+          match them exactly and that was the wrong target: sitting level with
+          the navigation made the mark read as a fourth nav item rather than as
+          the brand. A logo is allowed to outweigh the links beside it.
+
+          text-lg rather than an arbitrary text-[17px] because this scale pairs
+          18px with the same 1.75rem line-height as 16px (tailwind.config.js), so
+          the type grows and the box does not: the mark stays 28px tall and
+          neither sidebar header shifts by a pixel. An arbitrary size sets no
+          line-height and would inherit one instead.
+
+          Flat, not responsive: it is a shared mark, and the two sidebars have no
+          nav to line up with, so scaling it down on mobile would only shrink
+          their logos for nothing. Weight stays 600. */}
+      <span className="text-lg font-semibold text-gray-12">vgpu</span>
       {children}
     </Link>
   );
