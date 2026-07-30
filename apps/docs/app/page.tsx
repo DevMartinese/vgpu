@@ -23,7 +23,7 @@ const pillars = [
   {
     title: 'Ready for agents',
     description: 'Docs, CLI and skill built for coding agents. Your agent gets the full API in one command.',
-    code: 'npx vgpu docs',
+    code: 'npx vgpu',
   },
   {
     title: 'Runs on web and Node.js',

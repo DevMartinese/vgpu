@@ -8,7 +8,7 @@ export function stripBackticks(text: string): string {
 /**
  * Renders a string where `backtick`-wrapped spans are set in mono.
  *
- * For commands quoted mid-sentence ("install with `npx vgpu docs`"), where a
+ * For commands quoted mid-sentence ("install with `npx skills add vercel-labs/vgpu`"), where a
  * block would break the line but the text still has to read as literal — hence
  * a span swap. Geist Mono runs slightly wider and taller than Geist Sans at the
  * same px size, so code is nudged to 0.95em to keep the baseline row even.
