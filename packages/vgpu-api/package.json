@@ -75,6 +75,7 @@
     "@vgpu/adapter-node": "workspace:*",
     "@vgpu/core": "workspace:*",
     "@vgpu/wgsl": "workspace:*",
+    "@vgpu/wgsl-std": "workspace:*",
     "wgpu-matrix": "^3.4.2",
     "@webgpu/types": "^0.1.69",
     "pixelmatch": "^7.2.0",

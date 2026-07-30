@@ -21,6 +21,60 @@ test("walking stops at workspace root", async () => {
   await writeFile(join(dir, "node_modules", "pkg", "index.wgsl"), "export fn x(){}");
   await expect(resolveShader({ entry: join(dir, "root", "app", "main.wgsl"), validate: false })).rejects.toMatchObject({ code: "VGPU-WGSL-PKG-NOTFOUND" });
 });
+// `@vgpu/wgsl-std` reaches a user's project transitively through `vgpu`. Walking up from the shader
+// only finds it when the package manager hoists it (npm/yarn-classic); under pnpm's isolated store
+// and Yarn PnP it is installed but invisible to that walk, which is the failure a dogfood run hit.
+// The shader below sits in a temp dir with no node_modules chain at all, so it can only resolve
+// through the fallback that asks Node to resolve the specifier next to the resolver itself.
+test("a transitively installed WGSL package resolves from an isolated layout", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-isolated-"));
+  const entry = join(dir, "main.wgsl");
+  await writeFile(entry, "import { voronoi3d } from '@vgpu/wgsl-std/noise';\nfn main(){ let s = voronoi3d(vec3f(1.0)); }");
+
+  const result = await resolveShader({ entry, validate: false });
+
+  expect(result.wgsl).toContain("voronoi3d");
+  expect(result.deps.some((dep) => dep.replace(/\\/gu, "/").endsWith("wgsl-std/src/noise/index.wgsl"))).toBe(true);
+});
+
+test("a project-local copy of a WGSL package wins over the transitive one", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-local-wins-"));
+  const pkgDir = join(dir, "node_modules", "@vgpu", "wgsl-std");
+  await mkdir(pkgDir, { recursive: true });
+  await writeFile(join(pkgDir, "package.json"), JSON.stringify({ name: "@vgpu/wgsl-std", exports: { "./noise": "./local.wgsl" } }));
+  // A symbol the real package does not export: resolving to the real one would throw SYM-NOEXPORT.
+  await writeFile(join(pkgDir, "local.wgsl"), "export fn projectLocalMarker() -> f32 { return 1.0; }");
+  const entry = join(dir, "main.wgsl");
+  await writeFile(entry, "import { projectLocalMarker } from '@vgpu/wgsl-std/noise';\nfn main(){ let v = projectLocalMarker(); }");
+
+  const result = await resolveShader({ entry, validate: false });
+
+  expect(result.wgsl).toContain("projectLocalMarker");
+  expect(result.deps.some((dep) => dep.replace(/\\/gu, "/").includes("vgsl-local-wins-"))).toBe(true);
+});
+
+// Uses a package that exists in no layout: `@vgpu/wgsl-std` is now always resolvable, since
+// `@vgpu/wgsl` depends on it.
+test("uninstalled package error teaches the install fix", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-"));
+  await mkdir(join(dir, "app"), { recursive: true });
+  const entry = join(dir, "app", "main.wgsl");
+  await writeFile(entry, "import { thing } from '@acme/not-installed/noise'; fn main(){}");
+  await expect(resolveShader({ entry, validate: false })).rejects.toMatchObject({
+    code: "VGPU-WGSL-PKG-NOTFOUND",
+    message: "Package @acme/not-installed was not found. Install the package (npm install @acme/not-installed) or check the specifier",
+  });
+});
+
+test("unknown package export error names the package and points at its exports map", async () => {
+  const dir = await pkgFixture({ exports: { "./shaders/*": "./dist/*.wgsl" }, files: { "dist/foo.wgsl": "export fn x(){}" } });
+  await writeFile(join(dir, "app", "main.wgsl"), "import { x } from 'pkg/missing'; fn main(){x();}");
+  await expect(resolveShader({ entry: join(dir, "app", "main.wgsl"), validate: false })).rejects.toMatchObject({
+    code: "VGPU-WGSL-PKG-NOTFOUND",
+    message: "Package export ./missing was not found in pkg. Check the package's exports map or fix the import subpath",
+  });
+});
+
 test("conditional exports select default", async () => {
   const dir = await pkgFixture({ exports: { ".": { import: "./bad.wgsl", default: "./good.wgsl" } }, files: { "good.wgsl": "export fn x(){}" } });
   await writeFile(join(dir, "app", "main.wgsl"), "import { x } from 'pkg'; fn main(){x();}");
@@ -104,7 +158,7 @@ async function pkgFixture(opts: { exports: unknown; files: Record<string, string
   const dir = await mkdtemp(join(tmpdir(), "vgsl-"));
   await mkdir(join(dir, "app"), { recursive: true });
   await mkdir(join(dir, "node_modules", "pkg"), { recursive: true });
-  await writeFile(join(dir, "node_modules", "pkg", "package.json"), JSON.stringify({ exports: opts.exports }));
+  await writeFile(join(dir, "node_modules", "pkg", "package.json"), JSON.stringify({ name: "pkg", exports: opts.exports }));
   for (const [file, text] of Object.entries(opts.files)) {
     await mkdir(join(dir, "node_modules", "pkg", file.split("/").slice(0, -1).join("/")), { recursive: true });
     await writeFile(join(dir, "node_modules", "pkg", file), text);

@@ -7,7 +7,7 @@ Commands:
   cat <path|symbol>          Print docs by virtual path or unique symbol
   grep [-i] [--package <pkg>] <pattern>
                              Search docs content; case-sensitive unless -i is used
-  find <query>               Find symbols and docs paths by substring
+  find <query>               Find docs by name, keyword, or phrase (all words must match)
   path <symbol|path>         Resolve a symbol or virtual path for shell usage
   symbols                    List indexed symbols
   help                       Show this help

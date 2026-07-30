@@ -52,6 +52,7 @@ Writing or optimizing a shader? Read **performance-model** first, then the rest 
 - **Quickstart: Browser** — In this quickstart you run an ONNX model with ONNX Runtime Web's WebGPU execution provider and consume its output with vgpu shaders — on one shared…  `references/guides/ml-browser.docs.md`
 - **Buffers & ownership** — ts export interface InitOptions { readonly adapter?: VGPUAdapter; / Never set: adoption lives in initFromDevice(device).  `references/guides/ml-buffers.docs.md`
 - **Quickstart: Node** — In this quickstart you run the same integration in Node, with Dawn providing WebGPU.  `references/guides/ml-node.docs.md`
+- **Using vgpu with Next.js and other bundlers** — effect(gpu, source) takes WGSL as a string, so nothing forces you to use a bundler loader.  `references/guides/nextjs.docs.md`
 - **Optimize a pass** — Optimize one pass by first deciding what changes every frame.  `references/guides/optimize-pass.docs.md`
 - **Performance model** — vgpu's public API is organized around stable identities.  `references/guides/performance-model.docs.md`
 - **Performance patterns** — This is the quick index.  `references/guides/performance-patterns.docs.md`

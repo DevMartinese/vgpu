@@ -72,6 +72,37 @@ test("extracts schema v3 topic metadata from symbol docs", () => {
   });
 });
 
+test("parses declared search keywords for guides", () => {
+  const manifest = createManifest("", {
+    exists: () => true,
+    read: () => "---\ntitle: Using vgpu with Next.js\nkeywords: nextjs, Next.js, wgsl loader, declare module, , nextjs\n---\n\n# Using vgpu with Next.js\n\nBody.\n",
+    guides: ["docs/topics/nextjs.docs.md"],
+  });
+
+  expect(manifest.records[0]).toMatchObject({
+    symbol: "nextjs",
+    topicTitle: "Using vgpu with Next.js",
+    keywords: ["nextjs", "next.js", "wgsl loader", "declare module"],
+  });
+});
+
+test("omits keywords when a doc declares none", () => {
+  const manifest = createManifest("", {
+    exists: () => true,
+    read: () => "# Plain guide\n\nBody.\n",
+    guides: ["docs/topics/plain.docs.md"],
+  });
+
+  expect(manifest.records[0]).not.toHaveProperty("keywords");
+});
+
+test("the shipped nextjs guide declares the queries agents type", () => {
+  const record = docsManifest.records.find((item) => item.symbol === "nextjs");
+
+  expect(record).toMatchObject({ package: "guides", kind: "guide", repoPath: "docs/topics/nextjs.docs.md" });
+  expect(record?.keywords).toEqual(expect.arrayContaining(["nextjs", "next.js", "webpack", "turbopack", "vite", "bundler", "declare module"]));
+});
+
 test("fails on a missing guide doc", () => {
   expect(() => createManifest("", { exists: () => false, read: () => "", guides: ["docs/topics/nope.docs.md"] })).toThrow(
     "Missing docs file: docs/topics/nope.docs.md",

@@ -72,6 +72,7 @@ function enrichRecord(record) {
     anchor,
     topic,
     topicTitle,
+    ...(frontmatter.keywords === undefined ? {} : { keywords: parseKeywords(frontmatter.keywords) }),
     ...(frontmatter.order === undefined ? {} : { order: parseOrder(frontmatter.order, record.repoPath) }),
     ...(frontmatter.websitePath === undefined ? {} : { websitePath: parseWebsitePath(frontmatter.websitePath, record.repoPath) }),
     symbolKind: frontmatter.symbolKind ?? inferSymbolKind(record.symbol),
@@ -89,6 +90,13 @@ function parseFrontmatter(markdown) {
     frontmatter[key] = rawValue.trim().replace(/^['"]|['"]$/gu, "");
   }
   return { body: markdown.slice(match[0].length), frontmatter };
+}
+
+// Comma-separated search phrases a doc claims for `vgpu docs find`. They exist so a guide can own
+// the words an agent types ("next.js", "wgsl loader", "declare module") even when the body words
+// differ from the query.
+function parseKeywords(value) {
+  return [...new Set(value.split(",").map((keyword) => keyword.trim().toLowerCase()).filter(Boolean))];
 }
 
 function parseOrder(value, repoPath) {

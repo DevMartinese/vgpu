@@ -79,4 +79,4 @@ console.log(result.map === null, result.code.includes("version"));
 - Leaf shader transforms do not call `onDependency` because Vite already tracks the entry file. Imported graph transforms call it for transitive deps.
 - A leaf WGSL file may declare entry resources. Shared/imported modules must be pure: no `@group/@binding` outside the entry.
 - The transform calls `resolveShader({ validate: false })` for imported graphs; parsing, purity checks, DCE, mangling, and optional minification still apply.
-- **See also:** `ShaderSource`, `resolveShader`, `wgslWebpackLoader`.
+- **See also:** `ShaderSource`, `resolveShader`, `wgslWebpackLoader`, and the `nextjs` guide (`npx vgpu docs cat nextjs.md`) for the ambient `.d.ts` that types `.wgsl` imports.
