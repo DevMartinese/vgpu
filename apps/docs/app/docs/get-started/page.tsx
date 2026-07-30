@@ -33,7 +33,7 @@ export default function GetStartedPage() {
       >
         <h2 className="text-lg font-semibold text-gray-12">Agents</h2>
         <p className="mt-2 text-sm leading-6 text-gray-10">
-          vgpu is agent-first — the full documentation ships inside the package. Point your agent at <code>npx vgpu docs</code>.
+          vgpu is agent-first — the full documentation ships inside the package. Point your agent at <code>npx vgpu</code>.
         </p>
       </Link>
 
