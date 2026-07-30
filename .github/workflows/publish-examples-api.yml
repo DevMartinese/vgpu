@@ -20,7 +20,7 @@ jobs:
       contents: read
     env:
       VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN: ${{ secrets.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN }}
-      VGPU_EXAMPLES_ORIGIN: ${{ vars.VGPU_EXAMPLES_ORIGIN || 'https://vgpu.labs.vercel.dev' }}
+      VGPU_EXAMPLES_ORIGIN: ${{ vars.VGPU_EXAMPLES_ORIGIN || 'https://vgpu.sh' }}
       VGPU_EXAMPLES_BLOB_PREFIX: ${{ vars.VGPU_EXAMPLES_BLOB_PREFIX || 'examples/v1' }}
       VERCEL_DEPLOYMENT_URL: ${{ inputs.deployment_url }}
     steps:
@@ -38,7 +38,7 @@ jobs:
       - name: Require retained public Blob credentials and official origin
         run: |
           test -n "$VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN" || { echo "::error::Missing VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN"; exit 1; }
-          test "$VGPU_EXAMPLES_ORIGIN" = "https://vgpu.labs.vercel.dev" || { echo "::error::Unexpected production origin"; exit 1; }
+          test "$VGPU_EXAMPLES_ORIGIN" = "https://vgpu.sh" || { echo "::error::Unexpected production origin"; exit 1; }
           test "$VGPU_EXAMPLES_BLOB_PREFIX" = "examples/v1" || { echo "::error::Unexpected blob prefix"; exit 1; }
           test -n "$VERCEL_DEPLOYMENT_URL" || { echo "::error::Missing VERCEL_DEPLOYMENT_URL"; exit 1; }
       - name: Confirm the matching docs deployment is already live

@@ -1,7 +1,7 @@
 # VGPU canonical examples API
 
-Official origin: https://vgpu.labs.vercel.dev
-Discovery: https://vgpu.labs.vercel.dev/.well-known/vgpu-examples.json
+Official origin: https://vgpu.sh
+Discovery: https://vgpu.sh/.well-known/vgpu-examples.json
 Contract: vgpu-examples/v1
 
 Use the published CLI to inspect canonical gallery source:

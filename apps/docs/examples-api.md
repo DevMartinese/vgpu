@@ -1,6 +1,6 @@
 # Examples API operations
 
-The examples API exposes exact canonical gallery bytes from the permanent origin `https://vgpu.labs.vercel.dev`. Version 1 is read-only, tokenless, same-origin, and contains no dynamic search endpoint.
+The examples API exposes exact canonical gallery bytes from the permanent origin `https://vgpu.sh`. Version 1 is read-only, tokenless, same-origin, and contains no dynamic search endpoint.
 
 ## Routes and HTTP contract
 
@@ -49,9 +49,9 @@ Run `.github/workflows/publish-examples-api.yml` manually only after the matchin
 1. In the Vercel team owning the docs project, create a **public Vercel Blob store** and connect it to the docs project.
 2. Disable every expiration/automatic-deletion lifecycle policy. Revision objects are permanent retained protocol state.
 3. Create the GitHub environment `examples-api-production`. Add secret `VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN` with the store's read/write token.
-4. Add environment variables `VGPU_EXAMPLES_ORIGIN=https://vgpu.labs.vercel.dev` and `VGPU_EXAMPLES_BLOB_PREFIX=examples/v1` to that GitHub environment.
+4. Add environment variables `VGPU_EXAMPLES_ORIGIN=https://vgpu.sh` and `VGPU_EXAMPLES_BLOB_PREFIX=examples/v1` to that GitHub environment.
 5. Add production variables to the Vercel docs project: `VGPU_EXAMPLES_ARTIFACT_STORE=blob` and `VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN=<same store token>`. Preview/local production builds must explicitly use `VGPU_EXAMPLES_ARTIFACT_STORE=local` and `VGPU_EXAMPLES_LOCAL_ROOT=<absolute generated tree>` instead.
-6. Ensure `vgpu.labs.vercel.dev` targets this same docs deployment. The v1 discovery, latest, and revision responses must remain on this host.
+6. Ensure `vgpu.sh` targets this same docs deployment and is the **canonical apex** (no redirect). The v1 discovery, latest, and revision responses must be served directly on this host: the CLI fetches with `redirect: 'error'`, so any redirect on `vgpu.sh` (for example an apex→`www` rewrite) makes every request fail with `Request failed`. `www.vgpu.sh` must redirect to the apex, and is deliberately absent from the CLI host allowlist for that reason. `vgpu.labs.vercel.dev` stays pointed at the same deployment as a legacy alias so already-published CLIs and `--base-url` overrides keep working during the migration.
 7. Deploy docs first. Then run the publisher workflow with its `VERCEL_DEPLOYMENT_URL`. The adapter-v1 all-ten parity gate and integration approval were completed before enabling this step.
 
 The generator now consumes the canonical adapter-v1 export. `--publish` still requires `VERCEL_DEPLOYMENT_URL` and the configured Vercel Blob credentials; immutable verification and the latest-pointer-last transaction remain mandatory.

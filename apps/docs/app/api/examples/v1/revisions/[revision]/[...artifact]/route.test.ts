@@ -11,7 +11,7 @@ import * as discoveryRoute from '../../../../../../.well-known/vgpu-examples.jso
 import * as latestRoute from '../../../latest.json/route';
 import * as revisionRoute from './route';
 
-const origin = 'https://vgpu.labs.vercel.dev';
+const origin = 'https://vgpu.sh';
 const graph = adaptCanonicalSourceExport(exampleSources, { repository: 'https://github.com/vgpu/vgpu', gitCommit: sourceSnapshotIdentity('canonical-source-snapshot-fixture\n') });
 const set = generateExampleArtifacts(graph);
 let root: string;
