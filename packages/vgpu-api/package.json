@@ -61,6 +61,7 @@
     "client.d.ts",
     "bin",
     "dist",
+    "!dist/tsconfig.tsbuildinfo",
     "README.md",
     "LICENSE"
   ],
