@@ -252,6 +252,75 @@ with a literal, and do not put the raw `shade.time` back.**
   tone map is applied once, by `shade.wgsl`, after both layers are composited —
   never inside `disk.wgsl`.
 
+#### The second shear lobe is skipped where it is redundant (`rho > 0.98`)
+
+The recycling above evaluates `smokeField` **twice** per disk pixel per layer,
+once per shear lobe — 26 of the ~28 noise fetches a disk pixel can issue. But the
+two lobes sit only `dOmega * SHEAR_PERIOD / 2` radians apart, and the field
+decorrelates over ~`1/angBase` radians, so over a large part of the disk they are
+*the same field* and the cross-dissolve is blending a field with itself.
+`disk.wgsl` already quantified that, analytically, for the variance rescale:
+
+```wgsl
+let lobeShift = abs(dOmega) * SHEAR_PERIOD * 0.5 * angBase * 0.85;
+let rho = 1.0 - smoothstep(0.12, 1.1, lobeShift);   // lobe correlation, 0..1
+```
+
+`rho` is now computed **above** the two `smokeField` calls (it needs nothing they
+produce) and gates them: where `rho > 0.98` only the higher-weight lobe is
+evaluated and `blended` is that lobe, with the variance rescale set to 1 (nothing
+was destroyed, because nothing was blended). Below the threshold the code is the
+one it always was, expression for expression.
+
+Measured with `debug-render.mjs` at 1280x720, shipped defaults (`DiskSample.density`
+hijacked in a scratch copy to carry the executed fetch count, read back through
+debug view 5, which is exact because the count lands in an `rgba8unorm` channel):
+
+| | before | after |
+|---|---|---|
+| noise fetches / disk px (front layer, executed) | 14.372 | **11.512** |
+| noise fetches / frame px | 3.045 | **2.439** |
+| disk px taking the skip | — | **40.2%** (all of them exactly halved) |
+
+i.e. **-19.9% of the disk's noise work**, for free. The skip region is the outer
+disk, `radiusNorm >~ 0.65` (radii near and beyond `SHEAR_REF_RADIUS`, where the
+differential rate is small): 0% of pixels inside 0.6, ~99% beyond 0.7.
+
+Two properties make this legal here, and both must survive any edit:
+
+- **It is per-pixel DATA divergence, not a uniform branch.** The predicate is a
+  function of the pixel's radius and view angle, exactly like the
+  `visible > 0.004` octave skip inside `streakFbm`/`ridgeFbm`, and it forms
+  screen-coherent radial bands, so a warp mostly takes one side or the other. No
+  uniform, no pipeline variant, one code path — the project's variant rule is
+  intact.
+- **The sample is `textureSampleLevel`, so calling it under non-uniform control
+  flow is valid WGSL.** `noise3` uses an explicit LOD precisely for this reason
+  (see its comment); the footprints `dAngle`/`dRadius` were computed higher up, in
+  uniform control flow, from a `fwidth` taken in `shade.wgsl`. Never move a
+  derivative into this branch.
+
+Image cost, before/after over 18 pairs (1280x720; `t = 2.5 / 5 / 9.9 s`,
+`--yaw 0 / ±0.15`, disk-only `--stars.brightness 0` and full frame), display-space
+luma:
+
+| clock phase | what happens | rmse (frame) | rmse (disk px) | max abs Δ |
+|---|---|---|---|---|
+| `t = 5` (`w0 = 1`, lobe reset) | **bit-identical**, 0 px differ | 0 | 0 | 0 |
+| `t = 9.9` (just before the wrap, `w0 = 0.02`) | 0.09% of px differ | 0.00012 | 0.00026 | 1/255 |
+| `t = 2.5` (worst case, the 50/50 crossfade) | 98.1% of px bit-identical | 0.00077 | 0.0017 | 16/255 (1 px) |
+
+At the 50/50 point 1.9% of the frame moves, 1.56% of it by a single 8-bit step;
+39 pixels in the whole frame move by more than 4/255. The residual is not a band
+edge — it sits in the outer rim and the outer flank of the lensed arc, i.e. inside
+the skip region where the two lobes are *nearly* rather than exactly equal (see
+`/home/user/reports/shear-skip/` for the x16-amplified diffs). For scale, the
+same measurement calls a `threads` 5→3 octave cut "no change" at rmse 0.0015 and
+half-res disk rendering "visible" at 0.0115.
+
+Do not lower the 0.98 threshold to widen the region: the residual grows as
+`1 - rho`, and the whole point of the skip is that it is free.
+
 #### The tiled noise volume
 
 `shadeDisk` does not hash its noise any more. The value-noise lattice is baked
