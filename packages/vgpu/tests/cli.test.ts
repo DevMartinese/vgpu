@@ -141,6 +141,51 @@ test("finds symbols and resolves paths", () => {
   expect(success(["docs", "path", "/guides/performance-model.docs.md"])).toBe("/guides/performance-model.docs.md\n");
 });
 
+// The queries below are the ones a base agent actually typed while building a Next.js app against
+// vgpu (see the dogfood friction log). Every one of them used to print "No docs found"; each must
+// now land on the page that answers it.
+test("routes the dogfood queries to the page that answers them", () => {
+  const cases: [string, string][] = [
+    ["nextjs", "/guides/nextjs.docs.md"],
+    ["next.js", "/guides/nextjs.docs.md"],
+    ["bundler", "/guides/nextjs.docs.md"],
+    ["wgsl loader", "/guides/nextjs.docs.md"],
+    ["wgsl import", "/guides/nextjs.docs.md"],
+    [".wgsl", "/guides/nextjs.docs.md"],
+    ["typescript wgsl import", "/guides/nextjs.docs.md"],
+    ["declare module", "/guides/nextjs.docs.md"],
+    ["d.ts", "/guides/nextjs.docs.md"],
+    ["webpack", "/@vgpu/wgsl/loader-webpack/index.docs.md"],
+    ["noise", "/@vgpu/wgsl-std/noise/index.docs.md"],
+    // Cloud/plasma looks: no Perlin/simplex/fBM primitive exists, so the noise page has to be the
+    // page that says so and shows the octave recipe instead.
+    ["fbm", "/@vgpu/wgsl-std/noise/index.docs.md"],
+    ["perlin", "/@vgpu/wgsl-std/noise/index.docs.md"],
+    // The router advertises `docs find "<VGPU-error-code>"`, so codes must resolve too.
+    ["VGPU-WGSL-PKG-NOTFOUND", "/@vgpu/wgsl/runtime/resolve-shader.docs.md"],
+  ];
+
+  for (const [query, expected] of cases) {
+    expect(success(["docs", "find", query]), `docs find ${query}`).toContain(expected);
+  }
+});
+
+test("find requires every word of the query to match and still reports honest misses", () => {
+  // "wgsl" and "webpack" both match the loader page; the nonsense word must veto it.
+  expect(success(["docs", "find", "wgsl webpack"])).toContain("/@vgpu/wgsl/loader-webpack/index.docs.md");
+  expect(runCli(["docs", "find", "wgsl webpack zzzznope"])).toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining("No docs found for: wgsl webpack zzzznope"),
+  });
+});
+
+test("the nextjs guide is reachable by cat and from getting-started", () => {
+  for (const form of ["nextjs", "nextjs.md", "/guides/nextjs.docs.md"]) {
+    expect(success(["docs", "cat", form])).toContain("# Using vgpu with Next.js and other bundlers");
+  }
+  expect(success(["docs", "cat", "getting-started.md"])).toContain("vgpu docs cat nextjs.md");
+});
+
 test("keeps existing guide and API docs forms working", () => {
   expect(success(["docs", "cat", "browser-testing"])).toContain("# Browser testing with Playwright WebGPU");
   expect(success(["docs", "cat", "performance-model"])).toContain("# Performance model");

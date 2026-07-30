@@ -46,7 +46,7 @@ npx vgpu check ./shaders/main.wgsl
 
 ## docs
 
-The `vgpu docs` commands let you explore the vgpu documentation from the terminal. The full corpus — API reference and guides — ships inside the package, so every query runs locally and works offline. Use `ls` to browse the documentation tree, `cat` to print a page or symbol, `grep` to search across content, and `find` to look up entries by name.
+The `vgpu docs` commands let you explore the vgpu documentation from the terminal. The full corpus — API reference and guides — ships inside the package, so every query runs locally and works offline. Use `ls` to browse the documentation tree, `cat` to print a page or symbol, `grep` to search across content, and `find` to look up the page to read next by name, keyword, or phrase.
 
 ```text
 Usage: vgpu docs <command> [args] [flags]
@@ -84,7 +84,16 @@ npx vgpu docs cat /@vgpu/core/Buffer.docs.md
 ```terminal
 npx vgpu docs find <query>
 npx vgpu docs find buffer
+npx vgpu docs find "wgsl loader"
 ```
+
+Every whitespace-separated word in the query must match, so multi-word phrases
+narrow the result instead of returning nothing. `find` looks at symbol names,
+doc paths, page titles, and the search keywords a page declares; only when that
+finds nothing does it fall back to searching page bodies, which is what makes
+prose (`"typescript wgsl import"`) and error codes
+(`VGPU-WGSL-PKG-NOTFOUND`) resolve to a page. Use `grep` when you want every
+content match with its line, and `find` when you want the page to read next.
 
 ### docs grep
 
