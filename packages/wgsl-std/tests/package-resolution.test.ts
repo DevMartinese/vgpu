@@ -46,6 +46,40 @@ fn main() -> f32 {
   expect(result.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__fullscreenTriangleClip\(index: u32\) -> vec4f/);
 });
 
+test("structs imported from a package subpath can type bindings and struct members (#212)", async () => {
+  const dir = await workspaceFixture();
+  const entry = join(dir, "app", "main.wgsl");
+  await writeFile(entry, `import { VoronoiSample2, VoronoiSample3, voronoi2d, voronoi3d } from "@vgpu/wgsl-std/noise";
+
+struct Report {
+  flat: VoronoiSample2,
+  volume: VoronoiSample3,
+}
+
+@group(0) @binding(0) var<storage, read_write> report: Report;
+@group(0) @binding(1) var<storage, read_write> latest: VoronoiSample2;
+
+@compute @workgroup_size(1) fn main() {
+  report.flat = voronoi2d(vec2f(0.5, 0.25));
+  report.volume = voronoi3d(vec3f(0.5, 0.25, 0.125));
+  latest = report.flat;
+}`);
+
+  const { reflection } = await resolveShader({ entry, validate: false });
+  const [report, latest] = reflection.bindings;
+
+  expect(report?.layout?.members?.map((member) => [member.name, member.offset, member.size])).toEqual([
+    ["flat", 0, 16],
+    ["volume", 16, 32],
+  ]);
+  expect(latest?.struct?.name).toBe("VoronoiSample2");
+  expect(latest?.layout?.members?.map((member) => [member.name, member.offset])).toEqual([
+    ["f1", 0],
+    ["f2", 4],
+    ["cell", 8],
+  ]);
+});
+
 test("wgsl-std has no root WGSL export", async () => {
   const dir = await workspaceFixture();
   const entry = join(dir, "app", "main.wgsl");
