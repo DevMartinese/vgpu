@@ -4,6 +4,8 @@
 
 ### Patch Changes
 
+- @vgpu/core@0.2.0
+
 - f526de2: Respell the published README and reference docs for the 0.2.0 free-function API (`surface(gpu, canvas)`, `draw(gpu, …)`, `frameLoop(gpu, cb)`, `geometry(gpu, …)`), so copied snippets compile. No runtime change: `@vgpu/render`'s own exports are untouched.
 - Updated dependencies [0026ff2]
 - Updated dependencies [f526de2]

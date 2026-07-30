@@ -10,6 +10,8 @@
 
 ### Patch Changes
 
+- @vgpu/core@0.2.0
+
 - Updated dependencies [0026ff2]
 - Updated dependencies [f526de2]
 - Updated dependencies [ccbdd95]
