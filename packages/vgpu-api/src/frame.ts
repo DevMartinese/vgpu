@@ -5,6 +5,7 @@ import type { Bundle } from "./bundle.ts";
 import type { Draw, DrawCallOptions } from "./draw.ts";
 import type { Effect } from "./effect.ts";
 import type { Target } from "./target.ts";
+import { assertDeviceUsable } from "./lifecycle.ts";
 import { claimedGroupNativeValidationError, frameAlreadySubmittedError, frameCanceledError, framePassActiveError, frameReentrantError, passClearDepthInvalidError, passClearStencilInvalidError, passDepthReadOnlyError, passDepthReadOnlyMsaaError, passPreserveClearDepthError, passPreserveClearStencilError, passPreserveMsaaError, passScissorInvalidError, passViewportInvalidError, queryNestedError, queryNoVisibilityError, surfaceNotInFrameError, targetRequiredError, timerInvalidError, VGPUError, visibilityInvalidError } from "./errors.ts";
 import { enterFrame, isSurface, isSurfaceResizeCallbackActive, leaveFrame } from "./surface.ts";
 import { BUILT_IN_CLEAR_COLOR, hasStencilAspect, isTarget, type ClearColor } from "./target-utils.ts";
@@ -124,6 +125,7 @@ export class Frame {
     private readonly trackSettled?: (promise: Promise<unknown>) => void,
     private readonly releaseLifecycle?: () => void,
   ) {
+    assertDeviceUsable(device, "Frame.constructor");
     this.#encoder = device.gpu.createCommandEncoder({ label: "vgpu.frame" });
   }
 
@@ -131,8 +133,11 @@ export class Frame {
   pass(options: FramePassOptions, body: Effect | Draw | ((pass: FramePass) => void)): void;
   pass(target: Target | FramePassOptions, body: Effect | Draw | ((pass: FramePass) => void)): void {
     // A canceled frame dropped its encoder: encoding into it would silently never run (and would
-    // re-take the telemetry retains cancel() just released), so reject the call instead.
+    // re-take the telemetry retains cancel() just released), so reject the call instead. Checked
+    // before the device: `gpu.dispose()` cancels outstanding frames and *then* drops the device, so
+    // cancellation is the proximate cause there and names it better than a generic disposed device.
     if (this.#canceled) throw frameCanceledError("Frame.pass");
+    assertDeviceUsable(this.device, "Frame.pass");
     const targetOnly = isTarget(target);
     const cb = typeof body === "function" ? body : (p: FramePass) => p.draw(body);
     const resolvedTarget = targetOnly ? target : target.target ?? this.defaultTarget;
@@ -203,6 +208,9 @@ export class Frame {
       this.#passActive = true;
       try {
         cb(new FramePass(encoder, resolvedTarget, this.#validations, depthReadOnly === true, occlusion, this, (where) => {
+          // Retained external devices can be destroyed mid-pass, so every FramePass entry point
+          // re-checks the device here instead of taking it as a separate constructor argument.
+          assertDeviceUsable(this.device, where);
           if (this.#canceled) throw frameCanceledError(where);
         }));
       } finally {
@@ -224,8 +232,10 @@ export class Frame {
   submit(): void {
     // Closed either way: a re-submit has nothing left to flush, and a canceled frame dropped its
     // encoder. Both are silent no-ops so `frame(gpu, cb)`'s submit-in-finally never masks a cancel()
-    // (or an exception) from inside the callback.
+    // (or an exception) from inside the callback. Checked before the device so that submitting an
+    // already-closed frame stays a no-op even after `gpu.dispose()` took the device with it.
     if (this.#submitted || this.#canceled) return;
+    assertDeviceUsable(this.device, "Frame.submit");
     this.#submitted = true;
     this.releaseLifecycle?.();
     // Timed and occlusion-queried frames append one resolveQuerySet of each instance's contiguous
@@ -364,6 +374,7 @@ export class Frame {
 
   async #deliverValidationError(label: string, group: number, cause: unknown): Promise<void> {
     await submittedWorkDone(this.device);
+    assertDeviceUsable(this.device, "Frame.validation");
     const error = claimedGroupNativeValidationError(label, group, cause);
     if (this.errorSink) await this.errorSink(error);
     else console.error(error);
@@ -514,6 +525,12 @@ function previewValue(value: unknown): string {
   return String(value);
 }
 
+/** True for the "the device this frame belongs to is gone" errors raised by the liveness guards. */
+function isDeviceGoneError(error: unknown): boolean {
+  const code = (error as VGPUError | undefined)?.code;
+  return code === "VGPU-DEVICE-DISPOSED" || code === "VGPU-DEVICE-LOST";
+}
+
 export class FrameRunner {
   #running = false;
   /**
@@ -531,7 +548,15 @@ export class FrameRunner {
       const frame = this.createFrame();
       if (cb) {
         try { cb(frame); }
-        finally { frame.submit(); }
+        finally {
+          // A callback is allowed to dispose the owning gpu (gpu.dispose() inside a loop tick does
+          // exactly that). The device is then gone and the frame has nothing left to flush, so this
+          // implicit submit swallows that one error instead of throwing over the callback's own
+          // intent — the same reason a canceled frame submits as a no-op. An explicit
+          // frame.submit() on a dead device still reports it.
+          try { frame.submit(); }
+          catch (error) { if (!isDeviceGoneError(error)) throw error; }
+        }
       }
       return frame;
     } finally {

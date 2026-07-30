@@ -6,6 +6,7 @@
  * calls `clock()` never allocates the service.
  */
 import { frameState } from "./frame-state.ts";
+import { assertDeviceUsable } from "./lifecycle.ts";
 import { gpuDisposedError, liveKernel } from "./live-kernel.ts";
 import { clockDeltaInvalidError } from "./errors.ts";
 import { serviceToken, type Gpu, type Kernel } from "./kernel.ts";
@@ -44,7 +45,13 @@ export function clock(gpu: Gpu): Clock {
 function createClock(kernel: Kernel): Clock {
   return kernel.service(clockToken, (self) => {
     const state = frameState(self);
-    const assertLive = (where: string) => { if (self.disposed) throw gpuDisposedError(where); };
+    const assertLive = (where: string) => {
+      if (self.disposed) throw gpuDisposedError(where);
+      // The clock is the frame-state entry point, and a retained external device can be lost or
+      // destroyed by its owner while this gpu still looks alive. Reading or advancing then reports
+      // state that can no longer reach a device, so re-check the device itself.
+      assertDeviceUsable(self.device, where);
+    };
     return {
       get time(): number { assertLive("clock.time"); return state.time; },
       get deltaTime(): number { assertLive("clock.deltaTime"); return state.deltaTime; },

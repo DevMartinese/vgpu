@@ -14,6 +14,9 @@ export const exampleSlugs = [
   'transmission',
   'radiance-cascades',
   'nextjs-flare',
+  'depth-estimation',
+  'mnist-classifier',
+  'air-painting',
 ] as const;
 
 export type ExampleSlug = (typeof exampleSlugs)[number];

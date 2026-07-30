@@ -19,6 +19,8 @@ export type { ResolvedShader, ShaderSource, SourceMap, WGSLAst, WGSLSource } fro
 // --- The public creation API: gpu-first free functions. There is no facade — the `Gpu` is a
 // device handle plus a lifetime, and everything else takes it as its first argument.
 export type { Gpu } from "./kernel.ts";
+// Parity with the browser entry: a Dawn device from another library is adopted the same way.
+export { initFromDevice } from "./init-from-device.ts";
 export { bundle } from "./bundle.ts";
 export { clock } from "./clock.ts";
 export type { Clock } from "./clock.ts";
@@ -39,15 +41,19 @@ export { visibility } from "./visibility.ts";
 export { geometry } from "./scene/geometry-descriptor.ts";
 export type { GeometryRecipe, GeometryRecipeOf } from "./scene/geometry-recipe.ts";
 
-export interface NodeInitOptions extends Omit<InitOptions, "adapter"> { readonly adapter?: NodeAdapterMode | VGPUAdapter }
+export type NodeInitOptions = Omit<InitOptions, "adapter"> & { readonly adapter?: NodeAdapterMode | VGPUAdapter };
+// Non-nullable again: init() always selects a Dawn adapter. An adopted device has none to
+// describe, which is why initFromDevice() returns the plain `Gpu` instead of this.
 export interface NodeGpu extends Gpu { readonly adapter: NodeAdapterInfo }
 
 /** Node headless entrypoint (Dawn via @vgpu/adapter-node). */
 export async function init(options: NodeInitOptions = {}): Promise<NodeGpu> {
+  const normalized = options;
   const override = nodeAdapterEnvironmentOverride();
-  const requested = override ?? options.adapter ?? "auto";
+  const requested = override ?? normalized.adapter ?? "auto";
   const custom = typeof requested === "object" ? requested : undefined;
-  const { adapter: _, ...deviceOptions } = options;
+  // `normalized`, not `options`: the raw value is still unvalidated here.
+  const { adapter: _, ...deviceOptions } = normalized;
   const gpu = await createGpu("node", custom ? { ...deviceOptions, adapter: custom } : deviceOptions, () => createNodeAdapter({ adapter: typeof requested === "string" ? requested : "auto" }));
   return Object.assign(gpu, { adapter: Object.freeze(describeNodeAdapter(gpu.device.adapterInfo)) });
 }

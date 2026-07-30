@@ -3,6 +3,7 @@ import type { BindingInfo } from "@vgpu/wgsl/reflect-source";
 import type { BindGroupIdentityPart } from "./bind-cache.ts";
 import { incompatibleResourceError, textureFilterabilityError } from "./errors.ts";
 import type { Target } from "./target.ts";
+import { assertBufferUsable } from "./lifecycle.ts";
 import { BINDING_RESOURCE, bindingResourceOf } from "./draw-protocols.ts";
 
 export interface NormalizedBindingResource {
@@ -55,10 +56,14 @@ function normalizeBufferResource(binding: BindingInfo, value: unknown, context: 
   const provider = bindingResourceOf(value);
   if (provider) return provider[BINDING_RESOURCE](binding, context.sourceHint);
   if (value instanceof Buffer) {
+    assertBufferUsable(value, `${context.sourceHint}.set`);
     validateBufferUsage(binding, value.options.usage);
     return { resource: { buffer: value.gpu }, identity: value.resourceIdentity, unsubscribe: (cb) => value.onDestroy(cb) };
   }
-  if (isUniformLike(value)) return { resource: { buffer: value.gpu, offset: 0, size: value.size }, identity: value.buffer.resourceIdentity, unsubscribe: (cb) => value.buffer.onDestroy(cb) };
+  if (isUniformLike(value)) {
+    assertBufferUsable(value.buffer, `${context.sourceHint}.set`);
+    return { resource: { buffer: value.gpu, offset: 0, size: value.size }, identity: value.buffer.resourceIdentity, unsubscribe: (cb) => value.buffer.onDestroy(cb) };
+  }
   if (isGPUBufferBinding(value)) return { resource: value, identity: syntheticIdentity(value.buffer) };
   if (isRawGPUBuffer(value)) return { resource: { buffer: value }, identity: syntheticIdentity(value) };
   throw incompatibleResourceError(binding, "buffer", `Pass a compatible Buffer/Uniform: ${binding.name}.set({ ${binding.name}: gpu.device.createBuffer(...) }).`);

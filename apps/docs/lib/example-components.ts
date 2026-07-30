@@ -23,6 +23,9 @@ export const exampleComponentLoaders = {
   transmission: () => import('../examples/transmission/index'),
   'radiance-cascades': () => import('../examples/radiance-cascades/index'),
   'nextjs-flare': () => import('../examples/nextjs-flare/index'),
+  'depth-estimation': () => import('../examples/depth-estimation/index'),
+  'mnist-classifier': () => import('../examples/mnist-classifier/index'),
+  'air-painting': () => import('../examples/air-painting/index'),
 } satisfies Record<ExampleSlug, ExampleComponentLoader>;
 
 export function getExampleComponentLoader(slug: ExampleSlug): ExampleComponentLoader {

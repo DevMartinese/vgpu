@@ -12,8 +12,21 @@ import { Device, validateRequiredFeatures, type RequiredDeviceLimits, type VGPUA
 import type { GpuErrorListener } from "./api-types.ts";
 import { unsupportedError, VGPUError } from "./errors.ts";
 
+/**
+ * Options for the device vgpu creates and owns; it destroys that device on `dispose()`.
+ *
+ * To adopt a device another library owns, call `initFromDevice(device)` instead. `device` is
+ * declared here only so that passing one lands on the compile-time signpost rather than being
+ * silently ignored.
+ */
 export interface InitOptions {
   readonly adapter?: VGPUAdapter;
+  /**
+   * Never set: adoption lives in `initFromDevice(device)`. Declared so passing a device here is a
+   * type error instead of a silently ignored option. There is deliberately no runtime check: one
+   * does not fit the `init-only` budget, which is the budget this split exists to protect.
+   */
+  readonly device?: never;
   readonly powerPreference?: GPUPowerPreference;
   readonly requiredFeatures?: readonly GPUFeatureName[];
   readonly requiredLimits?: RequiredDeviceLimits;

@@ -7,6 +7,7 @@ import { visibilityForEntries } from "./set-layouts.ts";
 import type { Compute, ComputeOptions, DispatchOptions } from "./api-types.ts";
 import { normalizeConstantsOptions, selectEntryPoint } from "./pipeline-store.ts";
 import { indirectInvalidError, unsupportedError, writableStorageAliasingError } from "./errors.ts";
+import { assertDeviceUsable } from "./lifecycle.ts";
 import type { Gpu } from "./kernel.ts";
 import { liveKernel } from "./live-kernel.ts";
 import { renderService } from "./render-service.ts";
@@ -50,6 +51,7 @@ export class ComputePipeline implements Compute {
     readonly opts: ComputeOptions = {},
     private readonly cache: BindGroupCache = createBindGroupCache(),
   ) {
+    assertDeviceUsable(device, "Compute.constructor");
     this.label = opts.label ?? "compute";
     this.reflection = reflectSource(source, `${this.label}.wgsl`);
     // Entry selection runs before everything derived from the selected entry — binding visibility, bind group
@@ -74,6 +76,7 @@ export class ComputePipeline implements Compute {
   }
 
   set(values: SetBag): this {
+    assertDeviceUsable(this.device, `${this.label}.set`);
     this.setCore.set(values);
     return this;
   }
@@ -81,6 +84,7 @@ export class ComputePipeline implements Compute {
   dispatch(x: number, y?: number, z?: number): void;
   dispatch(opts: DispatchOptions): void;
   dispatch(x: number | DispatchOptions, y?: number, z?: number): void {
+    assertDeviceUsable(this.device, `${this.label}.dispatch`);
     const indirect = typeof x === "object" && x !== null ? this.#resolveIndirectDispatch(x, y, z) : undefined;
     this.#preflightAliasing();
     const encoder = this.device.gpu.createCommandEncoder({ label: `${this.label}.encoder` });

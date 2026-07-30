@@ -1,4 +1,5 @@
 export { createCoreGpu as createGpu, type Gpu } from "./kernel.ts";
+export { initFromDevice } from "./init-from-device.ts";
 export type { AdapterFactory, InitOptions } from "./kernel.ts";
 export type { Compute, ComputeOptions, DispatchOptions, GpuErrorListener, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, StorageOptions } from "./api-types.ts";
 export type { ClearColor } from "./target-utils.ts";

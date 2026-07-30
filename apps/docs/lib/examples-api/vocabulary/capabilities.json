@@ -1,15 +1,19 @@
 [
+  "camera-input",
   "checkbox-controls",
   "compute",
   "compute-shader",
   "continuous-rendering",
   "controls",
   "demand-rendering",
+  "external-device",
   "fixed-timestep",
   "fragment-shader",
+  "gpu-buffer-interop",
   "hdr",
   "instanced-rendering",
   "instancing",
+  "machine-learning",
   "multi-pass",
   "offscreen-rendering",
   "pointer-input",
@@ -21,5 +25,6 @@
   "select-control",
   "storage-buffers",
   "textures",
-  "webgpu"
+  "webgpu",
+  "zero-copy"
 ]

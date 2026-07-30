@@ -1,5 +1,6 @@
 import { createMockAdapter } from "@vgpu/adapter-mock";
 import { createGpu, type InitOptions } from "./init.ts";
+export { initFromDevice } from "./init-from-device.ts";
 
 export { createMockAdapter } from "@vgpu/adapter-mock";
 export type { CreateMockAdapterOptions } from "@vgpu/adapter-mock";

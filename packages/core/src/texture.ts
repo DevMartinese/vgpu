@@ -57,6 +57,7 @@ export class Texture {
   }
 
   createView(desc?: GPUTextureViewDescriptor): GPUTextureView {
+    this.assertAlive("Texture.createView");
     return this.gpu.createView(desc);
   }
 
@@ -99,11 +100,14 @@ export class Texture {
    * Use `readFloats()` for float formats to get decoded component values.
    */
   async read(): Promise<Uint8Array> {
-    this.assertAlive();
+    this.assertAlive("Texture.read");
     // Validated before the mock branch: a mock device must reject the same formats a real one does.
     const info = textureReadbackFormat(this.options.format, "Texture.read");
     if (isMockGPUTexture(this.gpu)) return readMockTextureBytes(this.gpu.__vgpuMockBytes, this.options.size, info);
-    return this.device.readback.readTexture(this.gpu, this.options.size, this.options.format);
+    const result = await this.device.readback.readTexture(this.gpu, this.options.size, this.options.format);
+    // Re-checked after the await: a retained external device can be destroyed mid-readback.
+    this.assertAlive("Texture.read");
+    return result;
   }
 
   /**
@@ -130,8 +134,9 @@ export class Texture {
     this.destroy();
   }
 
-  private assertAlive(): void {
-    if (this.destroyed) throw new ValidationError({ code: "VGPU-CORE-TEXTURE-DESTROYED", message: "Texture is destroyed", where: "Texture" });
+  private assertAlive(where = "Texture"): void {
+    if (this.destroyed) throw new ValidationError({ code: "VGPU-CORE-TEXTURE-DESTROYED", message: "Texture is destroyed", where });
+    (this.device as unknown as { assertUsable?(where: string): void }).assertUsable?.(where);
   }
 }
 

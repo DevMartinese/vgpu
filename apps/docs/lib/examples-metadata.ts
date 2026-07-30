@@ -17,6 +17,9 @@ import { meta as environmentMapMeta } from '../examples/environment-map/meta';
 import { meta as transmissionMeta } from '../examples/transmission/meta';
 import { meta as radianceCascadesMeta } from '../examples/radiance-cascades/meta';
 import { meta as nextjsFlareMeta } from '../examples/nextjs-flare/meta';
+import { meta as depthEstimationMeta } from '../examples/depth-estimation/meta';
+import { meta as mnistClassifierMeta } from '../examples/mnist-classifier/meta';
+import { meta as airPaintingMeta } from '../examples/air-painting/meta';
 
 const rawMetadata = {
   gradient: gradientMeta,
@@ -34,6 +37,9 @@ const rawMetadata = {
   transmission: transmissionMeta,
   'radiance-cascades': radianceCascadesMeta,
   'nextjs-flare': nextjsFlareMeta,
+  'depth-estimation': depthEstimationMeta,
+  'mnist-classifier': mnistClassifierMeta,
+  'air-painting': airPaintingMeta,
 } satisfies Record<ExampleSlug, ExampleMetaDefinition>;
 
 function withThumbnails(meta: ExampleMetaDefinition): ExampleMeta {
@@ -60,6 +66,9 @@ export const exampleMetadataBySlug = {
   transmission: withThumbnails(rawMetadata.transmission),
   'radiance-cascades': withThumbnails(rawMetadata['radiance-cascades']),
   'nextjs-flare': withThumbnails(rawMetadata['nextjs-flare']),
+  'depth-estimation': withThumbnails(rawMetadata['depth-estimation']),
+  'mnist-classifier': withThumbnails(rawMetadata['mnist-classifier']),
+  'air-painting': withThumbnails(rawMetadata['air-painting']),
 } satisfies Record<ExampleSlug, ExampleMeta>;
 
 export const examplesMetadata = exampleSlugs.map((slug) => exampleMetadataBySlug[slug]);
