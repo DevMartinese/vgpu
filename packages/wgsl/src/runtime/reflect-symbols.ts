@@ -3,7 +3,15 @@ import type { MangleModule } from "./mangler.ts";
 import type { AliasInfo, ModuleSymbols, ParsedDecls, Registry, StructInfo, SymbolTarget, WGSLType } from "./reflect-types.ts";
 import { namespaceTypeError, unknownTypeError } from "./diagnostics.ts";
 
-export function buildModuleSymbols(modules: readonly MangleModule[], parsed: readonly ParsedDecls[]): ReadonlyMap<string, ModuleSymbols> {
+/**
+ * Resolves an import declaration to the canonical path of the imported module, using the same
+ * module resolution that loaded the graph (relative/root-alias/`packageMap`/`package.json`
+ * `exports`). `resolveShader()` passes its resolver so bare package specifiers resolve for
+ * nominal type positions exactly like they do for value positions in the mangler.
+ */
+export type ImportPathResolver = (from: string, imp: ImportDecl) => string;
+
+export function buildModuleSymbols(modules: readonly MangleModule[], parsed: readonly ParsedDecls[], resolveImport?: ImportPathResolver): ReadonlyMap<string, ModuleSymbols> {
   const own = new Map<string, Map<string, SymbolTarget>>();
   for (const decls of parsed) {
     const map = new Map<string, SymbolTarget>();
@@ -16,14 +24,14 @@ export function buildModuleSymbols(modules: readonly MangleModule[], parsed: rea
   const result = new Map<string, ModuleSymbols>();
   for (const module of modules) {
     const map = new Map(byPath.get(module.path));
-    for (const imp of module.parsed.imports) addImportedSymbols(module, imp, map, modules, byPath);
+    for (const imp of module.parsed.imports) addImportedSymbols(module, imp, map, modules, byPath, resolveImport);
     result.set(module.path, map);
   }
   return result;
 }
 
-function addImportedSymbols(module: MangleModule, imp: ImportDecl, map: Map<string, SymbolTarget>, modules: readonly MangleModule[], byPath: ReadonlyMap<string, ReadonlyMap<string, SymbolTarget>>): void {
-  const targetPath = resolveImportPath(imp.from, module.path, modules);
+function addImportedSymbols(module: MangleModule, imp: ImportDecl, map: Map<string, SymbolTarget>, modules: readonly MangleModule[], byPath: ReadonlyMap<string, ReadonlyMap<string, SymbolTarget>>, resolveImport?: ImportPathResolver): void {
+  const targetPath = resolveImportPath(imp, module.path, modules, resolveImport);
   const exports = byPath.get(targetPath);
   for (const binding of imp.bindings) {
     if (binding.namespace) {
@@ -108,11 +116,27 @@ export function resolveAliasesDeep(type: WGSLType, registry: Registry): WGSLType
   }
 }
 
-function resolveImportPath(from: string, owner: string, modules: readonly MangleModule[]): string {
+function resolveImportPath(imp: ImportDecl, owner: string, modules: readonly MangleModule[], resolveImport?: ImportPathResolver): string {
+  const resolved = tryResolveImport(imp, owner, resolveImport);
+  if (resolved !== undefined && modules.some((module) => module.path === resolved)) return resolved;
+  const from = imp.from;
   const base = owner.slice(0, owner.lastIndexOf("/") + 1);
   const joined = from.startsWith("/") ? from : normalizeVirtualPath(`${base}${from}`);
   const candidates = [from, joined];
-  return candidates.find((candidate) => modules.some((module) => module.path === candidate)) ?? joined;
+  return candidates.find((candidate) => modules.some((module) => module.path === candidate)) ?? resolved ?? joined;
+}
+
+/**
+ * Bare specifiers (`@vgpu/wgsl-std/scene`) only resolve through the graph resolver, so failures
+ * fall back to the relative/absolute heuristic below instead of aborting reflection.
+ */
+function tryResolveImport(imp: ImportDecl, owner: string, resolveImport?: ImportPathResolver): string | undefined {
+  if (!resolveImport) return undefined;
+  try {
+    return resolveImport(owner, imp);
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeVirtualPath(path: string): string {
