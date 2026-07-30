@@ -36,7 +36,12 @@ const url = (origin: string, key: string) => {
 export function generateExampleArtifacts(
   graph: ExampleByteGraph,
   origin: string = EXAMPLES_ORIGIN,
-  minimumCliVersion = '0.1.6',
+  // The oldest CLI that can actually consume these artifacts. 0.2.0-rc.0 and earlier pin a
+  // single trusted host, so they reject vgpu.sh URLs outright -- advertising anything lower
+  // would be a lie. NOTE: this gate is currently unreachable for exactly those CLIs, because
+  // assertTrustedUrl runs before the version check during the handshake, so they surface
+  // VGPU-EXAMPLES-INTEGRITY instead of VGPU-EXAMPLES-CLI-TOO-OLD. See examples-api.md.
+  minimumCliVersion = '0.2.0-rc.1',
 ): GeneratedArtifactSet {
   verifyGraph(graph);
   const normalizedOrigin = origin.replace(/\/$/, '');
