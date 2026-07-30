@@ -106,6 +106,14 @@ vgpu docs cat concepts-frames.md          # frame batching and animation loops
 vgpu docs cat concepts-render-bundles.md  # record draws once, replay cheap
 ```
 
+Shipping this inside an app? Shaders in their own `.wgsl` files need a bundler
+loader plus one ambient TypeScript declaration, and the canvas has to live in a
+client component:
+
+```sh
+vgpu docs cat nextjs.md   # Next.js (Turbopack or webpack), Vite, .wgsl types, canvas component
+```
+
 For performance work and testing:
 
 ```sh
