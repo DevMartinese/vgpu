@@ -40,7 +40,10 @@ export function Navigation() {
         }`}
       >
         <div className="h-full flex flex-col">
-          <div className="h-16 px-6 flex items-center border-b border-gray-4">
+          {/* No border-b here, and none on the GitHub footer below: those two
+              rules were what boxed the menu in with a line top and bottom. The
+              aside keeps its border-r, which is the sidebar's own edge. */}
+          <div className="h-16 px-6 flex items-center">
             {/* Dropped the `group` class along with the inlined mark: nothing
                 inside was using group-hover. */}
             <Wordmark onClick={() => setMobileMenuOpen(false)}>
@@ -60,7 +63,7 @@ export function Navigation() {
             ))}
           </nav>
 
-          <div className="p-4 border-t border-gray-4">
+          <div className="p-4">
             <a
               href="https://github.com/vercel-labs/vgpu"
               target="_blank"
@@ -109,7 +112,9 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
           href={docsHref(section.href)}
           onClick={onNavigate}
           aria-current={pathname === section.href ? 'page' : undefined}
-          className={`${titleClassName} block px-3 py-1 hover:text-gray-12`}
+          /* Same full-row target and hover as the collapsible sections below,
+             so a flat section does not feel different to hit. */
+          className={`${titleClassName} block rounded-md px-3 py-1 transition-colors hover:bg-gray-1 hover:text-gray-12`}
         >
           {section.title}
         </Link>
@@ -119,13 +124,28 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
 
   return (
     <div className={className}>
-      <div className="mb-1 flex items-center justify-between pl-3 pr-1">
+      {/* The whole row is the target, not just the few characters of the label.
+          The row's left padding moved onto the link/button and it flexes to fill
+          the width, so the gap either side of the text hits it too; the row only
+          keeps pr-1 to hold the chevron off the edge. Row navigates (or toggles,
+          for a section with no page of its own), chevron collapses — they stay
+          siblings rather than nesting, since a button inside a link is invalid
+          and would swallow the collapse click. */}
+      <div className="group mb-1 flex items-center rounded-md transition-colors hover:bg-gray-1">
         {section.href ? (
-          <Link href={docsHref(section.href)} onClick={onNavigate} className={`${titleClassName} hover:text-gray-12`}>
+          <Link
+            href={docsHref(section.href)}
+            onClick={onNavigate}
+            className={`${titleClassName} flex-1 py-1 pl-3 hover:text-gray-12`}
+          >
             {section.title}
           </Link>
         ) : (
-          <button type="button" onClick={() => setManualOpen(!open)} className={`${titleClassName} hover:text-gray-12`}>
+          <button
+            type="button"
+            onClick={() => setManualOpen(!open)}
+            className={`${titleClassName} flex-1 py-1 pl-3 text-left hover:text-gray-12`}
+          >
             {section.title}
           </button>
         )}
@@ -134,7 +154,13 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
           onClick={() => setManualOpen(!open)}
           aria-expanded={open}
           aria-label={`${open ? 'Collapse' : 'Expand'} ${section.title}`}
-          className="rounded p-1 text-gray-8 transition-colors hover:bg-gray-1 hover:text-gray-11"
+          /* gray-3, not gray-1: the row underneath is already gray-1 on hover,
+             so the chevron needs a step up to still read as its own target.
+             pr-2 rather than the row carrying pr-1 — that padding used to be a
+             4px dead strip at the very right edge of the row that hit nothing.
+             Folding it into the button keeps the icon at the same inset and
+             makes the row clickable edge to edge. */
+          className="rounded p-1 pr-2 text-gray-8 transition-colors hover:bg-gray-3 hover:text-gray-11"
         >
           <svg
             viewBox="0 0 12 12"

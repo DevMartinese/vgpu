@@ -10,18 +10,23 @@ interface CodeBlockProps {
   showLineNumbers?: boolean;
 }
 
-// Language display names and colors
-const languageConfig: Record<string, { name: string; color: string }> = {
-  typescript: { name: "TypeScript", color: "#3178c6" },
-  ts: { name: "TypeScript", color: "#3178c6" },
-  javascript: { name: "JavaScript", color: "#f7df1e" },
-  js: { name: "JavaScript", color: "#f7df1e" },
-  wgsl: { name: "WGSL", color: "#ff6b35" },
-  bash: { name: "Bash", color: "#4eaa25" },
-  shell: { name: "Shell", color: "#4eaa25" },
-  json: { name: "JSON", color: "#292929" },
-  html: { name: "HTML", color: "#e34c26" },
-  css: { name: "CSS", color: "#1572b6" },
+// Display names only.
+//
+// These labels used to carry a per-language brand colour — TypeScript blue,
+// Bash green, JSON near-black — so every header in a page came out a different
+// accent and the docs read as a patchwork. They are one grey now, and the colour
+// field is deleted rather than left dead for someone to wire back up.
+const languageConfig: Record<string, { name: string }> = {
+  typescript: { name: "TypeScript" },
+  ts: { name: "TypeScript" },
+  javascript: { name: "JavaScript" },
+  js: { name: "JavaScript" },
+  wgsl: { name: "WGSL" },
+  bash: { name: "Bash" },
+  shell: { name: "Shell" },
+  json: { name: "JSON" },
+  html: { name: "HTML" },
+  css: { name: "CSS" },
 };
 
 export async function CodeBlock({
@@ -30,7 +35,7 @@ export async function CodeBlock({
   filename,
   showLineNumbers = false,
 }: CodeBlockProps) {
-  const langConfig = languageConfig[language] || { name: language.toUpperCase(), color: "#888" };
+  const langConfig = languageConfig[language] || { name: language.toUpperCase() };
   
   // Highlight code on the server at render time
   const highlightedHtml = await highlightCode(code, language);
@@ -43,13 +48,11 @@ export async function CodeBlock({
       <Card.Header className="border-[#333] bg-[#111]">
         <div className="flex items-center gap-2">
           {filename ? (
-            <span className="text-sm text-[#a1a1a1]">{filename}</span>
+            <span className="text-sm text-gray-11">{filename}</span>
           ) : (
             <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-[#666]" />
-              <span className="text-sm text-[#a1a1a1]" style={{ color: langConfig.color }}>
-                {langConfig.name}
-              </span>
+              <Terminal className="w-4 h-4 text-gray-9" />
+              <span className="text-sm text-gray-11">{langConfig.name}</span>
             </div>
           )}
         </div>
