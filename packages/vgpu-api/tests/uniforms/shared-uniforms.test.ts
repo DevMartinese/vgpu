@@ -149,6 +149,27 @@ describe("gpu.uniforms() shared uniforms", () => {
     gpu.dispose();
   });
 
+  test("ignores unsafe keys from parsed updates without polluting Object.prototype", async () => {
+    const gpu = await init();
+    const globals = gpu.uniforms<Record<string, unknown>>({ time: 0, mouse: [0, 0] });
+    const pollutionKey = "__vgpuPrototypePollutionTest";
+    const update = JSON.parse(`{
+      "time": 2,
+      "__proto__": { "${pollutionKey}": true },
+      "constructor": { "prototype": { "${pollutionKey}": true } },
+      "prototype": { "${pollutionKey}": true }
+    }`) as Record<string, unknown>;
+
+    try {
+      globals.set(update);
+
+      expect((Object.prototype as Record<string, unknown>)[pollutionKey]).toBeUndefined();
+    } finally {
+      Reflect.deleteProperty(Object.prototype, pollutionKey);
+      gpu.dispose();
+    }
+  });
+
   test("binding name is chosen by each shader", async () => {
     const gpu = await init();
     const globals = gpu.uniforms({ time: 0, mouse: [0, 0] });
