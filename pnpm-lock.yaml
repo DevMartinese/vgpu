@@ -368,6 +368,10 @@ importers:
         version: 3.4.2
 
   packages/wgsl:
+    dependencies:
+      '@vgpu/wgsl-std':
+        specifier: workspace:*
+        version: link:../wgsl-std
     devDependencies:
       vite:
         specifier: ^6.4.3

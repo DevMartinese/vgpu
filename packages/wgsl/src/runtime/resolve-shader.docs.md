@@ -57,6 +57,8 @@ Package @vgpu/wgsl-std was not found. Install the package (npm install @vgpu/wgs
 ```
 
 With `modules` (in-memory resolution) `node_modules` is never consulted, so the same code reports `Map it with packageMap or add the module to modules`. An unknown subpath reports `Package export ./missing was not found in <pkg>. Check the package's exports map or fix the import subpath`.
+
+Package specifiers resolve in two steps: first by walking `node_modules` up from the importing file, so a copy in the project always wins; then, only if that fails, through Node's own resolver next to `@vgpu/wgsl`. The second step is what lets a package that reaches the project transitively — `@vgpu/wgsl-std` through `vgpu`, for example — resolve under pnpm's isolated `node_modules` and Yarn PnP, where it is installed but absent from the project's own tree.
 **Throws:** `VGPU-WGSL-IMP-SELF` when the graph contains an import cycle — break the cycle.
 **Throws:** `VGPU-WGSL-IMP-ORDER` when an `import` appears after declarations — move imports before declarations.
 **Throws:** `VGPU-WGSL-IMP-SIDEEFFECT` for `import "x"` — import named symbols or a namespace.

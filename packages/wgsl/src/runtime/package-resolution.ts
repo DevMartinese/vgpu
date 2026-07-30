@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { wgslError, wgslWarning } from "./errors.ts";
 import type { Diagnostic } from "./diagnostic-types.ts";
@@ -45,13 +46,37 @@ export function canonicalEntry(entry: string, opts: PackageResolveOptions): stri
 function packageImport(spec: string, from: string, diagnostics: Diagnostic[]): string {
   const pkg = packageNameOf(spec);
   const sub = `.${spec.slice(pkg.length) || ""}`;
+  // Project-local first: the importing project's own node_modules always wins, so a project can
+  // override or pin a WGSL package.
   for (let dir = dirname(from);;) {
     const pkgJson = join(dir, "node_modules", pkg, "package.json");
     if (existsSync(pkgJson)) return packageExport(pkgJson, sub, diagnostics);
     if (isWorkspaceRoot(dir)) break;
     const next = dirname(dir); if (next === dir) break; dir = next;
   }
+  const transitive = resolveAlongsideResolver(spec);
+  if (transitive) return transitive;
   throw packageNotFound(pkg, PKG_NOTFOUND_FIXIT);
+}
+
+/**
+ * Last resort: resolve the specifier from *this module's* install location instead of the shader's.
+ *
+ * Walking up from the shader only finds packages hoisted into the project's node_modules chain,
+ * which is why `@vgpu/wgsl-std` reaching a project transitively through `vgpu` worked under npm
+ * (accidental hoisting) but failed under pnpm's isolated store and Yarn PnP. `@vgpu/wgsl` depends on
+ * `@vgpu/wgsl-std`, so the package manager guarantees it next to *us* in every layout. Node's own
+ * resolver is used rather than another node_modules walk because it honors `exports` maps and is the
+ * only thing that works under Yarn PnP.
+ *
+ * This runs after the loop above, so it never shadows a project-local copy.
+ */
+function resolveAlongsideResolver(spec: string): string | undefined {
+  try {
+    return defaultFile(createRequire(import.meta.url).resolve(spec));
+  } catch {
+    return undefined;
+  }
 }
 
 function packageExport(pkgJson: string, sub: string, diagnostics: Diagnostic[]): string {
