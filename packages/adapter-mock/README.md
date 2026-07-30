@@ -1,6 +1,6 @@
 # @vgpu/adapter-mock
 
-> 0.1.6 — deterministic adapter for `vgpu/mock`
+Deterministic adapter for `vgpu/mock`.
 
 `@vgpu/adapter-mock` backs the `vgpu/mock` entrypoint for tests that need the public `Gpu` API without real GPU hardware.
 
@@ -13,10 +13,10 @@ pnpm add -D @vgpu/adapter-mock
 ## Usage
 
 ```ts
-import { init } from "vgpu/mock";
+import { init, storage } from "vgpu/mock";
 
 const gpu = await init();
-const buffer = gpu.storage(16);
+const buffer = storage(gpu, 16);
 buffer.write(new Float32Array([1, 2, 3, 4]));
 await buffer.read();
 gpu.dispose();

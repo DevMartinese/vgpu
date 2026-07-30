@@ -1,8 +1,10 @@
 # vgpu
 
-> 0.1.6 — public main API (`vgpu`) preview
+[![npm version](https://img.shields.io/npm/v/vgpu.svg)](https://www.npmjs.com/package/vgpu)
+[![CI](https://github.com/vercel-labs/vgpu/actions/workflows/ci.yml/badge.svg)](https://github.com/vercel-labs/vgpu/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/vgpu.svg)](../../LICENSE)
 
-`vgpu` is the public package for the new API. It is built around one `Gpu` context, explicit WGSL reflection, and `set()` ownership rules that make the fast path the default.
+vgpu is a TypeScript library for WebGPU: typed shader imports, a tiny gpu-first API, and the same code running in the browser, headless Node, and your test suite. Ship a 25 KB effect, not a 500 KB engine.
 
 ## Install
 
@@ -11,56 +13,63 @@ pnpm add vgpu
 pnpm add -D @webgpu/types
 ```
 
-## Entry points and layers
-
-- **main API (`vgpu`)**: `init`, `Gpu`, `pass`, `draw`, `compute`, `frame`, `bundle`, `target`, `pingPong`, `uniforms`.
-- **core layer (`vgpu/core`)**: device/resource escape hatches, native handles, bind groups, `Uniform`, `UniformPool`, storage buffers.
-- **scene helpers (`vgpu/scene`)**: pure geometry and camera helpers. No scene graph and no material layer.
-
-## Browser quick start
+## Quick Start
 
 ```ts
-import { init } from "vgpu";
+import { clock, init, effect, frameLoop, surface } from "vgpu";
+import waveShader from "./wave.wgsl";
 
 const gpu = await init();
-const surface = gpu.surface(canvas, { dpr: [1, 2] });
-const wave = gpu.effect(/* wgsl */ `
-struct Params { time: f32, speed: f32 }
-@group(0) @binding(0) var<uniform> params: Params;
-@fragment fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
-  return vec4f(uv, sin(params.time * params.speed) * .5 + .5, 1);
-}
-`, { set: { speed: 2 } });
+const canvasSurface = surface(gpu, canvas, { dpr: [1, 2] });
+const wave = effect(gpu, waveShader, { set: { speed: 2 } });
 
-gpu.frame.loop(() => {
-  wave.set({ time: gpu.time });
-  wave.draw();
+const time = clock(gpu);
+frameLoop(gpu, (frame) => {
+  wave.set({ time: time.time });
+  frame.pass(canvasSurface, wave);
 });
 ```
 
-## Node quick start
+The same `init`, `effect`, and `frame` calls run unchanged against `vgpu/node` (Dawn-backed, headless) and `vgpu/mock` (deterministic, no GPU hardware) — see the [Node quick start](../../README.md#node-quick-start) in the repo root.
 
-```ts
-import { init } from "vgpu/node";
+## WGSL modules with typed imports
 
-const gpu = await init();
-const target = gpu.target({ size: [256, 256], format: "rgba8unorm" });
-const tri = gpu.draw({ shader: TRIANGLE_WGSL });
-gpu.frame((f) => f.pass({ target, clear: [0, 0, 0, 1] }, (p) => p.draw(tri)));
-const pixels = await target.read();
-gpu.dispose();
+`.wgsl` files import and export like TypeScript modules. `@vgpu/wgsl-std` ships reusable declarations (hash, noise, color, sampling, ...) as named exports, and any `.wgsl` file can export its own `fn`, `struct`, or `const` for other shaders to import:
+
+```wgsl
+// grain.wgsl
+import { hash2 } from "@vgpu/wgsl-std/hash";
+
+export fn grain(uv: vec2f, time: f32) -> f32 {
+  return hash2(uv * time).x;
+}
 ```
 
-## Performance defaults
+Imports resolve at build time through typed WGSL reflection — no codegen step and no manual binding declarations to keep in sync.
 
-Read `docs/topics/performance-playbook.docs.md` before writing shader code. It documents bundles, target pre-warm, manual bind-group dynamic offsets, in-place `set()`, bake, instancing, shared uniforms, ping-pong, and MSAA/depth as defaults rather than late optimizations.
+## Why vgpu
 
-## WGSL imports
+- **One `Gpu` context.** `init()` returns a single handle; `draw`, `effect`, `frame`, `surface`, `target`, and every other entry point take it as their first argument. No facade, no hidden global state.
+- **Typed WGSL imports.** Shaders import from `@vgpu/wgsl-std` or from each other, and reflection keeps binding names, types, and layouts correct without hand-written declarations.
+- **Real tree-shaking.** Unused declarations are pruned before minification, so a single fullscreen effect ships in a 25 KB gzip budget instead of a 500 KB engine.
+- **Multi-runtime by default.** The public API is one surface across the browser, headless Node (`vgpu/node`, Dawn-backed), and a deterministic mock (`vgpu/mock`) built for tests and CI.
+- **Explicit frames.** `frame(gpu, (f) => f.pass(target, effect))` — passes, clears, and draws are all explicit calls, never implicit scene-graph state.
 
-For app projects that import `.wgsl` files, add:
+## Documentation
 
-```ts
-/// <reference types="vgpu/client" />
+Guides and API reference ship inside the package and run fully offline through the CLI:
+
+```bash
+npx vgpu docs cat getting-started.md
+npx vgpu docs find effect
 ```
 
-Runtime reflection remains the source of truth for binding names, types, and layouts.
+Start with [`docs/topics/getting-started.docs.md`](../../docs/topics/getting-started.docs.md), then [`docs/topics/performance-playbook.docs.md`](../../docs/topics/performance-playbook.docs.md) for the defaults (bundles, target pre-warm, in-place `set()`, instancing, ping-pong, MSAA/depth) that shader authors should reach for from day one.
+
+## Contributing
+
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the development setup, bundle budgets, and release flow.
+
+## License
+
+MIT — see [LICENSE](../../LICENSE).

@@ -1,6 +1,6 @@
 # @vgpu/adapter-node
 
-> 0.1.6 — Dawn adapter for `vgpu/node`
+Dawn adapter for `vgpu/node`.
 
 `@vgpu/adapter-node` connects vgpu to Node.js through the `webgpu` Dawn native prebuild. Most callers should import `init` from `vgpu/node`; direct adapter/device helpers remain for core layer (`vgpu/core`) tooling.
 
@@ -13,13 +13,13 @@ pnpm add vgpu
 ## Usage
 
 ```ts
-import { init } from "vgpu/node";
+import { init, draw, frame, target } from "vgpu/node";
 
 const gpu = await init();
-const target = gpu.target({ size: [256, 256], format: "rgba8unorm" });
-const draw = gpu.draw({ shader: TRIANGLE_WGSL, targets: [target] });
-gpu.frame((f) => f.pass({ target, clear: [0, 0, 0, 1] }, (p) => p.draw(draw)));
-const rgba = await target.read();
+const colorTarget = target(gpu, { size: [256, 256], format: "rgba8unorm" });
+const drawable = draw(gpu, { shader: TRIANGLE_WGSL, targets: [colorTarget] });
+frame(gpu, (f) => f.pass({ target: colorTarget, clear: [0, 0, 0, 1] }, (p) => p.draw(drawable)));
+const rgba = await colorTarget.read();
 gpu.dispose();
 ```
 

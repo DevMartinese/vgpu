@@ -1,4 +1,4 @@
-import { examples } from './examples-registry';
+import { examplesMetadata } from './examples-metadata';
 
 import {
   getGuideRecord,
@@ -63,7 +63,7 @@ const guideGroups = [
 ] as const;
 
 
-const exampleItems: NavItem[] = examples.map(({ meta }) => ({
+const exampleItems: NavItem[] = examplesMetadata.map((meta) => ({
   title: meta.title,
   href: `/examples/${meta.slug}`,
 }));
@@ -113,6 +113,21 @@ export const navSections: NavSection[] = [
     })).filter((group) => group.items.length > 0),
   },
   {
+    title: 'ML',
+    href: '/ml',
+    groups: [
+      {
+        title: '',
+        items: [
+          { title: 'Overview', href: '/ml' },
+          { title: 'Quickstart: Browser', href: '/ml/browser' },
+          { title: 'Quickstart: Node', href: '/ml/node' },
+          { title: 'Buffers & ownership', href: '/ml/buffers' },
+        ],
+      },
+    ],
+  },
+  {
     title: 'Examples',
     href: '/examples',
     groups: [
@@ -121,6 +136,11 @@ export const navSections: NavSection[] = [
         items: exampleItems,
       },
     ],
+  },
+  {
+    title: 'CLI',
+    href: '/cli',
+    groups: [],
   },
   {
     title: 'API Reference',
@@ -210,6 +230,9 @@ function referenceTopicToNavItem(topic: ReferenceTopic): NavItem {
 function flattenNavSections(sections: NavSection[]) {
   const items: FlatNavItem[] = [];
   for (const section of sections) {
+    if (section.href && section.groups.length === 0) {
+      items.push({ title: section.title, href: section.href, section: section.title, groupPath: [] });
+    }
     for (const group of section.groups) {
       flattenGroup(section.title, group, [group.title], items);
     }
@@ -241,6 +264,7 @@ function sectionOverviewHref(section: string) {
   if (section === 'Core Concepts') return '/concepts';
   if (section === 'Guides') return '/guides';
   if (section === 'Examples') return '/examples';
+  if (section === 'CLI') return '/cli';
   if (section === 'API Reference') return '/reference';
   return '/';
 }

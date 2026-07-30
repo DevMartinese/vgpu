@@ -21,7 +21,9 @@ vi.mock("node:module", async (importOriginal) => {
   return {
     ...original,
     createRequire: () => (id: string) => {
-      if (id !== "webgpu") throw new Error(`Unexpected require: ${id}`);
+      // The verified loader requires a private temporary copy of the cached native binary;
+      // direct package mode still requires the package name.
+      if (id !== "webgpu" && !id.endsWith(".node")) throw new Error(`Unexpected require: ${id}`);
       return {
         globals: {},
         create: (flags: string[]) => {
@@ -36,6 +38,7 @@ vi.mock("node:module", async (importOriginal) => {
               }
               return {
                 info: state.adapterInfo,
+                features: new Set(["timestamp-query"]),
                 async requestDevice(descriptor: GPUDeviceDescriptor): Promise<GPUDevice> {
                   state.deviceDescriptors.push(descriptor);
                   return {
@@ -81,6 +84,14 @@ test("node adapter forwards required features and limits to requestDevice", asyn
   const requiredLimits = { maxStorageBuffersInVertexStage: 2 };
   await createNodeDevice({ requiredFeatures, requiredLimits });
   expect(state.deviceDescriptors.at(-1)).toEqual({ requiredFeatures, requiredLimits });
+});
+
+test("node adapter fails clearly when a required feature is unsupported", async () => {
+  const { createNodeDevice } = await import("../src/index.ts");
+  await expect(createNodeDevice({ requiredFeatures: ["depth-clip-control"] })).rejects.toMatchObject({
+    code: "VGPU-FEATURE-UNSUPPORTED",
+    message: expect.stringContaining('"depth-clip-control"'),
+  });
 });
 
 test("node adapter leaves webgpu backend devices out of compatibility mode", async () => {

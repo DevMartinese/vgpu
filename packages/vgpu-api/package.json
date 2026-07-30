@@ -1,6 +1,6 @@
 {
   "name": "vgpu",
-  "version": "0.1.6",
+  "version": "0.2.0-rc.0",
   "description": "Public VGPU API entrypoint scaffold for browser, Node, mock, scene, and client typing surfaces.",
   "keywords": [
     "webgpu",
@@ -61,13 +61,14 @@
     "client.d.ts",
     "bin",
     "dist",
+    "!dist/tsconfig.tsbuildinfo",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b && node scripts/copy-cli.mjs",
     "test": "cd ../.. && vitest run packages/vgpu-api",
-    "prepack": "pnpm --dir ../vgpu generate:docs && node scripts/copy-cli.mjs"
+    "prepack": "pnpm --dir ../vgpu generate:docs"
   },
   "dependencies": {
     "@vgpu/adapter-mock": "workspace:*",
@@ -79,16 +80,32 @@
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0"
   },
-  "vgpuExportBundleBudgetNote": "Bundle-diet ceilings use 512-byte granularity with one rounded safety step above measured gzip sizes.",
+  "vgpuExportBundleBudgetNote": "Gzip ceilings use 512-byte granularity: each budget is the next 512-byte multiple strictly above the measured size. Regenerate with `pnpm bundle-check --update`. vgpuBundleAudience/vgpuExportBundleAudiences select the gate: \"client\" entries ship to browsers and fail on any byte over budget; \"tooling\" entries (loaders, Node runtime, CLI, package tarballs) only warn until growth passes vgpuBundleBudgetGrowthThreshold (default 5%). Tarballs measure published dist bytes with sourcemap sourcesContent stripped and *.docs.md excluded.",
+  "vgpuExportBundleAudiences": {
+    ".": "client",
+    "./node": "tooling",
+    "./mock": "tooling",
+    "./scene": "client",
+    "./client": "client",
+    "./core": "client"
+  },
   "vgpuExportBundleBudgetsGzipBytes": {
-    ".": 30720,
-    "./node": 30720,
-    "./mock": 30720,
-    "./scene": 5632,
+    ".": 38912,
+    "./node": 38912,
+    "./mock": 38912,
+    "./scene": 12800,
     "./client": 512,
     "./core": 3584
   },
   "bin": {
     "vgpu": "./bin/vgpu.js"
-  }
+  },
+  "vgpuExperienceBundleBudgetsGzipBytes": {
+    "init-only": 1024,
+    "effect-only": 25600,
+    "triangle-low-level": 28672,
+    "draw-recipe-box": 29696,
+    "full-root": 38912
+  },
+  "vgpuSceneBundleBudgetNote": "The scene barrel retains all recipe builders after the geometry redesign; direct primitive imports retain only their selected mesh, as the experience fixtures assert."
 }

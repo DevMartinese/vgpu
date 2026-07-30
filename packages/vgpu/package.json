@@ -1,6 +1,6 @@
 {
   "name": "@vgpu/cli",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Official VGPU CLI for docs, doctor, and WGSL utilities.",
   "keywords": [
     "webgpu",
@@ -36,7 +36,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "generate:docs": "node lib/docs/generate/cli.js",
+    "generate:docs": "node lib/docs/generate/cli.js && node ../vgpu-api/scripts/copy-cli.mjs",
     "prepack": "node lib/docs/generate/cli.js",
     "test": "cd ../.. && vitest run packages/vgpu"
   },
@@ -45,9 +45,9 @@
     "pngjs": "^7.0.0"
   },
   "peerDependencies": {
-    "@vgpu/adapter-node": "^0.1.6",
-    "@vgpu/wgsl": "^0.1.6",
-    "vgpu": "^0.1.6"
+    "@vgpu/adapter-node": ">=0.1.6 <1.0.0",
+    "@vgpu/wgsl": ">=0.1.6 <1.0.0",
+    "vgpu": ">=0.1.6 <1.0.0"
   },
   "peerDependenciesMeta": {
     "@vgpu/adapter-node": {
