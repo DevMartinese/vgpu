@@ -1,17 +1,35 @@
 import type { Device } from "@vgpu/core";
+import type { ShaderSource } from "@vgpu/wgsl";
 import { reflectSource, type BindingInfo, type EntryPointInfo, type Reflection } from "@vgpu/wgsl/reflect-source";
 import { createBindGroupCache, identityKey, type BindGroupCache, type BindGroupIdentityPart } from "./bind-cache.ts";
 import { createSetCore, bindGroupLayoutsForReflection, pipelineLayoutFor, type SetBag, type SetCore } from "./set-core.ts";
 import { visibilityForEntries } from "./set-layouts.ts";
-import type { Compute, ComputeOptions, DispatchOptions } from "./gpu.ts";
+import type { Compute, ComputeOptions, DispatchOptions } from "./api-types.ts";
 import { normalizeConstantsOptions, selectEntryPoint } from "./pipeline-store.ts";
 import { indirectInvalidError, unsupportedError, writableStorageAliasingError } from "./errors.ts";
-import { resolveIndirect } from "./storage.ts";
+import { assertDeviceUsable } from "./lifecycle.ts";
+import type { Gpu } from "./kernel.ts";
+import { liveKernel } from "./live-kernel.ts";
+import { renderService } from "./render-service.ts";
+import { toWgsl } from "./shader-source.ts";
+import { resolveIndirect } from "./indirect.ts";
+
+/**
+ * Compute pipeline for this gpu, ready to `set()` bindings and `dispatch()`.
+ *
+ * Each compute owns its own pipeline (no shared pipeline store), but it resolves the gpu's single
+ * lazy bind group cache through the kernel, so a bind group built for a draw and one built here are
+ * the same object when the resources match — and the cache is torn down once, in the service phase.
+ */
+export function compute(gpu: Gpu, source: string | ShaderSource, opts: ComputeOptions = {}): Compute {
+  const kernel = liveKernel(gpu, "compute");
+  return new ComputePipeline(kernel.device, toWgsl(source), opts, renderService(kernel).binds);
+}
 
 let nextComputeId = 1;
 
 /**
- * Internal Ring-1 compute implementation behind `Gpu.compute()`.
+ * Internal Ring-1 compute implementation behind `compute(gpu, source, opts)`.
  *
  * @internal
  */
@@ -33,13 +51,14 @@ export class ComputePipeline implements Compute {
     readonly opts: ComputeOptions = {},
     private readonly cache: BindGroupCache = createBindGroupCache(),
   ) {
+    assertDeviceUsable(device, "Compute.constructor");
     this.label = opts.label ?? "compute";
     this.reflection = reflectSource(source, `${this.label}.wgsl`);
     // Entry selection runs before everything derived from the selected entry — binding visibility, bind group
     // layouts, and the active-binding set for storage aliasing all reflect the chosen variant.
     const entry = computeEntryPoint(this.reflection, this.label, opts.entry);
     this.entryPoint = entry.name;
-    const { constants } = normalizeConstantsOptions(this.label, opts.constants, this.reflection.overrides, "gpu.compute");
+    const { constants } = normalizeConstantsOptions(this.label, opts.constants, this.reflection.overrides, "compute");
     this.bindGroupLayouts = bindGroupLayoutsForReflection(device, this.label, this.reflection, visibilityForEntries(this.reflection.bindings, [entry]));
     this.pipelineLayout = pipelineLayoutFor(device, this.bindGroupLayouts);
     this.shaderModule = device.gpu.createShaderModule({ label: `${this.label}.shader`, code: source });
@@ -57,6 +76,7 @@ export class ComputePipeline implements Compute {
   }
 
   set(values: SetBag): this {
+    assertDeviceUsable(this.device, `${this.label}.set`);
     this.setCore.set(values);
     return this;
   }
@@ -64,6 +84,7 @@ export class ComputePipeline implements Compute {
   dispatch(x: number, y?: number, z?: number): void;
   dispatch(opts: DispatchOptions): void;
   dispatch(x: number | DispatchOptions, y?: number, z?: number): void {
+    assertDeviceUsable(this.device, `${this.label}.dispatch`);
     const indirect = typeof x === "object" && x !== null ? this.#resolveIndirectDispatch(x, y, z) : undefined;
     this.#preflightAliasing();
     const encoder = this.device.gpu.createCommandEncoder({ label: `${this.label}.encoder` });
@@ -104,7 +125,7 @@ export class ComputePipeline implements Compute {
 function computeEntryPoint(reflection: Reflection, label: string, name?: string): EntryPointInfo {
   // A named entry validates existence and stage inside selectEntryPoint (VGPU-ENTRY-INVALID); only the
   // no-name case can come back undefined, keeping today's error for a shader without any @compute entry.
-  const entry = selectEntryPoint(label, reflection.entryPoints, "compute", name, "gpu.compute");
+  const entry = selectEntryPoint(label, reflection.entryPoints, "compute", name, "compute");
   if (!entry) throw unsupportedError(`${label}.compute`, "The compute shader requires a @compute entry point.");
   return entry;
 }

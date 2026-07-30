@@ -1,6 +1,7 @@
 import { ValidationError } from "./errors.ts";
 import { textureUsageFlags } from "./gpu-constants.ts";
 import { isMockGPUTexture } from "./mock-gpu-storage.ts";
+import { decodeTextureFloats, readMockTextureBytes, textureReadbackFormat } from "./readback.ts";
 import { createResourceIdentity, DestroySignal, type ResourceDestroyCallback, type ResourceIdentity, type UnsubscribeResourceDestroy } from "./resource-lifecycle.ts";
 import type { Device } from "./device.ts";
 import type { TextureOptions } from "./types.ts";
@@ -56,6 +57,7 @@ export class Texture {
   }
 
   createView(desc?: GPUTextureViewDescriptor): GPUTextureView {
+    this.assertAlive("Texture.createView");
     return this.gpu.createView(desc);
   }
 
@@ -92,10 +94,31 @@ export class Texture {
     return true;
   }
 
+  /**
+   * Raw, unpadded texel bytes in this texture's own format (row stride padding removed).
+   * `byteLength` is `width * height * bytesPerPixel(format)`; `bgra*` bytes are swizzled to RGBA order.
+   * Use `readFloats()` for float formats to get decoded component values.
+   */
   async read(): Promise<Uint8Array> {
-    this.assertAlive();
-    if (isMockGPUTexture(this.gpu)) return this.gpu.__vgpuMockBytes.slice();
-    return this.device.readback.readTexture(this.gpu, this.options.size, this.options.format);
+    this.assertAlive("Texture.read");
+    // Validated before the mock branch: a mock device must reject the same formats a real one does.
+    const info = textureReadbackFormat(this.options.format, "Texture.read");
+    if (isMockGPUTexture(this.gpu)) return readMockTextureBytes(this.gpu.__vgpuMockBytes, this.options.size, info);
+    const result = await this.device.readback.readTexture(this.gpu, this.options.size, this.options.format);
+    // Re-checked after the await: a retained external device can be destroyed mid-readback.
+    this.assertAlive("Texture.read");
+    return result;
+  }
+
+  /**
+   * Texel components decoded to f32, row-major, `width * height * components(format)` long.
+   * `float16`/`float32` formats keep their HDR values (no clamping); `unorm8` formats are
+   * normalized to `[0, 1]` without srgb gamma conversion.
+   */
+  async readFloats(): Promise<Float32Array> {
+    // Validate before the copy so an unsupported format never allocates a staging buffer.
+    textureReadbackFormat(this.options.format, "Texture.readFloats");
+    return decodeTextureFloats(await this.read(), this.options.format);
   }
 
   destroy(): void {
@@ -111,8 +134,9 @@ export class Texture {
     this.destroy();
   }
 
-  private assertAlive(): void {
-    if (this.destroyed) throw new ValidationError({ code: "VGPU-CORE-TEXTURE-DESTROYED", message: "Texture is destroyed", where: "Texture" });
+  private assertAlive(where = "Texture"): void {
+    if (this.destroyed) throw new ValidationError({ code: "VGPU-CORE-TEXTURE-DESTROYED", message: "Texture is destroyed", where });
+    (this.device as unknown as { assertUsable?(where: string): void }).assertUsable?.(where);
   }
 }
 

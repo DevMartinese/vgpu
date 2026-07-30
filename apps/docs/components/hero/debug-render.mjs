@@ -45,6 +45,9 @@ import { fileURLToPath } from 'node:url';
 
 import { PNG } from 'pngjs';
 import { resolveShader } from '@vgpu/wgsl/runtime';
+// vgpu 0.2.0 is free functions over a minimal `Gpu`: `target`/`effect`/`frame`
+// take the gpu as their first argument instead of hanging off it.
+import * as vgpu from 'vgpu/node';
 import { init } from 'vgpu/node';
 
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
@@ -202,25 +205,25 @@ async function main() {
   const gpu = await init();
   const [width, height] = options.size;
 
-  const gbuffer = gpu.target({
+  const gbuffer = vgpu.target(gpu, {
     size: [width, height],
     colors: GBUFFER_FORMATS.map((format) => ({ format })),
     label: 'hero-debug-gbuffer',
   });
   // Display-referred, exactly what the swap chain gets in the browser: shade
   // tone maps in place, so this is the only pass target after the G-buffer.
-  const output = gpu.target({ size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
+  const output = vgpu.target(gpu, { size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
 
-  const bake = gpu.effect(bakeWgsl, { label: 'hero-debug-bake' });
+  const bake = vgpu.effect(gpu, bakeWgsl, { label: 'hero-debug-bake' });
   // The same shade.wgsl the browser renderer compiles, from the same imports:
   // a PNG from this harness and a frame from the page are the same program.
-  const shade = gpu.effect(shadeWgsl, { label: 'hero-debug-shade' });
+  const shade = vgpu.effect(gpu, shadeWgsl, { label: 'hero-debug-shade' });
 
   // Same lattice bytes the browser uploads (shared module, not a copy), so the
   // harness renders the disk the page renders. Node/Dawn takes the 3D texture
   // and the trilinear repeat sampler through the identical core WebGPU path.
   const noiseVolume = createNoiseVolume(gpu, options.noiseSize, 'hero-debug-noise-volume');
-  const noiseSampler = noiseVolumeSampler(gpu);
+  const noiseSampler = noiseVolumeSampler(vgpu, gpu);
 
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
   bake.set({ bake: {
@@ -246,7 +249,7 @@ async function main() {
   });
 
   // One bake for every view: that is the whole point of the split.
-  gpu.frame((frame) => {
+  vgpu.frame(gpu, (frame) => {
     frame.pass({ target: gbuffer, clear: [0, 0, 0, 1] }, (pass) => pass.draw(bake));
   });
 
@@ -264,7 +267,7 @@ async function main() {
     } });
     // No composite uniform: the debug bypass is an early return inside
     // shade.wgsl, so `debugView` alone decides whether the tone map runs.
-    gpu.frame((frame) => {
+    vgpu.frame(gpu, (frame) => {
       frame.pass({ target: output, clear: [0, 0, 0, 1] }, (pass) => pass.draw(shade));
     });
     const pixels = await output.read();

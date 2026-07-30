@@ -221,10 +221,16 @@ export function createNoiseVolume(gpu, size = NOISE_VOLUME_SIZE, label = 'hero-n
  * the eight-way `mix` chain — the cubic fade is applied to the coordinate
  * before the fetch, so the filter only has to be linear.
  *
+ * Takes the vgpu module namespace rather than importing it: in 0.2.0 `sampler`
+ * is a free function, and this module is pulled in statically by the browser
+ * renderer — a top-level `import { sampler } from 'vgpu'` here would drag the
+ * library back into the initial bundle that `renderer.ts` keeps it out of.
+ *
+ * @param {typeof import('vgpu')} vgpu
  * @param {import('vgpu').Gpu} gpu
  */
-export function noiseVolumeSampler(gpu) {
-  return gpu.sampler({
+export function noiseVolumeSampler(vgpu, gpu) {
+  return vgpu.sampler(gpu, {
     addressModeU: 'repeat',
     addressModeV: 'repeat',
     addressModeW: 'repeat',

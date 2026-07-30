@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
@@ -7,6 +7,34 @@ const docsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const chunksDir = process.env.VGPU_EXAMPLE_CHUNKS_DIR
   ? path.resolve(process.env.VGPU_EXAMPLE_CHUNKS_DIR)
   : path.join(docsDir, '.next', 'static', 'chunks');
+const sourceDir = process.env.VGPU_EXAMPLE_SOURCE_DIR
+  ? path.resolve(process.env.VGPU_EXAMPLE_SOURCE_DIR)
+  : docsDir;
+
+/**
+ * Everything that can change what lands in an example chunk. Deliberately not
+ * the whole app: `.next`, `node_modules` and `public` are outputs or assets,
+ * and walking them would cost more than the check is worth.
+ */
+const SOURCE_ROOTS = ['app', 'components', 'examples', 'lib', 'next.config.mjs', 'package.json'];
+
+/** Newest mtime under `entry`, or 0 if it does not exist. */
+async function newestMtime(entry) {
+  const info = await stat(entry).catch((error) => {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!info) return { time: 0, file: null };
+  if (!info.isDirectory()) return { time: info.mtimeMs, file: entry };
+
+  let newest = { time: 0, file: null };
+  for (const child of await readdir(entry, { withFileTypes: true })) {
+    if (child.name === 'node_modules' || child.name.startsWith('.')) continue;
+    const found = await newestMtime(path.join(entry, child.name));
+    if (found.time > newest.time) newest = found;
+  }
+  return newest;
+}
 const budgetsFile = process.env.VGPU_EXAMPLE_BUDGETS_FILE
   ? path.resolve(process.env.VGPU_EXAMPLE_BUDGETS_FILE)
   : new URL('./example-chunk-budgets.json', import.meta.url);
@@ -29,8 +57,27 @@ const names = (await readdir(chunksDir).catch((error) => {
 })).filter((name) => name.endsWith('.js'));
 
 const chunkSources = new Map();
+let newestChunk = 0;
 for (const name of names) {
-  chunkSources.set(name, await readFile(path.join(chunksDir, name)));
+  const file = path.join(chunksDir, name);
+  chunkSources.set(name, await readFile(file));
+  newestChunk = Math.max(newestChunk, (await stat(file)).mtimeMs);
+}
+
+/**
+ * This script measures whatever chunks it finds and never builds anything, so
+ * without this it will happily grade a build from last week and report a pass.
+ * That is not hypothetical: the ML baselines in the budgets file were all
+ * captured that way and two of them were wrong by up to 57%.
+ */
+const newestSource = (await Promise.all(SOURCE_ROOTS.map((root) => newestMtime(path.join(sourceDir, root)))))
+  .reduce((newest, found) => (found.time > newest.time ? found : newest), { time: 0, file: null });
+if (newestSource.time > newestChunk) {
+  throw new Error(
+    `Stale chunks: ${path.relative(sourceDir, newestSource.file)} was modified at `
+    + `${new Date(newestSource.time).toISOString()}, after the newest chunk in ${chunksDir} `
+    + `(${new Date(newestChunk).toISOString()}). Run \`pnpm --filter docs build\` first; these numbers would describe a build that no longer exists.`,
+  );
 }
 
 function loaderPattern(slug) {
@@ -54,6 +101,16 @@ if (hostGzip > hostLimit) {
   throw new Error(`Shared preview host is ${hostGzip} B gzip; budget is ${hostLimit} B (${budgets.sharedHost.gzipBytes} B baseline + ${budgets.sharedHost.maxGrowthBytes} B growth).`);
 }
 
+/*
+ * Turbopack preserves `apps/docs/examples/<slug>/` virtual paths for inlined
+ * WGSL, but not for ordinary TypeScript modules. The marker check below is
+ * therefore supplementary evidence only: it catches a foreign renderer/WGSL
+ * when that path survives minification, but cannot prove source isolation for
+ * examples whose chunks contain no such marker (including the current ML
+ * routes). Unique route-owned chunks are still enforced above; use a bundler
+ * manifest with module-to-chunk attribution before treating this as a complete
+ * cross-contamination guarantee.
+ */
 const chunkOwners = new Map();
 const results = [];
 for (const slug of slugs) {
@@ -73,11 +130,14 @@ for (const slug of slugs) {
   for (const chunk of chunks) {
     const source = chunkSources.get(chunk);
     if (!source) throw new Error(`/preview/${slug} references missing chunk ${chunk}.`);
-    const owner = chunkOwners.get(chunk);
-    if (owner && owner !== slug) throw new Error(`${chunk} is shared by ${owner} and ${slug}; example chunks must be isolated.`);
-    chunkOwners.set(chunk, slug);
-
     const markerSlugs = new Set([...source.toString('utf8').matchAll(/apps\/docs\/examples\/([a-z0-9-]+)\//g)].map((match) => match[1]));
+    // Turbopack may factor shared library code into a dependency chunk referenced by several lazy
+    // routes. Only chunks containing example source must have exactly one example owner.
+    if (markerSlugs.size > 0) {
+      const owner = chunkOwners.get(chunk);
+      if (owner && owner !== slug) throw new Error(`${chunk} is shared by ${owner} and ${slug}; example chunks must be isolated.`);
+      chunkOwners.set(chunk, slug);
+    }
     const foreign = [...markerSlugs].filter((marker) => marker !== slug);
     if (foreign.length) throw new Error(`/preview/${slug} chunk ${chunk} contains another example's renderer/WGSL: ${foreign.join(', ')}.`);
 

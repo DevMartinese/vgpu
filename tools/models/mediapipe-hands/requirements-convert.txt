@@ -1,0 +1,39 @@
+# Pinned conversion toolchain for convert.sh (Python 3.11).
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-convert.txt
+#
+# onnx is 1.22.0 here, matching requirements.txt: one auditable onnx across both
+# the conversion and the validation toolchain.
+#
+# History, because this file used to say the opposite. It previously held onnx
+# at 1.17.0 with tf2onnx 1.16.1 + tensorflow 2.15.1, and recorded two hard,
+# independent resolver conflicts as the reason:
+#
+#   tf2onnx 1.16.1            depends on protobuf~=3.20
+#   onnx >= 1.18              depends on protobuf>=4.25.1
+#
+#   tensorflow-cpu-aws 2.15.1 depends on ml-dtypes~=0.3.1
+#   onnx 1.22.0               depends on ml_dtypes>=0.5.4
+#
+# Both conflicts are gone as of this bump:
+#   * tf2onnx 1.17.0 (released 2026-03-04, after the note above was written)
+#     drops the protobuf upper bound: it now requires only protobuf>=3.20.
+#   * tensorflow 2.19.0 requires ml-dtypes>=0.5.1,<1.0.0, which admits the
+#     ml_dtypes>=0.5.4 that onnx 1.22.0 needs.
+# The environment resolves to protobuf 5.29.6 and ml-dtypes 0.5.4.
+#
+# This retires the CVE-2025-51480 exposure that the old onnx==1.17.0 pin
+# accepted deliberately, so that risk-acceptance note is no longer needed.
+#
+# The conversion output was re-verified against the reproducibility contract
+# before this toolchain was adopted: graph-digest.py reproduces both recorded
+# structural digests exactly (palm a19a1337..., landmark 416a8438...), and
+# validate-cpu.py over both fixtures reproduces the recorded golden.json
+# landmark-for-landmark. Only the byte *lengths* moved, by 2 bytes each
+# (4589374 -> 4589372, 10903457 -> 10903455) - the same tensor-naming
+# non-determinism PROVENANCE.md already documents. See convert.sh for the
+# byte constants and PROVENANCE.md for the full record.
+pip==26.2
+tf2onnx==1.17.0
+tensorflow==2.19.0
+onnx==1.22.0
+numpy==1.26.4

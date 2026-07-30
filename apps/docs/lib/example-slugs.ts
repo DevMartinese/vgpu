@@ -10,6 +10,13 @@ export const exampleSlugs = [
   'batch-rendering',
   'fft-ocean',
   'raymarched-fractal',
+  'environment-map',
+  'transmission',
+  'radiance-cascades',
+  'nextjs-flare',
+  'depth-estimation',
+  'mnist-classifier',
+  'air-painting',
 ] as const;
 
 export type ExampleSlug = (typeof exampleSlugs)[number];

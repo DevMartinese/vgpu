@@ -3,7 +3,7 @@ import { bindingKind, reflectedBindingLayout } from "./reflect-bind-layout.ts";
 import { parseDeclarations } from "./reflect-declarations.ts";
 import { layoutOf } from "./reflect-layout.ts";
 import { entrySamplingPairs } from "./reflect-sampling.ts";
-import { buildModuleSymbols, buildRegistry, resolveType, unwrapAlias } from "./reflect-symbols.ts";
+import { buildModuleSymbols, buildRegistry, resolveType, unwrapAlias, type ImportPathResolver } from "./reflect-symbols.ts";
 import type { Attr, BindingInfo, BindingRef, EntryPointInfo, EntryPointInputInfo, HostShareableLayout, ModuleSymbols, ParsedDecls, ParsedEntryPoint, ParsedStructMember, Reflection, Registry } from "./reflect-types.ts";
 import { numericAttr } from "./reflect-utils.ts";
 import { analyzeWgslTokens } from "./scope-walker.ts";
@@ -40,10 +40,13 @@ export type {
 /**
  * Reflects mangled WGSL modules into the frozen ReflectionFacade contract.
  * The returned names preserve source-facing identifiers while `mangledName` points at emitted WGSL.
+ * `resolveImport` is the graph resolver that loaded the modules; passing it lets imported nominal
+ * types (binding/struct-member types) resolve through bare package specifiers, `packageMap`
+ * entries and root aliases instead of relative/absolute paths only.
  */
-export function reflect(modules: readonly MangleModule[]): Reflection {
+export function reflect(modules: readonly MangleModule[], resolveImport?: ImportPathResolver): Reflection {
   const raw = modules.map(parseDeclarations);
-  const moduleSymbols = buildModuleSymbols(modules, raw);
+  const moduleSymbols = buildModuleSymbols(modules, raw, resolveImport);
   const registry = buildRegistry(raw, moduleSymbols);
   const bindings: BindingInfo[] = [];
   const hostShareableLayouts: HostShareableLayout[] = [];

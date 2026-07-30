@@ -113,6 +113,21 @@ export const navSections: NavSection[] = [
     })).filter((group) => group.items.length > 0),
   },
   {
+    title: 'ML',
+    href: '/ml',
+    groups: [
+      {
+        title: '',
+        items: [
+          { title: 'Overview', href: '/ml' },
+          { title: 'Quickstart: Browser', href: '/ml/browser' },
+          { title: 'Quickstart: Node', href: '/ml/node' },
+          { title: 'Buffers & ownership', href: '/ml/buffers' },
+        ],
+      },
+    ],
+  },
+  {
     title: 'Examples',
     href: '/examples',
     groups: [

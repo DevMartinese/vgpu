@@ -1,5 +1,13 @@
 import type { Effect, Frame, Gpu, Surface, Target, Timer, TimerSpan } from 'vgpu';
 
+/**
+ * vgpu 0.2.0 is a set of free functions over a minimal `Gpu` kernel — there is
+ * no `gpu.effect()` facade any more. The module namespace is captured from the
+ * SAME dynamic `import('vgpu')` that `init()` comes from, so the library still
+ * stays out of the initial bundle: nothing here imports vgpu at module scope.
+ */
+type VgpuApi = typeof import('vgpu');
+
 import bakeWgsl from './bake.wgsl';
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
 import shadeWgsl from './shade.wgsl';
@@ -341,6 +349,8 @@ const CLEAR: readonly [number, number, number, number] = [0, 0, 0, 1];
 export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   const settings = options.settings ?? defaultHeroSettings();
   let disposed = false;
+  /** Set once `initialize()` has loaded vgpu; every free function is called through it. */
+  let api: VgpuApi | undefined;
   let gpu: Gpu | undefined;
   let surface: Surface | undefined;
   let effects: Effects | undefined;
@@ -443,7 +453,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
    * Everything else (visibilitychange, IntersectionObserver, init, dispose)
    * only writes a boolean and calls this. The `loop` handle IS the "am I
    * running" flag, so the function is idempotent: calling it twice for the same
-   * state cannot start a second `gpu.frame.loop`, which would double the frame
+   * state cannot start a second `frameLoop(gpu, ...)`, which would double the frame
    * rate and the GPU cost permanently.
    *
    * Resuming resets both timestamp bases. `lastFrameAt` keeps the animation
@@ -452,7 +462,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
    * target (`1 - exp(-dt/tau)` is ~1 for a large dt).
    */
   function reconcileLoop(): void {
-    if (!started || !gpu) return;
+    if (!started || !gpu || !api) return;
     // A running measurement overrides both visibility reasons: the hero is
     // routinely scrolled out of view while the panel is being used, and pausing
     // mid-measurement would either hang the promise or, worse, silently report
@@ -462,7 +472,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     if (shouldRun) {
       lastFrameAt = undefined;
       lastYawAt = undefined;
-      loop = gpu.frame.loop(renderFrame);
+      loop = api.frameLoop(gpu, renderFrame);
     } else {
       loop?.stop();
       loop = undefined;
@@ -579,8 +589,8 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     if (measurement) return Promise.reject(new Error('[hero] a measurement is already running'));
     // Created on first use, not at init: a timer holds a query set plus staging
     // buffers, and the shipped hero never measures anything.
-    if (timestampsAvailable && !timer) {
-      try { timer = gpu.timer(); } catch { timer = undefined; }
+    if (timestampsAvailable && !timer && api) {
+      try { timer = api.timer(gpu); } catch { timer = undefined; }
     }
     return new Promise<MeasureResult>((resolve, reject) => {
       const m: Measurement = {
@@ -626,10 +636,10 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     resizeFrame = 0;
     const size = pendingSize;
     pendingSize = undefined;
-    if (disposed || !size || !gpu || !effects || !targets || !surface) return;
+    if (disposed || !size || !gpu || !api || !effects || !targets || !surface) return;
     try {
       const previousTargets = targets;
-      const nextTargets = createTargets(gpu, [
+      const nextTargets = createTargets(api, gpu, [
         Math.max(1, Math.round(size.width * size.dpr)),
         Math.max(1, Math.round(size.height * size.dpr)),
       ], 'black-hole-live');
@@ -703,7 +713,8 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   };
 
   const initialize = async () => {
-    const { init } = await import('vgpu');
+    const vgpu = await import('vgpu');
+    const { init } = vgpu;
     if (disposed) return;
     // Device features have to be requested at device creation, and requesting one
     // the adapter lacks makes init() throw — so ask the adapter first. Only the
@@ -722,9 +733,10 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     const nextGpu = await init(timestampsAvailable ? { requiredFeatures: ['timestamp-query'] } : {});
     if (disposed) { nextGpu.dispose(); return; }
     gpu = nextGpu;
-    surface = gpu.surface(options.canvas, { dpr: [1, MAX_DPR] });
-    effects = createEffects(gpu, 'black-hole-live');
-    targets = createTargets(gpu, surface.size, 'black-hole-live');
+    api = vgpu;
+    surface = vgpu.surface(gpu, options.canvas, { dpr: [1, MAX_DPR] });
+    effects = createEffects(vgpu, gpu, 'black-hole-live');
+    targets = createTargets(vgpu, gpu, surface.size, 'black-hole-live');
     setBindings(effects, targets);
     await prewarm(effects, targets, surface);
     if (disposed) return;
@@ -775,22 +787,22 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   return { ready, rebake, measure: measureFrameTime, dispose };
 }
 
-function createEffects(gpu: Gpu, label: string): Effects {
+function createEffects(vgpu: VgpuApi, gpu: Gpu, label: string): Effects {
   return {
-    bake: gpu.effect(bakeWgsl, { label: `${label}-bake` }),
-    shade: gpu.effect(shadeWgsl, { label: `${label}-shade` }),
+    bake: vgpu.effect(gpu, bakeWgsl, { label: `${label}-bake` }),
+    shade: vgpu.effect(gpu, shadeWgsl, { label: `${label}-shade` }),
     // Built and uploaded here, synchronously, before the first bind: the
     // lattice is a pure function of its size, so there is nothing to await and
     // nothing that can change later.
     noiseVolume: createNoiseVolume(gpu, NOISE_VOLUME_SIZE, `${label}-noise-volume`),
-    noiseSampler: noiseVolumeSampler(gpu),
+    noiseSampler: noiseVolumeSampler(vgpu, gpu),
   };
 }
 
-function createTargets(gpu: Gpu, size: readonly [number, number], label: string): Targets {
+function createTargets(vgpu: VgpuApi, gpu: Gpu, size: readonly [number, number], label: string): Targets {
   const full = normalizeSize(size);
   return {
-    gbuffer: gpu.target({
+    gbuffer: vgpu.target(gpu, {
       size: full,
       colors: GBUFFER_FORMATS.map((format) => ({ format })),
       label: `${label}-gbuffer`,

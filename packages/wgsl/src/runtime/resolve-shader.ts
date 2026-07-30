@@ -9,6 +9,7 @@ import { applyMinifyWgsl, normalizeMinifyOption, type MinifyOption } from "./min
 import { canonicalEntry, readModule, resolveImport as resolvePath } from "./package-resolution.ts";
 import { parseModule, type ImportDecl } from "./parser.ts";
 import { reflect, type Reflection } from "./reflect.ts";
+import { reservedIdentifierDiagnostics } from "./reserved-identifiers.ts";
 import { reflectSource } from "./reflect-source.ts";
 import { eliminateDeadDeclarations } from "./declaration-dce.ts";
 import { wgslError } from "./errors.ts";
@@ -49,10 +50,11 @@ export async function resolveShader(opts: ResolveOptions): Promise<ResolvedShade
   assertModulesHaveNoBindings(modules, entry);
   assertNoMangleCollisions(modules.map((module) => module.path));
   assertNoJsVisibleDuplicates(modules);
+  for (const module of modules) diagnostics.push(...reservedIdentifierDiagnostics(module));
   const exportsByPath = buildExports(modules);
   const pathOf = (from: string, imp: ImportDecl) => resolvePath(imp.from, from, opts, diagnostics);
   const emittedWgsl = eliminateDeadDeclarations(modules.map((module) => `// vgsl-module: ${module.path}\n${emitModule(module, exportsByPath, pathOf).trim()}\n`).join("\n"));
-  const reflection = reflect(modules);
+  const reflection = reflect(modules, pathOf);
   const emittedReflection = reflectSource(emittedWgsl, entry);
   for (const reflectedEntry of reflection.entryPoints) {
     const emittedEntry = emittedReflection.entryPoints.find((item) => item.name === reflectedEntry.mangledName);
