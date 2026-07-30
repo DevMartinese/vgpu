@@ -23,8 +23,7 @@ export function HomeHeader() {
     >
       <Link
         href="/"
-        // Serif is the wordmark's own treatment; the nav beside it stays sans.
-        className="flex items-center gap-2 font-serif text-[14px] leading-none text-[#D9D9D9] transition-opacity hover:opacity-75 lg:text-[16px]"
+        className="flex items-center gap-2 text-[14px] leading-none text-[#D9D9D9] transition-opacity hover:opacity-75 lg:text-[16px]"
       >
         <svg className="h-[10px] w-[12px]" viewBox="0 0 76 65" fill="currentColor" aria-hidden="true">
           <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />

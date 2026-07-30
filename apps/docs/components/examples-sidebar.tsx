@@ -14,9 +14,7 @@ export function ExamplesSidebar() {
           <svg className="h-3.5 w-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
             <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
           </svg>
-          {/* Serif wordmark, matching the homepage header; the list below it
-              stays sans. */}
-          <span className="font-serif text-[15px] font-semibold text-gray-12">vgpu</span>
+          <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
         </Link>
         <Link href="/docs" className="mt-3 inline-block text-sm text-gray-9 transition-colors hover:text-gray-12">
           Docs →

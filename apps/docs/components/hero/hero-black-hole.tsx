@@ -314,9 +314,15 @@ export function HeroBlackHole() {
   }, [hasWebGpu]);
 
   // Full-bleed: the canvas covers the entire hero section, with no gradient mask.
+  //
+  // There is deliberately no still-image fallback. A pre-rendered PNG under the
+  // canvas flashed on every load and never matched the shader's current look,
+  // so it read as a glitch rather than as progressive enhancement. The wrapper
+  // is bg-black and the canvas fades up over it: before the shader is ready, and
+  // on machines with no WebGPU at all, the hero is simply black with the copy on
+  // top. That is the intended presentation, not a degraded one.
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-black">
-      <img src="/examples/black-hole.card.png" alt="" className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${hasWebGpu ? 'opacity-0' : 'opacity-100 saturate-[0.35]'}`} />
       <canvas ref={canvasRef} className={`pointer-events-none absolute inset-0 h-full w-full transition-opacity duration-500 ${hasWebGpu ? 'opacity-100' : 'opacity-0'}`} />
     </div>
   );

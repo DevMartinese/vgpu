@@ -68,36 +68,41 @@ export default function HomePage() {
             }}
           />
 
-          {/* Second scrim, for the setup snippet now that it sits at the foot of
-              the hero, off the centre ellipse and over open disk and starfield.
+          {/* Foot fade. This was a tall, near-opaque band back when the setup
+              snippet was pinned to the bottom and needed contrast; the snippet
+              now sits centred with the tagline, so that job is gone and the band
+              was only costing us the lower crescent. What remains is the other
+              job it was doing: the hero ends mid-starfield, and cutting straight
+              to the black page below leaves a visible seam. Short and gentle is
+              enough to hide it.
 
               Multi-stop rather than a plain two-stop fade: alpha interpolates
               linearly while perceived luminance does not, so `black -> transparent`
               leaves a visible ledge around its midpoint. These stops approximate
-              an ease-out curve, which reads as haze instead of a band. It bottoms
-              out at 0.82 rather than 1 so the disk still shows through, and the
-              hero's foot meets the black page below without a seam. */}
+              an ease-out curve, which reads as haze instead of a band. */}
           <div
             data-hero-overlay
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[45%]"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[16%]"
             style={{
               background:
-                'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.72) 18%, rgba(0,0,0,0.5) 38%, rgba(0,0,0,0.28) 58%, rgba(0,0,0,0.12) 76%, rgba(0,0,0,0) 100%)',
+                'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.52) 24%, rgba(0,0,0,0.3) 48%, rgba(0,0,0,0.13) 72%, rgba(0,0,0,0) 100%)',
             }}
           />
 
-          {/* Tagline, dead centre — it sits inside the shadow.
+          {/* Tagline + setup snippet, one block centred on the hero — it sits
+              inside the shadow.
 
               The band is pointer-events-none so it never eats clicks over the
-              rest of the hero, but the h1 itself opts back IN: without that the
-              text cannot be selected, because pointer-events is inherited. */}
+              rest of the hero, but the children opt back IN: without that the
+              tagline cannot be selected and the tabs cannot be clicked, because
+              pointer-events is inherited. */}
           <div
             data-hero-overlay
-            className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 px-6"
+            className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-8 px-6 lg:gap-10"
           >
             <h1
-              className="pointer-events-auto mx-auto max-w-[798px] text-center font-serif font-normal leading-[1.4] text-white"
+              className="pointer-events-auto max-w-[798px] text-center font-light leading-[1.4] text-white"
               /* Sized off the viewport HEIGHT, not the width: the tagline has
                  to stay inside the black hole's shadow, and the shadow is a
                  circle scaled by the shorter axis. 2.4svh = 21.6px at 900px
@@ -110,17 +115,14 @@ export default function HomePage() {
                   narrow ones it collapses and the line wraps on its own. */}
               <br className="hidden sm:block" /> designed for agents.
             </h1>
-          </div>
 
-          {/* Setup snippet, anchored to the foot of the hero as in the design.
-              Pinned to the bottom rather than a top percentage so it keeps a
-              constant breathing space on short viewports instead of drifting up
-              into the tagline (at 73% of an 844px phone it nearly collided). */}
-          <div
-            data-hero-overlay
-            className="absolute bottom-10 left-1/2 z-10 w-[450px] max-w-[calc(100%-3rem)] -translate-x-1/2 lg:bottom-14"
-          >
-            <HeroTabs />
+            {/* Setup snippet, reading as one unit with the tagline above it.
+                Part of the centred flex column rather than pinned to the foot
+                of the hero, so the pair stays together and stays inside the
+                shadow at any viewport height. */}
+            <div className="pointer-events-auto w-[450px] max-w-full">
+              <HeroTabs />
+            </div>
           </div>
         </section>
 
@@ -137,7 +139,7 @@ export default function HomePage() {
         </section>
 
         <section className="mx-auto mb-24 max-w-6xl px-6 lg:px-12">
-          <h2 className="mb-10 text-center text-2xl text-gray-12 md:text-3xl">Why vgpu</h2>
+          <h2 className="mb-10 text-2xl text-gray-12 md:text-3xl">Why vgpu</h2>
           <div className="grid gap-4 md:grid-cols-3">
             {pillars.map((pillar) => (
               <Card key={pillar.title} className="overflow-hidden rounded-lg border border-gray-4 bg-gray-1">
@@ -156,7 +158,7 @@ export default function HomePage() {
         </section>
 
         <section className="mx-auto max-w-6xl px-6 lg:px-12">
-          <h2 className="mb-12 text-center text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
+          <h2 className="mb-12 text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
           <div className="grid gap-4 md:grid-cols-2">
             {docLinks.map(([href, title, description]) => (
               <Link key={href} href={href} className="group rounded-lg border border-gray-4 bg-gray-1 p-6 transition-all hover:border-gray-5">

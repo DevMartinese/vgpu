@@ -40,9 +40,7 @@ export function HeroTabs() {
   return (
     // No `gap` on the column: the rule carries its own asymmetric margins (see
     // below), and a gap would add to both sides equally.
-    // font-serif on the wrapper covers the tabs and the snippet copy; the code
-    // fragments inside opt back out to mono in InlineCode.
-    <div className="flex w-full flex-col font-serif">
+    <div className="flex w-full flex-col">
       <div
         role="tablist"
         aria-label="Setup option"

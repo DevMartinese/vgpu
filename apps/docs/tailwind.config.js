@@ -134,17 +134,13 @@ module.exports = {
         },
       },
       fontFamily: {
+        // Geist Sans everywhere, Geist Mono for code. There is deliberately no
+        // `serif` family: Geist Serif was trialled as a display face for the
+        // wordmark, hero tagline and Prompt/Skill selector and then dropped, so
+        // the font, the CSS variable and this entry all came back out together.
+        // The .otf is still in app/fonts/ if it is ever wanted again.
         sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
         mono: ['var(--font-geist-mono)', 'Menlo', 'Monaco', 'monospace'],
-        // Geist Serif is a display face used by OPT-IN only — never as the body
-        // font. Applying it site-wide (by pointing `sans` here) was tried and
-        // rejected: it ships Regular alone, so every font-semibold heading and
-        // UI label came out synthetically bolded and muddy. It is now spelled
-        // out per element with `font-serif`: the wordmark in the three headers
-        // (home-header, navigation, examples-sidebar), plus the homepage
-        // tagline and the Prompt/Skill selector. Declared in app/fonts.ts and
-        // exposed as a variable on <html> in app/layout.tsx.
-        serif: ['var(--font-geist-serif)', 'Georgia', 'Times New Roman', 'serif'],
       },
       fontSize: {
         'xs': ['0.75rem', { lineHeight: '1rem' }],
