@@ -15,11 +15,11 @@ import { InlineCode, stripBackticks } from './inline-code';
  * fragment as code mislabelled it; it read as two registers spliced together
  * when it is one instruction throughout.
  *
- * Prompt stays fenced regardless, because "npx vgpu docs" must not wrap: unset,
- * it breaks after "vgpu" on a phone and strands "docs" alone on line two.
+ * Prompt stays fenced regardless, because "npx vgpu" must not wrap: unset, it
+ * breaks after "npx" on a phone and strands the command name on line two.
  */
 const tabContent = {
-  Prompt: { text: 'Setup vgpu on my project, run `npx vgpu docs`', mono: false },
+  Prompt: { text: 'Setup vgpu on my project, run `npx vgpu`', mono: false },
   Skill: { text: '`npx skills add vercel-labs/vgpu`', mono: true },
 } as const;
 
