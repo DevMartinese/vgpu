@@ -85,8 +85,8 @@
   },
   "vgpuExportBundleBudgetsGzipBytes": {
     ".": 1024,
-    "./runtime": 22016,
-    "./loader-webpack": 22528,
+    "./runtime": 22528,
+    "./loader-webpack": 23040,
     "./loader-vite": 22528,
     "./reflect-source": 13824
   },

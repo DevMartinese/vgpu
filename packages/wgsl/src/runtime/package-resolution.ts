@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -47,18 +47,58 @@ function packageImport(spec: string, from: string, diagnostics: Diagnostic[]): s
   const pkg = packageNameOf(spec);
   const sub = `.${spec.slice(pkg.length) || ""}`;
   // Project-local first: the importing project's own node_modules always wins, so a project can
-  // override or pin a WGSL package.
-  for (let dir = dirname(from);;) {
-    const pkgJson = join(dir, "node_modules", pkg, "package.json");
-    if (existsSync(pkgJson)) return packageExport(pkgJson, sub, diagnostics);
-    if (isWorkspaceRoot(dir)) break;
-    const next = dirname(dir); if (next === dir) break; dir = next;
+  // override or pin a WGSL package. The second pass repeats the walk from the importer's *real*
+  // path, which is what rescues a WGSL package that imports another WGSL package under pnpm (see
+  // walkForPackage).
+  const start = dirname(from);
+  const real = realPathOf(start);
+  for (const dir of real === start ? [start] : [start, real]) {
+    const local = walkForPackage(dir, pkg, sub, diagnostics);
+    if (local) return local;
+  }
+  // Yarn PnP installs packages inside zip archives with no node_modules directories at all, so the
+  // walk above can never see them. Ask Node — the PnP runtime hooks its resolver *and* patches `fs`,
+  // so the zip-internal path it returns is readable by existsSync/readFile like any other file.
+  // Resolving from the importer (not from this module) keeps the resolution in the user's own
+  // dependency graph: it can reach what the shader's package declares and nothing else.
+  if (process.versions.pnp) {
+    const pnp = resolveFromImporter(spec, from);
+    if (pnp) return pnp;
   }
   if (pkg.startsWith("@vgpu/")) {
     const transitive = resolveAlongsideResolver(spec);
     if (transitive) return transitive;
   }
   throw packageNotFound(pkg, PKG_NOTFOUND_FIXIT);
+}
+
+/**
+ * One node_modules walk up from `start`, stopping at the workspace root so a shader never picks up
+ * packages from outside its own project.
+ *
+ * `packageImport` runs this twice: once from the importer's path as written, once from its realpath.
+ * The second pass is what makes a *third-party WGSL package that imports another WGSL package* work
+ * under pnpm: `node_modules/@acme/fbm` is a symlink into `node_modules/.pnpm/@acme+fbm@<v>/`, and
+ * `@acme/fbm`'s own dependencies are installed next to that store entry, not next to the symlink, so
+ * the symlinked chain never reaches them. Resolving the link first puts the walk inside the store,
+ * where they are visible — this is also how Node itself resolves (it realpaths by default).
+ */
+function walkForPackage(start: string, pkg: string, sub: string, diagnostics: Diagnostic[]): string | undefined {
+  for (let dir = start;;) {
+    const pkgJson = join(dir, "node_modules", pkg, "package.json");
+    if (existsSync(pkgJson)) return packageExport(pkgJson, sub, diagnostics);
+    if (isWorkspaceRoot(dir)) return undefined;
+    const next = dirname(dir); if (next === dir) return undefined; dir = next;
+  }
+}
+
+function realPathOf(dir: string): string {
+  try { return realpathSync(dir); } catch { return dir; }
+}
+
+/** Node resolution from the importing shader's own location. Used under Yarn PnP, where there is no node_modules tree to walk. */
+function resolveFromImporter(spec: string, from: string): string | undefined {
+  try { return defaultFile(createRequire(from).resolve(spec)); } catch { return undefined; }
 }
 
 /**
