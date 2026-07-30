@@ -78,17 +78,10 @@ device.
 
 ## G-buffer layout
 
-Created in `renderer.ts::createTargets`, size = canvas size in physical pixels
-(dpr clamped to **1.5**, `MAX_DPR` in `renderer.ts`). Cleared to `[0,0,0,1]`
-before the bake.
-
-`MAX_DPR` is the single biggest lever on cost in the whole hero — the bake is a
-geodesic raymarch per pixel and the G-buffer is 32 bytes per sample — so it is
-used in **both** places that can size the swap chain, `gpu.surface({ dpr })` and
-`measure()`. They must agree: if they disagreed, a resize would fight the
-surface's own clamp and the G-buffer would stop matching the canvas 1:1.
-Dropping it from 1.6 to 1.5 removes ~12% of the fragments on any display with
-`devicePixelRatio >= 1.6`, and displays at 1.5 or below are unaffected.
+Created in `renderer.ts::createTargets`, size = canvas size in physical pixels =
+**CSS size**: the dpr is pinned to `RENDER_DPR = 1`, not clamped to a range. See
+[Cost defaults — dpr 1 and 60 fps](#cost-defaults--dpr-1-and-60-fps). Cleared to
+`[0,0,0,1]` before the bake.
 
 | # | Binding in `shade.wgsl` | Format | Channels |
 |---|---|---|---|
@@ -330,9 +323,22 @@ logged object as the literal string `{...}`.
 **Prefer the GPU number when it is there.** With `timestamp-query` available
 (requested only under `?debug`) the result includes the shade pass's own GPU
 time, which excludes the bake, the present and all CPU submit cost. Wall-clock
-ms/frame is capped by the display: anything faster than vsync reads ~16.7 ms and
+ms/frame is capped **twice** — by the display, and by the renderer's own 60 fps
+pacer — so on a healthy machine it reads ~16.7 ms whatever the shader costs, and
 cannot show a shader change at all. The panel detects that case and flags it as
-`VSYNC-CAPPED`.
+`VSYNC-CAPPED`; the result also carries `targetFps: 60` so a pasted measurement
+says which cadence produced it.
+
+`measure()` deliberately does **not** turn the pacer off: a frame time collected
+at a cadence the hero never runs at would be measuring a different renderer. The
+timestamp query is unaffected by pacing — it times the shade pass on the GPU
+timeline, not the interval between presents — so the A/B number keeps working
+exactly as before. What the cap does change is the shape of a run: ~180 samples
+at 60 fps take ~3 s, so `MEASURE_MAX_MS` (4 s) now truncates the sample count on
+displays the cap steps down harder (90/144 Hz → 45/48 fps). The stats are still
+medians of >= 2 intervals, and the wall-clock median staying *above* ~16.7 ms is
+the one wall-clock signal that still means something: the frame no longer fits in
+its slot.
 
 `measure()` renders 30 warmup frames first (absorbing any pending re-bake), then
 suppresses the bake entirely while sampling, so a geodesic re-bake can never land
@@ -423,7 +429,8 @@ power-law brightness distribution *inside* every one of them:
   sub-pixel star's peak value rises as pixels shrink (radiance is what is
   conserved, not the pixel value). At dpr 2 the dust species crosses one pixel and
   the field reads brighter and denser. The old field did the same; it is inherent
-  to flux-conserving point sampling.
+  to flux-conserving point sampling. The shipped hero pins the dpr to 1, so what
+  the reader sees is the CSS-resolution end of that behaviour on every display.
 
 #### Lensing aliasing — the sky PREFILTER (read this before tuning stars)
 
@@ -709,12 +716,78 @@ Two things to know about these values:
   shared `0..4` when an earlier `1` / `2.93` landed on their old tops. When you
   change a default, check its slider still has room.
 
+## Cost defaults — dpr 1 and 60 fps
+
+Two constants in `renderer.ts` set what the hero costs, and neither is a look
+decision. Heat is **work per frame x frames per second**, and before these two the
+page handed both factors to the reader's hardware: a Retina ProMotion laptop ran
+2.25x the fragments at 2x the rate of a plain 60 Hz 1x display — ~4.5x the work
+for an image nobody could tell apart in motion.
+
+| Constant | Value | What it bounds |
+|---|---|---|
+| `RENDER_DPR` | `1` | Pixels: every buffer in the chain is CSS size x this |
+| `TARGET_FPS` | `60` | Rate: the rAF loop skips ticks above it |
+
+**`RENDER_DPR = 1`** is pinned, not clamped to a `[min, max]` range like the
+`MAX_DPR = 1.5` it replaced. It is the single biggest lever on cost in the whole
+hero — the bake is a geodesic raymarch per pixel and the G-buffer is 32 bytes per
+sample — so at dpr 1 a Retina hero shades **~56% fewer fragments** than at 1.5 and
+~75% fewer than an uncapped 2. What it buys back is a softer photon-ring edge,
+which is the cheapest place to spend softness in a scene that is otherwise smooth
+gradients and glow.
+
+Because it is a fixed number, physical size **is** CSS size, and that has two
+consequences worth knowing:
+
+- the value is used in **both** places that can size the swap chain,
+  `surface({ dpr })` at init and the `resize()` path — they must agree, or the
+  shade pass (a 1:1 `textureLoad` of the G-buffer) would sample at the wrong
+  scale;
+- `ResizeObserver` on the canvas is now the **only** resize input. The old
+  `window` `resize` listener existed to catch a `devicePixelRatio` change (moving
+  the window to another monitor), which can no longer change any buffer size, so
+  it is gone. `resize()` reads `clientWidth/clientHeight` — the same two
+  properties vgpu's surface uses — so the two chains cannot round a fractional
+  CSS width to different integers.
+
+**`TARGET_FPS = 60`** is enforced by the loop itself (`startPacedLoop`), not by
+vsync: a tick renders only if `timestamp - lastRendered >= 1000/60 -
+FRAME_PACING_EPSILON_MS`. Notes, in the order they bite:
+
+- The **epsilon (2 ms) is load-bearing.** A bare `>= 1000/60` halves the rate on a
+  display that already runs at 60 Hz, because vsync intervals land on both sides
+  of 16.667 ms and every other frame misses by microseconds. It also has to stay
+  well *below* one refresh interval of the displays being capped (8.33 ms at
+  120 Hz), or two consecutive ticks would pass and the cap would do nothing.
+- Since rAF only fires on a refresh boundary, the achievable cadence is
+  `refreshHz / n`: **60 and 120 Hz both land exactly on 60 fps**, while 90 and
+  144 Hz step down to 45 and 48 (the next step up, 90 and 72, would break the
+  cap).
+- It paces on the **rAF timestamp**, not `performance.now()`: the timestamp is the
+  frame's vsync time, so intervals are clean multiples of the refresh period,
+  while the callback's own dispatch latency jitters by whole milliseconds and
+  would randomly trip the threshold.
+- It is a hand-rolled rAF chain rather than `frameLoop(gpu, cb, { fps: 60 })`
+  because vgpu's knob compares intervals exactly (no epsilon — the 30 fps trap
+  above), and because a skipped tick here opens **no frame at all**: gating inside
+  the frame callback would still create a command encoder and submit an empty
+  command buffer 60 times a second. `dispose()` stops the loop before
+  `gpu.dispose()`, which is the ordering vgpu's own scheduler registration used to
+  guarantee.
+- Nothing in the animation depends on the cadence: the disk clock is in seconds
+  and the mouse yaw is smoothed with `1 - exp(-dt/tau)`. That is a precondition,
+  not a coincidence — see [Mouse rotation](#mouse-rotation--shadesceneyaw-no-re-bake).
+- `measure()` measures the paced loop and reports `targetFps`; the shade pass's
+  GPU time is what survives, exactly as under a vsync cap. See
+  [Measuring it yourself](#measuring-it-yourself).
+
 ## Bake invalidation
 
 | Setting | Re-bakes? |
 |---|---|
 | `cameraY`, `distance`, `diskRadius`, `fov`, `centerY` (= `BAKE_KEYS`) | **yes** (automatic, throttled) |
-| canvas resize / dpr change | **yes** (immediate) |
+| canvas resize (CSS box; the dpr is pinned, so a monitor change resizes nothing) | **yes** (immediate) |
 | `re-bake` button / `renderer.rebake()` | **yes** (immediate) |
 | everything under `disk`, `stars`, `debugView` and `diskLayers` | no — per-frame |
 | `mouseYaw` / moving the mouse (scene rotation) | **no, by design** — one uniform per frame |
@@ -812,7 +885,9 @@ stores `pointerXNormalized` in `-1..1`; nothing else. Per frame the loop
 computes `target = pointerXNormalized * settings.mouseYaw` and smooths it
 frame-rate independently with `k = 1 - exp(-dt / 0.325s)` (`dt` clamped to
 0..0.1 s), which reproduces the classic `lerp(..., 0.05)` feel at 60 fps without
-doubling the speed at 120 Hz. Touch and pen are ignored (`pointerType`), and
+doubling the speed at 120 Hz. That independence is what lets the loop pace itself
+to 60 fps (see [Cost defaults](#cost-defaults--dpr-1-and-60-fps)) without the
+mouse feeling any different: `dt` grows, `k` grows with it. Touch and pen are ignored (`pointerType`), and
 `pointerout` off the window, `blur` and a hidden tab all send the target back to
 0 so the scene drifts home instead of freezing off-center. The first frame is
 always exactly 0. All four listeners are removed in `dispose()`.

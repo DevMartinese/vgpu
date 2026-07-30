@@ -173,6 +173,47 @@ const SCENE_YAW_TAU_S = 0.325;
 /** Upper bound on the smoothing timestep, so a backgrounded tab cannot snap. */
 const MAX_FRAME_DT_S = 0.1;
 
+// --- Frame pacing -------------------------------------------------------------
+/**
+ * Cadence the hero renders at, in frames per second.
+ *
+ * Heat is work-per-frame x frames-per-second, and a vsync-paced loop hands the
+ * second factor to the display: the same shader costs twice the power on a
+ * 120 Hz ProMotion panel as on a 60 Hz one, for an animation (slow Keplerian
+ * shear plus a smoothed mouse yaw) that carries no detail at 120 fps. So the
+ * loop caps itself instead of taking whatever the panel offers.
+ *
+ * Nothing about the animation depends on this number: the disk clock is
+ * seconds-based and the yaw smoothing is `1 - exp(-dt/tau)`, both of which are
+ * frame-rate independent by construction.
+ */
+const TARGET_FPS = 60;
+
+/**
+ * Jitter allowance on the pacing threshold, in milliseconds.
+ *
+ * A naive `now - last >= 1000 / TARGET_FPS` halves the frame rate on a display
+ * that already runs AT the target: 60 Hz vsync intervals land on either side of
+ * 16.667 ms, so roughly every other frame misses the threshold by microseconds
+ * and the hero drops to ~30 fps. Subtracting an epsilon makes "close enough to
+ * one target interval" pass.
+ *
+ * It must stay well BELOW one refresh interval of the displays being capped, or
+ * the cap stops capping: at 120 Hz the ticks arrive 8.33 ms apart, so anything
+ * from 8.34 ms up would let two consecutive ticks through. 2 ms absorbs vsync
+ * jitter with a wide margin on both sides.
+ */
+const FRAME_PACING_EPSILON_MS = 2;
+
+/**
+ * Minimum spacing between two rendered frames, in milliseconds.
+ *
+ * Because rAF only fires on a refresh boundary, the achievable cadence is
+ * `refreshHz / n`: 60 and 120 Hz both land exactly on 60 fps, while 90/144 Hz
+ * fall to 45/48 fps (the next step up, 90 and 72, would break the cap).
+ */
+const MIN_FRAME_INTERVAL_MS = 1000 / TARGET_FPS - FRAME_PACING_EPSILON_MS;
+
 // --- measure() tuning ---------------------------------------------------------
 /** Frame intervals collected per measurement, unless `maxMs` cuts it short. */
 const MEASURE_FRAMES = 180;
@@ -256,8 +297,21 @@ export interface MeasureResult {
    * Wall-clock median sits on a display refresh interval while the GPU number is
    * comfortably below it: the frame is waiting for the display, so wall-clock
    * cannot see a change in the shader at all. Trust `gpuMedianMs` instead.
+   *
+   * Effectively always true now that the loop paces itself to `targetFps`: it is
+   * the pacer, not the display, that holds the frame — same conclusion for the
+   * reader either way (the wall-clock number is a cadence, not a cost).
    */
   vsyncCapped: boolean;
+  /**
+   * Cadence the render loop paces itself to (TARGET_FPS), for the record.
+   *
+   * `medianMs` is a measurement OF THAT PACING whenever the machine can keep up:
+   * a healthy result is ~1000/targetFps, and a median comfortably above it is
+   * the interesting case — the frame no longer fits in its slot. Reported so a
+   * pasted measurement stays interpretable if the cap ever changes.
+   */
+  targetFps: number;
   /** Physical pixels actually shaded, for the record. */
   resolution: readonly [number, number];
 }
@@ -274,6 +328,13 @@ export interface HeroRenderer {
    * so the caller stays in control of what is being compared. Rejects if a
    * measurement is already running, or if no frame arrives at all (a hidden tab
    * stops `requestAnimationFrame`, which no flag here can override).
+   *
+   * It measures the SHIPPED loop, pacing included: the wall-clock median is
+   * therefore ~1000/TARGET_FPS on any machine that keeps up, and `gpuMedianMs`
+   * (`profiling: true` + `timestamp-query`) is the only number that reacts to a
+   * change in the shade shader. The pacer is left on rather than bypassed for
+   * the measurement, because a frame time collected at an fps the hero never
+   * runs at would be measuring a different renderer.
    */
   measure(options?: MeasureOptions): Promise<MeasureResult>;
   dispose(): void;
@@ -329,18 +390,24 @@ interface Targets {
 }
 
 /**
- * Upper bound on `devicePixelRatio`.
+ * Device pixel ratio the whole chain renders at — pinned, not clamped.
  *
  * Every buffer in the chain is allocated at CSS size x this, so it is the single
  * biggest lever on fill cost: the bake is a geodesic raymarch per pixel and the
- * G-buffer is 32 bytes per sample. 1.5 keeps the hero crisp on Retina while
- * costing ~12% fewer fragments than the 1.6 it replaced, and ~44% fewer than an
- * uncapped 2.
+ * G-buffer is 32 bytes per sample. 1 (CSS resolution) costs ~56% fewer fragments
+ * than the 1.5 cap it replaced and ~75% fewer than an uncapped 2 on Retina —
+ * paid for by a softer edge on the photon ring, which is the cheapest possible
+ * place to spend it in a scene that is mostly smooth gradients and glow.
  *
- * Used in BOTH places that can size the swap chain — `gpu.surface({ dpr })` and
- * `measure()` — which must agree or a resize would fight the surface clamp.
+ * A fixed number rather than a `[min, max]` range on purpose: with the ratio out
+ * of the picture, physical size IS CSS size, so a monitor change or a browser
+ * zoom cannot resize the render targets behind the layout's back.
+ *
+ * Used in BOTH places that can size the swap chain — `surface({ dpr })` and the
+ * `resize()` path — which must agree or the shade pass would sample the G-buffer
+ * at the wrong scale.
  */
-const MAX_DPR = 1.5;
+const RENDER_DPR = 1;
 
 /**
  * G-buffer attachments, in @location order (hit1, hit2, sky, view).
@@ -395,7 +462,6 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
   let lastFrameAt: number | undefined;
   let resizeFrame = 0;
   let pendingSize: RenderSize | undefined;
-  let lastDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
   let reportedError = false;
   // The bake is one-shot: it only re-runs on init, resize, geometry edits, or an
   // explicit rebake(). `forceBake` bypasses the throttle (init / resize / button),
@@ -464,8 +530,8 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
    * Everything else (visibilitychange, IntersectionObserver, init, dispose)
    * only writes a boolean and calls this. The `loop` handle IS the "am I
    * running" flag, so the function is idempotent: calling it twice for the same
-   * state cannot start a second `frameLoop(gpu, ...)`, which would double the frame
-   * rate and the GPU cost permanently.
+   * state cannot start a second loop, which would double the frame rate and the
+   * GPU cost permanently.
    *
    * Resuming resets both timestamp bases. `lastFrameAt` keeps the animation
    * clock from swallowing the paused interval in one frame, and `lastYawAt`
@@ -483,11 +549,58 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     if (shouldRun) {
       lastFrameAt = undefined;
       lastYawAt = undefined;
-      loop = api.frameLoop(gpu, renderFrame);
+      loop = startPacedLoop(api, gpu);
     } else {
       loop?.stop();
       loop = undefined;
     }
+  }
+
+  /**
+   * The render loop: one `requestAnimationFrame` chain, throttled to TARGET_FPS.
+   *
+   * Hand-rolled rather than `api.frameLoop(gpu, cb, { fps })` for two reasons,
+   * both about the skipped ticks:
+   *
+   * - vgpu's `fps` knob compares `timestamp - last >= 1000 / fps` exactly, with
+   *   no jitter allowance, so asking it for 60 on a 60 Hz display drops every
+   *   other frame (see FRAME_PACING_EPSILON_MS).
+   * - a skipped tick here opens no frame at all. Gating inside the frame
+   *   callback instead would still create a command encoder and submit an empty
+   *   command buffer 60 times a second, plus its per-frame promises — exactly
+   *   the CPU-side work the cap exists to avoid.
+   *
+   * Paced on the rAF timestamp, not `performance.now()`: the timestamp is the
+   * frame's vsync time, so consecutive intervals are clean multiples of the
+   * refresh period, while the callback's own dispatch latency jitters by whole
+   * milliseconds and would randomly trip the threshold.
+   *
+   * Stopping is the caller's job (`reconcileLoop` / `dispose`), and `dispose`
+   * stops the loop before `gpu.dispose()` — the one ordering guarantee vgpu's
+   * own scheduler registration would have provided.
+   */
+  function startPacedLoop(vgpu: VgpuApi, activeGpu: Gpu): { stop(): void } {
+    let stopped = false;
+    /** rAF timestamp of the last RENDERED frame; skipped ticks do not move it. */
+    let lastPresentedAt: number | undefined;
+    const tick = (timestamp: number): void => {
+      if (stopped) return;
+      if (lastPresentedAt === undefined || timestamp - lastPresentedAt >= MIN_FRAME_INTERVAL_MS) {
+        lastPresentedAt = timestamp;
+        vgpu.frame(activeGpu, renderFrame);
+      }
+      // The frame callback can dispose the renderer (a failed resize calls
+      // handleFailure), which stops this loop mid-tick: re-arming after that
+      // would resurrect it against a disposed gpu.
+      if (!stopped) frameHandle = requestAnimationFrame(tick);
+    };
+    let frameHandle = requestAnimationFrame(tick);
+    return {
+      stop(): void {
+        stopped = true;
+        cancelAnimationFrame(frameHandle);
+      },
+    };
   }
 
   /**
@@ -672,14 +785,17 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     pendingSize = size;
     if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize);
   };
+  /**
+   * Re-reads the canvas box and queues a resize of the G-buffer.
+   *
+   * `clientWidth/clientHeight`, not `getBoundingClientRect()`: vgpu's surface
+   * sizes the swap chain from exactly those two (surface.ts `layoutCanvasSize`),
+   * and a fractional CSS width would round the two chains to different integers
+   * — a one-pixel disagreement the shade pass would resolve as a slight scale,
+   * since it reads the G-buffer 1:1 by texel index.
+   */
   const measure = () => {
-    const rect = options.canvas.getBoundingClientRect();
-    resize({ width: rect.width, height: rect.height, dpr: Math.min(MAX_DPR, Math.max(1, window.devicePixelRatio || 1)) });
-  };
-  const onWindowResize = () => {
-    if (window.devicePixelRatio === lastDpr) return;
-    lastDpr = window.devicePixelRatio;
-    measure();
+    resize({ width: options.canvas.clientWidth, height: options.canvas.clientHeight, dpr: RENDER_DPR });
   };
 
   const dispose = () => {
@@ -705,7 +821,6 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     intersection = undefined;
     started = false;
     if (typeof window !== 'undefined') {
-      window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerout', onPointerOut);
       window.removeEventListener('blur', recenterPointer);
@@ -745,15 +860,18 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     if (disposed) { nextGpu.dispose(); return; }
     gpu = nextGpu;
     api = vgpu;
-    surface = vgpu.surface(gpu, options.canvas, { dpr: [1, MAX_DPR] });
+    surface = vgpu.surface(gpu, options.canvas, { dpr: RENDER_DPR });
     effects = createEffects(vgpu, gpu, 'black-hole-live');
     targets = createTargets(vgpu, gpu, surface.size, 'black-hole-live');
     setBindings(effects, targets);
     await prewarm(effects, targets, surface);
     if (disposed) return;
+    // The ONLY resize input: with the dpr pinned to RENDER_DPR, physical size is
+    // CSS size, so the canvas box is the whole story — there is no
+    // devicePixelRatio change left to listen for (moving the window to a Retina
+    // screen no longer resizes anything).
     observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
     observer?.observe(options.canvas);
-    window.addEventListener('resize', onWindowResize);
     // Passive: the handler only stores a number, it never reads layout, touches
     // the GPU or cancels the event.
     window.addEventListener('pointermove', onPointerMove, { passive: true });
@@ -761,8 +879,8 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     window.addEventListener('blur', recenterPointer);
     document.addEventListener('visibilitychange', onVisibilityChange);
     // A hero scrolled past is 100% wasted GPU: this is a per-pixel geodesic
-    // shade at up to 1.5x dpr, running behind whatever the reader is actually
-    // looking at. threshold 0 = "any part of the canvas is on screen".
+    // shade running behind whatever the reader is actually looking at.
+    // threshold 0 = "any part of the canvas is on screen".
     if (typeof IntersectionObserver !== 'undefined') {
       intersection = new IntersectionObserver((entries) => {
         // Last entry wins: a batch is ordered oldest-first, so it is the
@@ -925,9 +1043,15 @@ function summarizeMeasurement(m: Measurement, resolution: readonly [number, numb
     // Two conditions, because either alone gives a false positive: a shader that
     // genuinely costs 16.7 ms sits on a refresh interval by coincidence, and a
     // cheap GPU pass is normal when the frame is not present-limited at all.
+    //
+    // The renderer's own 60 fps pacer lands on 1000/60, which is already in the
+    // list of plausible refresh intervals — so on a healthy machine this reads
+    // true everywhere now, and the advice it carries ("use the gpu number") is
+    // exactly right: the pacer hides shader cost the same way vsync does.
     vsyncCapped:
       REFRESH_INTERVALS_MS.some((interval) => Math.abs(medianMs - interval) < 1) &&
       gpuMedianMs !== undefined && gpuMedianMs < medianMs - 2,
+    targetFps: TARGET_FPS,
     resolution,
   };
 }
