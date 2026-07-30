@@ -11,14 +11,47 @@ function success(args) {
   return result.stdout ?? "";
 }
 
-test("preserves root help, version, and remaining placeholder", () => {
-  expect(success(["--help"])).toContain("snapshot");
-  expect(success(["--help"])).toContain("install-dawn");
-  expect(success(["--help"])).toContain("install-software-renderer");
-  expect(success(["--help"])).toContain("doctor     Verify this machine can render headless (JSON verdict + fixes)");
-  expect(success(["--help"])).toContain("vgpu docs --help");
+const routerHelp = `vgpu ${packageVersion}
+
+TypeScript library for WebGPU: typed shader imports, a tiny gpu-first API, and
+the same code running in the browser, headless Node, and your test suite.
+
+## Read the docs
+  npx vgpu docs cat getting-started.md    The guide for using the current API correctly
+  npx vgpu docs find "<topic | symbol | VGPU-error-code>"
+  npx vgpu docs cat <path>
+
+## Validate shader code
+  npx vgpu check <file.wgsl>              Validate and reflect a WGSL file as JSON
+
+## Working examples
+  npx vgpu examples search "<topic>"
+  npx vgpu examples pull <slug> --out <dir>
+
+## Node rendering environment
+  npx vgpu doctor
+`;
+
+test("routes the bare command and --help/-h to the docs-first guide, exit 0", () => {
+  expect(runCli([])).toMatchObject({ code: 0, stdout: routerHelp });
+  expect(runCli(["--help"])).toMatchObject({ code: 0, stdout: routerHelp });
+  expect(runCli(["-h"])).toMatchObject({ code: 0, stdout: routerHelp });
   expect(success(["--version"])).toBe(`${packageVersion}\n`);
-  expect(runCli(["wgsl"])).toMatchObject({ code: 1, stderr: expect.stringContaining("coming soon") });
+});
+
+test("does not list snapshot/install-dawn/install-software-renderer in the router (still runnable)", async () => {
+  const help = success(["--help"]);
+  expect(help).not.toContain("snapshot");
+  expect(help).not.toContain("install-dawn");
+  expect(help).not.toContain("install-software-renderer");
+  await expect(Promise.resolve(runCli(["install-dawn", "--help"]))).resolves.toMatchObject({ code: 0 });
+  await expect(Promise.resolve(runCli(["install-software-renderer", "--help"]))).resolves.toMatchObject({ code: 0 });
+});
+
+test("routes an unknown command to the same guide with exit code 2", () => {
+  const result = runCli(["nope"]);
+  expect(result.code).toBe(2);
+  expect(result.stderr).toBe(`Unknown command: nope\n\n${routerHelp}`);
 });
 
 test("exposes doctor JSON without rendering", async () => {
@@ -40,9 +73,7 @@ test("exposes the manual native installers", async () => {
 
 test("puts the getting-started guide first in CLI help", () => {
   const rootHelp = success(["--help"]);
-  expect(rootHelp).toContain("New here? Read the guide first:\n  vgpu docs cat getting-started.md\nRendering in Node? Check the environment first:\n  vgpu doctor");
-  expect(rootHelp.indexOf("vgpu docs cat getting-started.md")).toBeLessThan(rootHelp.indexOf("Commands:"));
-  expect(rootHelp.indexOf("WGSL and adapter packages:")).toBeLessThan(rootHelp.indexOf("Slim tooling subpaths:"));
+  expect(rootHelp.indexOf("npx vgpu docs cat getting-started.md")).toBeLessThan(rootHelp.indexOf("## Validate shader code"));
 
   const help = success(["docs", "help"]);
   expect(help).toContain("Usage: vgpu docs <command>");
@@ -121,7 +152,7 @@ test("keeps existing guide and API docs forms working", () => {
 test("returns nonzero for missing and unknown docs commands", () => {
   expect(runCli(["docs", "cat", "MissingSymbol"])).toMatchObject({ code: 1, stderr: expect.stringContaining("Symbol not found") });
   expect(runCli(["docs", "nope"])).toMatchObject({ code: 1, stderr: expect.stringContaining("Unknown docs command") });
-  expect(runCli(["nope"])).toMatchObject({ code: 1, stderr: expect.stringContaining("Unknown vgpu command") });
+  expect(runCli(["nope"])).toMatchObject({ code: 2, stderr: expect.stringContaining("Unknown command: nope") });
 });
 
 
