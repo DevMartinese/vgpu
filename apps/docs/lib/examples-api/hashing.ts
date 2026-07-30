@@ -70,6 +70,24 @@ export function canonicalRevisionBytes(graph: Omit<ExampleByteGraph, 'revision'>
   return encoder.encode(value);
 }
 
+/**
+ * Identity of a published ARTIFACT SET.
+ *
+ * A revision names exactly one immutable set of bytes -- not just a source snapshot. The graph
+ * revision covers the canonical source only, but the artifacts retained under
+ * `examples/v1/revisions/<revision>/` also embed the serving origin in every absolute URL (index,
+ * manifests, revision listing), so the same source served from a different origin is a different
+ * byte set and must therefore be a different revision.
+ *
+ * Folding the origin in keeps that invariant true. Without it, changing the origin silently
+ * produces new bytes under an EXISTING revision path, which the create-only publisher refuses to
+ * overwrite (`Published object byte mismatch`). Determinism is preserved: same source + same
+ * origin => same revision.
+ */
+export function artifactSetRevision(graphRevision: string, origin: string): string {
+  return sha256(`vgpu-example-artifact-set/v1\0${field(graphRevision)}${field(origin)}`);
+}
+
 export function buildByteGraph(
   records: readonly UnhashedExampleRecord[],
   source: ExampleGraphSource,

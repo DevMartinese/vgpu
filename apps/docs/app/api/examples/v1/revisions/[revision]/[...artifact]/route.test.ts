@@ -11,7 +11,7 @@ import * as discoveryRoute from '../../../../../../.well-known/vgpu-examples.jso
 import * as latestRoute from '../../../latest.json/route';
 import * as revisionRoute from './route';
 
-const origin = 'https://vgpu.labs.vercel.dev';
+const origin = 'https://vgpu.sh';
 const graph = adaptCanonicalSourceExport(exampleSources, { repository: 'https://github.com/vgpu/vgpu', gitCommit: sourceSnapshotIdentity('canonical-source-snapshot-fixture\n') });
 const set = generateExampleArtifacts(graph);
 let root: string;
@@ -53,7 +53,7 @@ describe('examples API App Router handlers', () => {
     const discovery = JSON.parse(new TextDecoder().decode(bytes));
     expect(discovery).toMatchObject({
       protocol: 'vgpu-examples', discoveryVersion: 1,
-      contracts: [{ id: 'vgpu-examples/v1', status: 'active', minimumCliVersion: '0.1.6', indexUrl: `${origin}/api/examples/v1/latest.json` }],
+      contracts: [{ id: 'vgpu-examples/v1', status: 'active', minimumCliVersion: '0.2.0-rc.1', indexUrl: `${origin}/api/examples/v1/latest.json` }],
     });
 
     const notModified = await discoveryRoute.GET(request('/.well-known/vgpu-examples.json', { 'if-none-match': etag }));

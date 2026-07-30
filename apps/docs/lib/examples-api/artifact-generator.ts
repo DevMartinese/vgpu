@@ -9,7 +9,7 @@ import {
   EXAMPLES_PROTOCOL,
   EXAMPLES_SCHEMA_SHA256,
 } from './contracts';
-import { canonicalExampleBytes, canonicalRevisionBytes, sha256, validatePath } from './hashing';
+import { artifactSetRevision, canonicalExampleBytes, canonicalRevisionBytes, sha256, validatePath } from './hashing';
 
 export interface GeneratedArtifact {
   readonly key: string;
@@ -36,12 +36,21 @@ const url = (origin: string, key: string) => {
 export function generateExampleArtifacts(
   graph: ExampleByteGraph,
   origin: string = EXAMPLES_ORIGIN,
-  minimumCliVersion = '0.1.6',
+  // The oldest CLI that can actually consume these artifacts. 0.2.0-rc.0 and earlier pin a
+  // single trusted host, so they reject vgpu.sh URLs outright -- advertising anything lower
+  // would be a lie. NOTE: this gate is currently unreachable for exactly those CLIs, because
+  // assertTrustedUrl runs before the version check during the handshake, so they surface
+  // VGPU-EXAMPLES-INTEGRITY instead of VGPU-EXAMPLES-CLI-TOO-OLD. See examples-api.md.
+  minimumCliVersion = '0.2.0-rc.1',
 ): GeneratedArtifactSet {
   verifyGraph(graph);
   const normalizedOrigin = origin.replace(/\/$/, '');
   validateUri(normalizedOrigin, 'Artifact origin');
-  const base = `${EXAMPLES_BLOB_PREFIX}/revisions/${graph.revision}`;
+  // The published revision identifies the ARTIFACT SET, not just the source snapshot: these bytes
+  // embed `normalizedOrigin` in every absolute URL, so a different origin must yield a different
+  // revision. See artifactSetRevision().
+  const revision = artifactSetRevision(graph.revision, normalizedOrigin);
+  const base = `${EXAMPLES_BLOB_PREFIX}/revisions/${revision}`;
   const artifacts: GeneratedArtifact[] = [];
   const add = (key: string, bytes: Uint8Array, contentType: string, immutable: boolean) => {
     if (artifacts.some((artifact) => artifact.key === key)) throw new Error(`Duplicate artifact key: ${key}`);
@@ -58,7 +67,7 @@ export function generateExampleArtifacts(
       return { path: file.path, contentType: file.contentType, size: file.size, sha256: file.sha256, url: url(normalizedOrigin, key) };
     });
     const document = {
-      schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision,
+      schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision,
       id: example.id, ...example.metadata, aggregateSha256: example.aggregateSha256, files,
     };
     const key = `${base}/examples/${example.id}/manifest.json`;
@@ -68,7 +77,7 @@ export function generateExampleArtifacts(
   });
 
   const indexDocument = {
-    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision, source: graph.source,
+    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision, source: graph.source,
     examples: manifests.map(({ example, key, sha256: manifestSha256 }) => ({
       id: example.id, ...example.metadata, fileCount: example.files.length,
       aggregateSha256: example.aggregateSha256, manifestUrl: url(normalizedOrigin, key), manifestSha256,
@@ -79,7 +88,7 @@ export function generateExampleArtifacts(
   add(indexKey, indexBytes, 'application/json; charset=utf-8', true);
 
   const revisionDocument = {
-    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision,
+    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision,
     objects: artifacts.map(({ key, bytes, sha256: objectSha256, contentType }) => ({ key, size: bytes.byteLength, sha256: objectSha256, contentType })),
   };
   add(`${base}/revision.json`, json(revisionDocument), 'application/json; charset=utf-8', true);
@@ -96,11 +105,11 @@ export function generateExampleArtifacts(
 
   const latestKey = `${EXAMPLES_BLOB_PREFIX}/latest.json`;
   add(latestKey, json({
-    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision: graph.revision,
+    schemaVersion: 1, contractId: EXAMPLES_CONTRACT_ID, revision,
     indexUrl: url(normalizedOrigin, indexKey), indexSha256: sha256(indexBytes),
   }), 'application/json; charset=utf-8', false);
 
-  return { revision: graph.revision, artifacts, discoveryKey, latestKey };
+  return { revision, artifacts, discoveryKey, latestKey };
 }
 
 export async function writeArtifactTree(set: GeneratedArtifactSet, outputDirectory: string): Promise<void> {
@@ -130,11 +139,20 @@ function verifyGraph(graph: ExampleByteGraph): void {
   if (total > 32 * 1024 * 1024) throw new Error('Graph source exceeds 32 MiB');
 }
 
+/**
+ * The origin must be a bare `scheme://host[:port]`: no path, query, fragment or credentials.
+ * Every published URL is built by concatenating this value, so anything extra would be baked into
+ * retained immutable bytes -- and because it also feeds artifactSetRevision(), two spellings of the
+ * same origin would fork the revision. Comparing against `URL.origin` rejects all of it in one go.
+ */
 function validateUri(value: string, name: string): void {
+  let parsed: URL;
   try {
-    const parsed = new URL(value);
-    if (!parsed.protocol) throw new Error('missing scheme');
+    parsed = new URL(value);
   } catch {
     throw new Error(`${name} must be an absolute URI`);
+  }
+  if (parsed.origin !== value) {
+    throw new Error(`${name} must be a bare origin (scheme://host[:port]), got: ${value}`);
   }
 }
