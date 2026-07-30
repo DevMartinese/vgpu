@@ -4,6 +4,8 @@
 
 ### Minor Changes
 
+- 7006a36: `@vgpu/wgsl-std` is now a dependency of `vgpu`, so WGSL package imports such as `import { voronoi3d } from "@vgpu/wgsl-std/noise";` resolve in any project that ran `npm install vgpu`. Previously the WGSL resolver failed with `VGPU-WGSL-PKG-NOTFOUND: Package @vgpu/wgsl-std was not found` until the package was installed separately, which no doc mentioned. This works under npm, pnpm, and Yarn PnP: the dependency entry alone only covers hoisting layouts, so `@vgpu/wgsl` resolves the standard modules next to itself when they are not in the project's own `node_modules`. The standard modules are pure `.wgsl` text with no JavaScript entry point.
+
 - 0026ff2: Add `DrawOptions.blendConstant` to `draw(gpu)`, closing the gap where `"constant"`/`"one-minus-constant"` blend factors were stuck at the initial `(0, 0, 0, 0)`. The constant is `[r, g, b, a]` finite numbers (values outside `[0, 1]` are allowed), emitted as `setBlendConstant` encoder state after `setPipeline` and before the draw — it is not part of the pipeline, so draws differing only in `blendConstant` share pipelines. A malformed value, or one paired with a `blend` that uses no constant factor, throws `VGPU-BLEND-CONSTANT-INVALID` at construction; constant factors without `blendConstant` stay legal and use the WebGPU pass default. Render bundles cannot set the pass blend constant, so `bundle` rejects recording such draws with `VGPU-BUNDLE-BLEND-CONSTANT`.
 - ae3b42c: Add configurable depth state to `draw(gpu)` and a per-pass depth clear value. `DrawOptions.depth` takes `false` to disable depth testing or `{ write?, compare?, bias?, biasSlopeScale?, biasClamp? }`; invalid values throw `VGPU-DEPTH-INVALID` at construction. `FramePassOptions.clearDepth` sets the depth clear value in `[0, 1]` (default `1`); use `0` with `depth: { compare: "greater" }` for reversed-Z. Render passes on combined depth-stencil targets (`"depth24plus-stencil8"`, `"depth32float-stencil8"`) now emit the required `stencilLoadOp`/`stencilStoreOp` instead of producing invalid passes, and the stencil-only `"stencil8"` depth format is rejected at target creation with `VGPU-TARGET-DEPTH-STENCIL-ONLY`.
 
@@ -193,6 +195,20 @@
   `init({ requiredFeatures })` now validates requested features against the adapter's supported set before `requestDevice` in the browser, node, and mock adapters, failing with `VGPU-FEATURE-UNSUPPORTED` instead of a cryptic native rejection (`validateRequiredFeatures`/`unsupportedFeaturesError` are exported from `@vgpu/core`). `createMockAdapter({ features })` declares the features the mock adapter supports and `createMockGPUDevice({ features })` creates a device whose `features` set reflects them — faithful to WebGPU, a mock device enables exactly the requested features, so tests can exercise feature-gated paths with and without the grant.
 
 ### Patch Changes
+
+- c21def5: the bare vgpu command now routes agents and humans to the docs workflow
+- 5261169: Prevent shared uniform updates from modifying object prototypes through unsafe property names.
+- ef1213b: the docs/examples CLI now points to https://vgpu.sh
+- Updated dependencies [8345a03]
+- Updated dependencies [65cc995]
+- Updated dependencies [2856407]
+- Updated dependencies [3731a3c]
+- Updated dependencies [eba8e4d]
+  - @vgpu/wgsl-std@0.2.0
+  - @vgpu/wgsl@0.2.0
+  - @vgpu/core@0.2.0
+  - @vgpu/adapter-mock@0.2.0
+  - @vgpu/adapter-node@0.1.7
 
 - 69b3f16: Fix render-pipeline cache collisions for strip-topology geometries that derive `stripIndexFormat` from `indexFormat`. The derived format now participates in the cache key exactly as it does in the WebGPU pipeline descriptor, so `uint16` and `uint32` strip meshes cannot incorrectly share a pipeline.
 - 4178c6e: Stop the render loops a gpu created when it is disposed: `frameLoop(gpu, cb)` handles are tracked like the timers and visibilities `gpu.dispose()` already releases, so disposal cancels the scheduled tick and the callback stops running against a disposed device (a loop that was stopped by hand drops its registration first). Internal tidy-ups with no behavior change: telemetry instances now expose an explicit `frameAbandoned(frame)` hook for frames that never reach the queue — a failed pass, a failed finish/submit, a cancelled frame — instead of the implicit `finalizeFrame(ABANDONED_FRAME)` + `frameSubmitted` pairing, and the `VGPU-QUERY-READBACK` error moved from an inline construction in the query ring to a `queryReadbackError()` factory in `errors.ts` like every other vgpu error.
