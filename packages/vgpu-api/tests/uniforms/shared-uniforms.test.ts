@@ -152,7 +152,7 @@ describe("uniforms(gpu) shared uniforms", () => {
 
   test("ignores unsafe keys from parsed updates without polluting Object.prototype", async () => {
     const gpu = await init();
-    const globals = gpu.uniforms<Record<string, unknown>>({ time: 0, mouse: [0, 0] });
+    const globals = uniforms<Record<string, unknown>>(gpu, { time: 0, mouse: [0, 0] });
     const pollutionKey = "__vgpuPrototypePollutionTest";
     const update = JSON.parse(`{
       "time": 2,
