@@ -23,8 +23,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/gradient/manifest.json",
-      "size": 1639,
-      "sha256": "9d57ea96bb360193a27a6641555c93af70ae5ea78ff684d06288cd48d9668804",
+      "size": 1600,
+      "sha256": "2b65d7598dcd03c5ba87c6ca6c3402166985204e1b468f9c19c2aef16e659156",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -173,8 +173,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/triangle-led-front/manifest.json",
-      "size": 10060,
-      "sha256": "79127a6c0291e3b768eeb47085b7d4cdee502978ceff49ec7c6b1bc3953ffea7",
+      "size": 9748,
+      "sha256": "1cd97e35e869a7d7a42101a37359a9d47e6d4030ec272bb931d42b0451e42242",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -221,8 +221,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/anti-aliasing/manifest.json",
-      "size": 3153,
-      "sha256": "ccf9710212fe742574c8d2687527ccb462d0ba89e9793373409320d31a50e184",
+      "size": 3062,
+      "sha256": "17f241f377e68edc61633ca6eeb5a24a9da92fa28063a84779fa9629d6d634b9",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -275,8 +275,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/post-processing/manifest.json",
-      "size": 3555,
-      "sha256": "886295ec61269f8223041c21f49dec55f3487345aca4165460d60c700b00dcaa",
+      "size": 3451,
+      "sha256": "bb404df8d695137411b3d58432680ca3e4176871baa03c29d9f77d0e54ba5654",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -317,8 +317,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/black-hole/manifest.json",
-      "size": 2878,
-      "sha256": "59cda3e14b671feb12403696477dbdfc8d3a04cc9fc2160e98689f64f59e31a2",
+      "size": 2800,
+      "sha256": "2f19a1f8e50085db08529026b8c9ef8e68409069d41d7ac46251cea2c66d8304",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -413,8 +413,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/earth/manifest.json",
-      "size": 6024,
-      "sha256": "41d4937ca2612476a2dc9fa950c1c3f232c7df625ad570b2dacffbd1d5a7e527",
+      "size": 5829,
+      "sha256": "de1b1ab84ce212c6700e6aec22dfa47241b215576b159ff05fb4b0d137051b0e",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -509,8 +509,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/fluid/manifest.json",
-      "size": 6035,
-      "sha256": "b652e3bf13dd65c0897d078a316f72decb463cb8ace5285e52f76d80db347e05",
+      "size": 5840,
+      "sha256": "dfd84c990823ca99b27156f4eeb51d3d16cfcd2aff7fd6a7bce4f4eb2e826dce",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -551,8 +551,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/instanced-rendering/manifest.json",
-      "size": 2835,
-      "sha256": "b3208f8750a01dc244a920f1a0bb69a9c6abd068ffe503c49c663c43117b9a11",
+      "size": 2757,
+      "sha256": "aad3ef3c5923f98c009dcdbfc2b673ba305952070ba5ffb1d6de1b1fb1599478",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -581,8 +581,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/batch-rendering/manifest.json",
-      "size": 2024,
-      "sha256": "dc43434f2c223024077456c55a424288b0dd01556e0e32deb6843591e7b23639",
+      "size": 1972,
+      "sha256": "f6d5b23713d7f343af85c561c96e0b35d1aecd1f76cdfae31341f0ca393210e8",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -701,8 +701,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/fft-ocean/manifest.json",
-      "size": 7677,
-      "sha256": "362d3c76e386fd445336183298945c1df08e15f9ef1306e4e35df63fcef2d08d",
+      "size": 7430,
+      "sha256": "048754ddcf43f64bcc89883f1704905ced4f72aadbc3447f58f77d19702e3b4e",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -755,8 +755,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/raymarched-fractal/manifest.json",
-      "size": 3677,
-      "sha256": "bfb8071c56a38859e561733fb17468306f9653b3c4f9a0ca22cfe334aa7fb3bf",
+      "size": 3573,
+      "sha256": "85d3719f75e4ed729cceb48c48de5ea516196eaed2ab0b636b1e11a5e08df225",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -815,8 +815,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/environment-map/manifest.json",
-      "size": 3950,
-      "sha256": "4fd7e9c5b377655a7bc9db3cea17e66c044a34fcdcd56de92ba741deb38567ab",
+      "size": 3833,
+      "sha256": "a43538d37009617004884795085f6b20dea8cffce29145703adc291794209a6d",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -941,8 +941,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/transmission/manifest.json",
-      "size": 8126,
-      "sha256": "fd3dfebc7fbae3810708828d58694d4488bb657674bf51871d29e5abc826b0ab",
+      "size": 7866,
+      "sha256": "edd456be7c6d456b93c32429de3b66e5a2ace0fd1045996e1a9b18eff1cab921",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -1067,8 +1067,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/radiance-cascades/manifest.json",
-      "size": 8302,
-      "sha256": "d3df0253545b746cfd40b2db65f237ca1a1f8383bf1095d6965726d2bbe3b949",
+      "size": 8042,
+      "sha256": "174c3ed7021cd5cb29e42ada676dc54114bd3ed384d245b8e9c3076ac82a9753",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -1157,8 +1157,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/nextjs-flare/manifest.json",
-      "size": 5839,
-      "sha256": "ce18dc640729ec0df9acb77f3b62494f03544d31e720b48d9463570a717f12de",
+      "size": 5657,
+      "sha256": "4fe594bfcfc6cb0ff40583d3f43361ab57087d8675e0daed0e475eefd96da11e",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -1217,8 +1217,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/depth-estimation/manifest.json",
-      "size": 4210,
-      "sha256": "c70bbfb92c75e1847cf61ae30477b5c20124c48079f52b714464994f9381cad9",
+      "size": 4093,
+      "sha256": "49aedc520cc822e113e7d49504be42da26137e81dff8e28ec6809044405b4a9f",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -1259,8 +1259,8 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/mnist-classifier/manifest.json",
-      "size": 2981,
-      "sha256": "fda0b22ec10791a1b7494dae9ae957dbc037dbf31b1d29a0e19c10b9b7ba6cd6",
+      "size": 2903,
+      "sha256": "22be845e844911c8df3090ced60dd5a5e1922b8d335670627ec82692a0f5ebdd",
       "contentType": "application/json; charset=utf-8"
     },
     {
@@ -1367,14 +1367,14 @@
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/examples/air-painting/manifest.json",
-      "size": 7107,
-      "sha256": "0a5cec15459b220e02e4d18ae5d4c2663134eed6f57a6005d22014c9854cdbc7",
+      "size": 6886,
+      "sha256": "a1f4c70d23b4a1412bb438f24b52875eabb1261a4e90285c2328e500a750abf8",
       "contentType": "application/json; charset=utf-8"
     },
     {
       "key": "examples/v1/revisions/b6799b5d7abb2ee36f7e7e14d037620c467e5822eaceea0cee2a58232f9a49b7/index.json",
-      "size": 17167,
-      "sha256": "bbd4d6fdc6d10d6f403227288fdd80b27bc657f64874211a6b8fd6ebf208461b",
+      "size": 16933,
+      "sha256": "e9fb0e6f0759f89df8d7ab8573897b5fbe51797d3b8e4f9bb2a286c81a22b07c",
       "contentType": "application/json; charset=utf-8"
     }
   ]
