@@ -134,11 +134,20 @@ function verifyGraph(graph: ExampleByteGraph): void {
   if (total > 32 * 1024 * 1024) throw new Error('Graph source exceeds 32 MiB');
 }
 
+/**
+ * The origin must be a bare `scheme://host[:port]`: no path, query, fragment or credentials.
+ * Every published URL is built by concatenating this value, so anything extra would be baked into
+ * retained immutable bytes -- and because it also feeds artifactSetRevision(), two spellings of the
+ * same origin would fork the revision. Comparing against `URL.origin` rejects all of it in one go.
+ */
 function validateUri(value: string, name: string): void {
+  let parsed: URL;
   try {
-    const parsed = new URL(value);
-    if (!parsed.protocol) throw new Error('missing scheme');
+    parsed = new URL(value);
   } catch {
     throw new Error(`${name} must be an absolute URI`);
+  }
+  if (parsed.origin !== value) {
+    throw new Error(`${name} must be a bare origin (scheme://host[:port]), got: ${value}`);
   }
 }
