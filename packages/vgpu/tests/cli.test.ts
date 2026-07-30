@@ -157,10 +157,10 @@ test("routes the dogfood queries to the page that answers them", () => {
     ["d.ts", "/guides/nextjs.docs.md"],
     ["webpack", "/@vgpu/wgsl/loader-webpack/index.docs.md"],
     ["noise", "/@vgpu/wgsl-std/noise/index.docs.md"],
-    // Cloud/plasma looks: no Perlin/simplex/fBM primitive exists, so the noise page has to be the
-    // page that says so and shows the octave recipe instead.
-    ["fbm", "/@vgpu/wgsl-std/noise/index.docs.md"],
-    ["perlin", "/@vgpu/wgsl-std/noise/index.docs.md"],
+    // Cloud/plasma looks: Perlin and simplex are dedicated subpaths with their own fBM helpers.
+    ["fbm", "/@vgpu/wgsl-std/noise/perlin/index.docs.md"],
+    ["perlin", "/@vgpu/wgsl-std/noise/perlin/index.docs.md"],
+    ["simplex", "/@vgpu/wgsl-std/noise/simplex/index.docs.md"],
     // The router advertises `docs find "<VGPU-error-code>"`, so codes must resolve too.
     ["VGPU-WGSL-PKG-NOTFOUND", "/@vgpu/wgsl/runtime/resolve-shader.docs.md"],
   ];
