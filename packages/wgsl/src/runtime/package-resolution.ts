@@ -54,8 +54,10 @@ function packageImport(spec: string, from: string, diagnostics: Diagnostic[]): s
     if (isWorkspaceRoot(dir)) break;
     const next = dirname(dir); if (next === dir) break; dir = next;
   }
-  const transitive = resolveAlongsideResolver(spec);
-  if (transitive) return transitive;
+  if (pkg.startsWith("@vgpu/")) {
+    const transitive = resolveAlongsideResolver(spec);
+    if (transitive) return transitive;
+  }
   throw packageNotFound(pkg, PKG_NOTFOUND_FIXIT);
 }
 
@@ -69,7 +71,12 @@ function packageImport(spec: string, from: string, diagnostics: Diagnostic[]): s
  * resolver is used rather than another node_modules walk because it honors `exports` maps and is the
  * only thing that works under Yarn PnP.
  *
- * This runs after the loop above, so it never shadows a project-local copy.
+ * This runs after the loop above, so it never shadows a project-local copy. Scoped to `@vgpu/*`
+ * specifiers only: it exists solely to rescue vgpu's own transitives in isolated pnpm/PnP layouts.
+ * Any other bare specifier that happens to be reachable from `@vgpu/wgsl`'s own install location
+ * (e.g. a devDependency like `webpack`) must NOT resolve here — it should fail with
+ * VGPU-WGSL-PKG-NOTFOUND instead of silently picking up an unrelated JS file that then fails much
+ * later with a confusing parse error.
  */
 function resolveAlongsideResolver(spec: string): string | undefined {
   try {

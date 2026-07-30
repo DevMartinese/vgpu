@@ -37,6 +37,22 @@ test("a transitively installed WGSL package resolves from an isolated layout", a
   expect(result.deps.some((dep) => dep.replace(/\\/gu, "/").endsWith("wgsl-std/src/noise/index.wgsl"))).toBe(true);
 });
 
+// The fallback that resolves alongside the resolver exists only to rescue `@vgpu/*` transitives in
+// isolated layouts (see above). A non-`@vgpu` bare specifier must never ride that fallback, even when
+// it happens to be reachable from `@vgpu/wgsl`'s own install location (e.g. one of its
+// devDependencies, like `webpack`) — otherwise a typo'd import can silently resolve to an unrelated
+// JS file instead of failing with a clear PKG-NOTFOUND.
+test("a non-@vgpu specifier reachable only from the resolver's own install location is not resolved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-isolated-"));
+  const entry = join(dir, "main.wgsl");
+  await writeFile(entry, "import { thing } from 'webpack'; fn main(){}");
+
+  await expect(resolveShader({ entry, validate: false })).rejects.toMatchObject({
+    code: "VGPU-WGSL-PKG-NOTFOUND",
+    message: "Package webpack was not found. Install the package (npm install webpack) or check the specifier",
+  });
+});
+
 test("a project-local copy of a WGSL package wins over the transitive one", async () => {
   const dir = await mkdtemp(join(tmpdir(), "vgsl-local-wins-"));
   const pkgDir = join(dir, "node_modules", "@vgpu", "wgsl-std");
