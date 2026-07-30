@@ -86,6 +86,26 @@ test("a third-party package's own WGSL dependency resolves from inside pnpm's is
   expect(deps(result)).toContain(".pnpm/@acme+fbm@1.0.0/node_modules/@acme/shaders/src/noise.wgsl");
 });
 
+// `npm link` / `yarn link` point a dependency at a checkout somewhere else on the machine. Resolving
+// the importer's real path must not turn into a walk of *that* tree: the linked package's parent
+// directories belong to another project (or to $HOME), and packages found there were never installed
+// by the project doing the import. The boundary is anchored to the importing project, so the walk
+// stops even though the external tree has no workspace-root marker of its own.
+test("the real-path walk stays inside the importing project's workspace root", async () => {
+  const { entry } = await linkedPackageFixture();
+
+  await expect(resolveShader({ entry, validate: false })).rejects.toMatchObject({ code: "VGPU-WGSL-PKG-NOTFOUND", message: expect.stringContaining("Package @acme/shaders was not found") });
+});
+
+// The same layout, with the linked package's dependency installed where the *project* can see it:
+// the link itself is fine, it is only the external tree that is out of bounds.
+test("a linked package resolves its dependency from the importing project", async () => {
+  const { entry, repo } = await linkedPackageFixture();
+  await writePackage(join(repo, "node_modules", "@acme", "shaders"), NOISE_PKG, { "src/noise.wgsl": NOISE });
+
+  expect((await resolveShader({ entry, validate: false })).wgsl).toContain("customNoise");
+});
+
 test("a third-party package with no WGSL export for the subpath reports the exports map", async () => {
   const dir = await mkdtemp(join(tmpdir(), "vgsl-3p-sub-"));
   await writePackage(join(dir, "node_modules", "@acme", "shaders"), NOISE_PKG, { "src/noise.wgsl": NOISE });
@@ -117,6 +137,23 @@ test("under Yarn PnP the importing shader's own resolver is used", async () => {
 
   expect((await resolveShader({ entry, validate: false })).wgsl).toContain("customNoise");
 });
+
+/**
+ * `npm link`-style layout: `repo/app/node_modules/@acme/fbm` is a symlink to a checkout outside the
+ * repo, and that checkout's *own* parent has a node_modules holding `@acme/shaders` — a package the
+ * importing project never installed. Returns the app's entry shader, which imports the linked package.
+ */
+async function linkedPackageFixture(): Promise<{ readonly entry: string; readonly repo: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-3p-link-"));
+  const outside = join(dir, "elsewhere");
+  await writePackage(join(outside, "fbm"), { name: "@acme/fbm", exports: { "./fbm": "./src/fbm.wgsl" } }, { "src/fbm.wgsl": "import { customNoise } from '@acme/shaders/noise';\nexport fn acmeFbm(p: vec2f) -> f32 { return customNoise(p) * 0.5; }" });
+  await writePackage(join(outside, "node_modules", "@acme", "shaders"), NOISE_PKG, { "src/noise.wgsl": NOISE });
+  const repo = join(dir, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await mkdir(join(repo, "app", "node_modules", "@acme"), { recursive: true });
+  await symlink(join(outside, "fbm"), join(repo, "app", "node_modules", "@acme", "fbm"), "dir");
+  return { entry: await writeEntry(join(repo, "app"), "@acme/fbm/fbm", "acmeFbm"), repo };
+}
 
 /** App shader in a project whose workspace root shadows the node_modules holding the package: only Node resolution from the importer reaches it. */
 async function aboveWorkspaceRootFixture(): Promise<string> {
