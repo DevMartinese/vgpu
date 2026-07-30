@@ -21,7 +21,7 @@
 
 import { GBufferSample, GBufferLayers, decodeGBuffer, ISCO, PI_CONST, TAU } from "./gbuffer.wgsl";
 import { DiskLook, DiskSample, shadeDisk, SHEAR_PERIOD } from "./disk.wgsl";
-import { StarLook, shadeStars } from "./stars.wgsl";
+import { StarLook, shadeStars, starPrefilterRatio } from "./stars.wgsl";
 
 struct Shade {
   resolution: vec2f,
@@ -55,7 +55,10 @@ struct Shade {
 
 /**
  * Angular size of the finest star layer in stars.wgsl (210 cells per cube face).
- * Used as the Nyquist limit for the lensed sky; see `starLod` in fs_main.
+ * The sampling reference for the lensed sky: `skyFootprint` is reported in units
+ * of it by debug view 6. Nothing in the final image keys off it any more — the
+ * sky is prefiltered per layer inside stars.wgsl instead of being faded out by a
+ * single global threshold.
  */
 const STAR_CELL: f32 = 1.0 / 210.0;
 
@@ -263,8 +266,9 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   let frontFootprint = diskFootprint(baked.front);
   let backFootprint = diskFootprint(baked.back);
 
-  // Angular footprint of the LENSED direction map, in radians per pixel. Also
-  // derivatives, so also uniform control flow.
+  // Angular footprint of the LENSED direction map, in cube-face units per pixel
+  // (the units `stars.wgsl` measures its point radius in). Also derivatives, so
+  // also uniform control flow.
   //
   // Gravitational lensing compresses the whole sky into ever thinner rings as
   // the impact parameter approaches the photon sphere, so `rayDirection` sweeps
@@ -272,21 +276,34 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   // pixel, point sampling the star field returns an essentially uncorrelated
   // cell per pixel and the lensed sky collapses into uniform speckle that reads
   // as "unlensed stars" in a band hugging the shadow — the opposite of what
-  // should be there. Same class of bug as the disk moire, same class of fix:
-  // measure the footprint and fade the detail that no longer fits in a pixel.
+  // should be there. Same class of bug as the disk moire; the fix is to hand the
+  // footprint to the sky shader and let it PREFILTER (see `starPrefilterRadius`
+  // in stars.wgsl), not to fade the sky out.
+  //
+  // This used to multiply the stars by `starLod = 1 - smoothstep(STAR_CELL,
+  // 4*STAR_CELL, skyFootprint)`, i.e. fade to black wherever a pixel spanned
+  // more than one star cell. That is wrong in the limit: radiance is conserved
+  // along rays, so a magnified patch of sky gets fainter and wider, never black,
+  // and the fade deleted an 88 px ring of sky around the shadow at 720p —
+  // exactly the annulus where the lensed images pile up, so the Einstein ring
+  // was the one thing guaranteed not to render. Prefiltering with flux
+  // conservation kills the speckle just as well and keeps the light.
   // Also measured on the baked direction, for the same reason as above.
+  //
+  // BOTH screen axes are kept, separately: the lensing map is anisotropic (it
+  // compresses the sky radially while barely touching it tangentially), so a
+  // single scalar footprint — the max over axes and components — is a 3-10x too
+  // wide filter along the well-sampled axis and smears every star into a
+  // tangential dash. `stars.wgsl` inverts the 2x2 Jacobian these two vectors
+  // span and filters in SCREEN space, where a pixel is isotropic by definition.
+  // The scalar below is kept only as the debug-view scale.
   let bakedRayDirection = baked.front.rayDirection;
+  let skyDdx = dpdx(bakedRayDirection);
+  let skyDdy = dpdy(bakedRayDirection);
   let skyFootprint = max(
     max(fwidth(bakedRayDirection.x), fwidth(bakedRayDirection.y)),
     fwidth(bakedRayDirection.z),
   );
-  // The correct band-limited value is the sky's MEAN radiance, which for a
-  // sparse star field is essentially black, so fading out is the right limit.
-  // Fade range measured with debug view 6 (see GBUFFER.md): the speckle band
-  // sits where a pixel spans 1..4 of the finest star cells, so the field is
-  // fully gone by 4 and untouched below 1. Do not widen this without re-reading
-  // that view -- fading too early eats real stars, too late leaves the speckle.
-  let starLod = 1.0 - smoothstep(STAR_CELL, STAR_CELL * 4.0, skyFootprint);
 
   // Everything below this line looks at the ROTATED scene: the mouse turns the
   // world around the hole's spin axis, and the baked G-buffer is still exact
@@ -295,10 +312,15 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   // and the debug views show what was actually sampled.
   let layers = rotateLayers(baked, -shade.sceneYaw);
   let g = layers.front;
+  // The sky derivatives belong to the same vector as `g.rayDirection`, so they go
+  // through the same rotation. `rotateY` is linear, so rotating a difference of
+  // directions is exactly the difference of the rotated directions.
+  let skyDdxRotated = rotateY(skyDdx, -shade.sceneYaw);
+  let skyDdyRotated = rotateY(skyDdy, -shade.sceneYaw);
 
   var background = vec3f(0.0);
   if (!g.isBlackHole && g.escaped) {
-    background = shadeStars(g.rayDirection, stars, shade.time) * starLod;
+    background = shadeStars(g.rayDirection, stars, shade.time, skyDdxRotated, skyDdyRotated);
   }
 
   // The same shadeDisk, called twice with two different crossings. disk.wgsl
@@ -343,13 +365,18 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   if (mode == 5) {
     return vec4f(vec3f(frontSample.density), 1.0);
   }
-  // Sky aliasing diagnostic. R = star cells crossed per pixel / 16 (so 255 means
-  // 16+ cells per pixel, i.e. hopeless undersampling), G = the star LOD weight
-  // actually applied, B = 1 on pixels that sample the star field at all.
+  // Sky prefilter diagnostic. R = star cells crossed per pixel / 16 (so 255 means
+  // 16+ cells per pixel, i.e. hopeless undersampling for a point sample),
+  // G = `starPrefilterRatio` — the LINEAR attenuation the prefilter applies
+  // (1 = the star already covers a pixel and keeps full brightness, -> 0 = the
+  // star is smeared over the footprint and dimmed by the square of this),
+  // B = 1 on pixels that sample the star field at all. Unlike the `starLod` this
+  // replaced, G going to 0 no longer means "no sky here": the flux is still
+  // there, spread out.
   if (mode == 6) {
     return vec4f(
       skyFootprint / (STAR_CELL * 16.0),
-      starLod,
+      starPrefilterRatio(g.rayDirection, skyDdxRotated, skyDdyRotated),
       select(0.0, 1.0, !g.isBlackHole && g.escaped),
       1.0,
     );

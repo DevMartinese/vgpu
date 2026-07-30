@@ -112,10 +112,22 @@ Channel details:
   `side == 1.0`.
 - **direction encoding** — each hit direction is a unit vector stored as
   `(y, atan2(z, x))` and rebuilt exactly unit-length by `decodeGBuffer`.
-- **flags** (`gSky.w`) — bit 0 (`1.0`) = `isBlackHole`, the ray ended inside the
-  horizon (`r < 1.004`), render black; bit 1 (`2.0`) = `escaped`, the ray reached
-  the escape radius and only then is `gSky.xyz` a meaningful sky direction. They
-  are mutually exclusive. Decoded for you into two `bool`s.
+- **flags** (`gSky.w`) — bit 0 (`1.0`) = `isBlackHole`, the ray is SHADOW; bit 1
+  (`2.0`) = `escaped`, the ray really did reach the escape radius moving outwards
+  and only then is `gSky.xyz` a meaningful sky direction. They are mutually
+  exclusive, and exactly one of them is always set. Decoded for you into two
+  `bool`s.
+  - `isBlackHole` covers **two** endings: the ray fell inside the horizon
+    (`r < 1.004`), or it ran out of the bake's 768 steps while still orbiting.
+    The second case is the band of impact parameters just above
+    `b_crit = 3*sqrt(3)/2 = 2.598`, which winds around the photon sphere many
+    times. It used to be flagged `escaped`, with `gSky.xyz` holding the direction
+    the ray happened to be pointing when the loop gave up (measured at
+    `b = 2.62`: 117 deg of deflection instead of the true 252 deg) — i.e. a
+    random sky direction, which is speckle waiting to happen. Black is the far
+    better approximation for a photon that is still circling, so it is folded
+    into the shadow. Cost: the shadow edge is ~2 px larger at 720p (188 -> 190 px
+    measured), which is inside the ~4 % the flat-frame ray launch already adds.
 - **normalized disk radius** is recomputed from the hit position on read, and
   arrives as `diskUv.x`, clamped `0..1` (`0` at ISCO, `1` at `diskRadius`).
 - The ray is **not** terminated at either disk hit: the bake keeps marching, so
@@ -346,7 +358,7 @@ export struct StarLook {  // uniform payload, mirrored by HeroSettings.stars
   density: f32, twinkle: f32,
 }
 
-export fn shadeStars(direction: vec3f, look: StarLook, time: f32) -> vec3f
+export fn shadeStars(direction: vec3f, look: StarLook, time: f32, ddx: vec3f, ddy: vec3f) -> vec3f
 ```
 
 - Called when the ray escaped and did not hit the disk-facing black hole
@@ -368,11 +380,11 @@ export fn shadeStars(direction: vec3f, look: StarLook, time: f32) -> vec3f
 - Stars have one uniform angular point radius. Bright anchors are distinguished
   by emission, never by a larger footprint.
 
-#### Lensing aliasing — the `starLod` fade (read this before tuning stars)
+#### Lensing aliasing — the sky PREFILTER (read this before tuning stars)
 
-`shade.wgsl` multiplies the return value of `shadeStars` by a `starLod` weight.
-Do not remove it, and know it exists before you judge how your field looks near
-the shadow.
+`shadeStars` takes the screen-space derivatives of the lensed direction and
+prefilters the field with them. Do not remove them, and know they exist before
+you judge how your field looks near the shadow.
 
 Gravitational lensing compresses the entire sky into ever thinner rings as the
 impact parameter approaches the photon sphere, so `rayDirection` sweeps faster
@@ -390,22 +402,71 @@ view 6 at `500x500`, in units of the finest star cell (1/210 of a cube face):
 Past ~1 cell per pixel, point-sampling that map returns an essentially
 uncorrelated cell per pixel, and the lensed sky degenerates into uniform
 speckle — which reads as a band of *unlensed* stars hugging the shadow, the
-exact opposite of the extreme bending that belongs there. The correct
-band-limited value is the sky's mean radiance, which for a sparse star field is
-essentially black, so `shade.wgsl` fades the field out between 1 and 4 cells per
-pixel:
+exact opposite of the extreme bending that belongs there. On top of that, a star
+is only 0.28 px across at 720p (0.53 px at 1350p), so even far from the hole
+point sampling misses ~3 of every 4 of them and the survivors pop in and out as
+the scene yaws.
 
-```wgsl
-let starLod = 1.0 - smoothstep(STAR_CELL, STAR_CELL * 4.0, skyFootprint);
-```
+`shade.wgsl` used to multiply the whole field by
+`starLod = 1 - smoothstep(STAR_CELL, 4*STAR_CELL, skyFootprint)`, i.e. fade the
+sky to black past one cell per pixel. **That fade is gone.** It was wrong in the
+limit — radiance is conserved along rays (Liouville), so a magnified patch of sky
+gets fainter per pixel and covers more of them, it never goes dark — and it cost
+exactly the effect it was protecting: an 88 px ring of empty sky around the
+shadow at 720p (24 % of the half-height, i.e. everything out to ~1.32 shadow
+radii), which is precisely the annulus where the lensed images pile up. The
+Einstein ring was the one thing guaranteed not to render.
 
-This is the same class of fix as the disk's `footprint` LOD. It is applied in
-`shade.wgsl` (a single global fade) rather than inside `stars.wgsl` only because
-of file ownership. **The better long-term fix lives in `stars.wgsl`**: take a
-footprint parameter and fade *each* `starLayer` toward its own mean at its own
-Nyquist limit, since the 34-, 92- and 210-cell layers alias at very different
-rates. If you do that, add `footprint: f32` to `shadeStars` and drop the global
-fade in `shade.wgsl`.
+What replaced it lives in `stars.wgsl` (`skyFilter`, `starLayer`) and is a
+flux-conserving prefilter — a cone trace of a point sky:
+
+1. **The filter is a pixel, and it is elliptical in sky space.** `shade.wgsl`
+   hands `shadeStars` `dpdx`/`dpdy` of the lensed direction (both, separately).
+   `skyFilter` differentiates the cube-face projection along a *pinned* face axis,
+   inverts the resulting 2x2 Jacobian, and every star's falloff is evaluated in
+   SCREEN space, where a pixel is isotropic by construction. A single scalar
+   footprint (the old `max` over axes and components) is a 3–10x too wide filter
+   along the well-sampled axis, because the lensing map is strongly anisotropic
+   (~3x more sky per pixel radially than tangentially at 32 deg off axis with the
+   shipped camera); it turns every star into a tangential dash. Do not go back to
+   a scalar.
+2. **Every star is at least one pixel wide, and pays for it in brightness.**
+   `starPixels = UNIFORM_POINT_RADIUS / sqrt(|det J|)` is the star's own radius in
+   pixels — the determinant carries both the local magnification and the
+   resolution — and `gain = min(1, starPixels^2)` is the fraction of the pixel it
+   covers, i.e. the flux-conserving dimming. This also fixes the sub-pixel
+   sampling: at `>= 1 px` the 4.9e-4 f16 quantum of `gSky` no longer matters, so
+   the sky stops flickering as the scene yaws, and `gSky` does not need a higher
+   precision format.
+3. **Four cells per layer, not one.** A prefiltered star is wider than the margin
+   the per-cell jitter leaves, so a single-cell lookup clipped stars near a cell
+   edge into half moons; the 2x2 block also starts summing the several stars a
+   compressed pixel really contains.
+4. **The mean-radiance limit.** Once a pixel spans more than a few cells along the
+   footprint's major axis, no small tap count can find all the stars in it, and
+   the exact band-limited value stops depending on which ones they are:
+   `mean = magnitude * density * STAR_FLUX_AREA * (UNIFORM_POINT_RADIUS * cells)^2`
+   — a constant, the layer's own surface brightness, with the footprint cancelled
+   out. That is Liouville again, and it is what `starLayer` cross-fades to between
+   1 and 3 cells per pixel, per layer (the 34-, 92- and 210-cell grids alias at
+   very different rates, which is exactly what one global threshold could not
+   express). The old comment called this mean "essentially black"; it is small,
+   but it is the same brightness the unlensed sky already has, which is why fading
+   past it left a visible hole.
+
+Measured effect on the sky alone (`--disk.brightness 0`, 1280x720, radial mean of
+the de-gamma'd image): the 170–230 px band goes from **exactly 0** to
+`0.5–1.5e-4`, the far field (>= 410 px) is unchanged within +/-13 %, and the
+transition band (250–390 px) reads 0.2–0.8x of the old value because the same
+flux is now spread over many faint pixels instead of a few bright ones (ACES
+compresses the faint end, so display-space energy drops even though radiance is
+conserved).
+
+Prerequisite, and the reason the two fixes ship together: the out-of-steps rays
+just outside the shadow (see the `flags` bullet in the layout section) used to be
+flagged `escaped` with a truncated direction. Relaxing the star LOD without
+reclassifying them would have uncovered a ring of speckle from those garbage
+directions right where the prefilter now keeps the sky alive.
 
 ## Uniforms and bindings (entry shader)
 
@@ -540,7 +601,7 @@ image as the page.
 |---|---|---|---|---|---|
 | `cameraY` | `0.085` | `brightness` | `0.098` | `brightness` (global) | `3` |
 | `distance` | `13.5` | `speed` | `0.75` | `brightnessMin` | `4` |
-| `diskRadius` | `10.8` | `stretch` | `5.75` | `brightnessMax` | `4` |
+| `diskRadius` | `6.9` | `stretch` | `5.75` | `brightnessMax` | `4` |
 | `fov` | `2.67` | `detail` | `3.44` | `density` | `2.92` |
 | `centerY` | `0` | `turbulence` | `4.46` | `twinkle` | `0` |
 | | | `density` | `1.38` | | |
@@ -754,7 +815,7 @@ The lil-gui panel has a **debug** folder with a *g-buffer view* dropdown:
 | 3 | flags | R = `isHit`, G = `isBlackHole`, B = `escaped` |
 | 4 | lensed ray dir | `rayDirection * 0.5 + 0.5` |
 | 5 | disk density | `DiskSample.density` |
-| 6 | sky footprint / star LOD | R = star cells crossed per pixel ÷ 16, G = applied `starLod`, B = 1 where stars are sampled |
+| 6 | sky footprint / star prefilter | R = star cells crossed per pixel ÷ 16, G = `starPrefilterRatio` (1 = star at least a pixel wide and at full brightness, → 0 = one pixel swallows many cells and every star is dimmed by the square of it), B = 1 where stars are sampled. G → 0 no longer means "no sky here": the flux is still rendered, spread out. |
 | 7 | second disk hit | **B = 1 exactly where a hidden second crossing exists**, R/G = its normalized disk coords (radius, azimuth) |
 
 Views 1–5 describe the **front** crossing. Next to the dropdown, **disk layers**
@@ -829,6 +890,12 @@ node apps/docs/components/hero/debug-render.mjs --views final,raydir --bakeYaw -
   `final mean≈0.037 std≈0.088`, `normals mean≈0.708`, `diskuv mean≈0.352`,
   `flags mean≈0.273`, `raydir mean≈0.448`, `density mean≈0.136`,
   `skylod mean≈0.650`, `hit2 mean≈0.023`.
+  At `1280x720` after the sky prefilter and the out-of-steps reclassification:
+  `final mean≈0.038 std≈0.078`, `raydir mean≈0.448`, `flags mean≈0.275`
+  (was `0.273` — the ~2 px shadow band that changed from `escaped` to shadow),
+  `skylod mean≈0.302` (was `0.673`; the G channel is now the prefilter ratio,
+  which is < 1 nearly everywhere, so this number is NOT comparable to the old
+  `starLod` one).
   These move with every defaults revision — re-measure them when you change one
   rather than treating a mismatch as a regression. (`final` roughly doubled from
   the previous set purely because `disk.brightness` went `0.05 -> 0.098`.)
@@ -838,6 +905,8 @@ node apps/docs/components/hero/debug-render.mjs --views final,raydir --bakeYaw -
 - Useful analysis helpers live in `/home/user/reports/tools/`:
   `center.mjs` (shadow circle + centering offset from a `flags` PNG),
   `profile.mjs` (radial star-cells-per-pixel profile from a `skylod` PNG),
+  `compare.mjs` / `crop.mjs` in `/home/user/reports/` (A/B diff stats, zoomed
+  side-by-side crops — how the prefilter was validated),
   `speckle.mjs` (high-frequency energy in the annulus hugging the shadow —
   the objective metric for lensing aliasing).
 - To isolate the sky, render with `--diskRadius 3.02` (just above `ISCO`), which

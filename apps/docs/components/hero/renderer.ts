@@ -99,7 +99,7 @@ export function defaultHeroSettings(): HeroSettings {
   return {
     cameraY: 0.085,
     distance: 13.5,
-    diskRadius: 10.8,
+    diskRadius: 6.9,
     fov: 2.67,
     // Canvas covers the whole hero now, so the hole sits dead center.
     centerY: 0,

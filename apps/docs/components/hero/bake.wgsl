@@ -31,9 +31,16 @@ const HORIZON: f32 = 1.0;
 const ISCO: f32 = 3.0;
 const MAX_STEPS: i32 = 768;
 
-/** sky.w bit 0 — the ray ended inside the event horizon. */
+/**
+ * sky.w bit 0 — the ray is SHADOW: it ended inside the event horizon, or it was
+ * still orbiting when MAX_STEPS ran out (see the classification at the end of
+ * fs_main). Both cases mean "no sky here".
+ */
 const FLAG_HOLE: f32 = 1.0;
-/** sky.w bit 1 — the ray escaped to infinity. */
+/**
+ * sky.w bit 1 — the ray really did reach `escapeRadius` moving outwards, so
+ * `sky.xyz` is its asymptotic direction and can be used to sample the sky.
+ */
 const FLAG_ESCAPED: f32 = 2.0;
 
 // G-BUFFER LAYOUT — 4 attachments, 32 bytes per sample. See GBUFFER.md.
@@ -123,7 +130,12 @@ fn geodesicAcceleration(position: vec3f, velocity: vec3f) -> vec3f {
   var hitCount = 0;
   var swallowed = 0.0;
   var escaped = 0.0;
-  let escapeRadius = max(30.0, orbitRadius + 8.0);
+  // Where the ray is declared to have reached infinity. Pushed out from 30 to
+  // 120 r_s: the deflection is already converged at 30 (raising it to 120 moves
+  // the outgoing direction by 0.002 deg at b = 3), but the far field is where
+  // the adaptive step below buys its budget back, so a farther cutoff costs
+  // almost no extra steps and makes the direction unambiguously asymptotic.
+  let escapeRadius = max(120.0, orbitRadius + 8.0);
 
   for (var stepIndex = 0; stepIndex < MAX_STEPS; stepIndex++) {
     let radius = length(position);
@@ -138,7 +150,18 @@ fn geodesicAcceleration(position: vec3f, velocity: vec3f) -> vec3f {
 
     // Adaptive to gravity: finer near the horizon where the geodesic curves
     // hardest. Much finer than the live version could afford (one-shot cost).
-    let stepSize = clamp((radius - HORIZON) * 0.035, 0.0045, 0.075);
+    //
+    // The ceiling grows LINEARLY with radius past r = 6 instead of staying
+    // pinned at 0.075. The acceleration falls off as h^2 / r^5, so out there a
+    // 0.075 step resolves a straight line 20x more finely than needed and the
+    // fixed cap was burning ~20% of MAX_STEPS on the flight in and out. Inside
+    // r = 6 the factor is exactly 1, so the strong-field part of every geodesic
+    // — everything that produces the deflection, the shadow edge and the disk
+    // crossings — integrates bit-for-bit as before. Measured effect of the
+    // relaxation (evidence/geo3.mjs): deflection unchanged to <= 0.03 deg, and
+    // the freed budget shrinks the out-of-steps band from 8.6 px to 2.3 px at
+    // 720p.
+    let stepSize = clamp((radius - HORIZON) * 0.035, 0.0045, 0.075 * max(1.0, radius / 6.0));
 
     let previousPosition = position;
     let previousVelocity = velocity;
@@ -181,10 +204,29 @@ fn geodesicAcceleration(position: vec3f, velocity: vec3f) -> vec3f {
     }
   }
 
-  // Rays that ran out of steps without falling in are treated as escaping;
-  // with 768 fine steps this only happens for near-photon-sphere orbits.
-  if (swallowed < 0.5) {
-    escaped = 1.0;
+  // OUT-OF-STEPS RAYS ARE SHADOW, NOT SKY.
+  //
+  // This used to be `if (swallowed < 0.5) { escaped = 1.0; }`, i.e. anything
+  // that did not fall in was declared to have reached infinity — including the
+  // rays that simply exhausted MAX_STEPS. Those are the ones with an impact
+  // parameter just above b_crit = 3*sqrt(3)/2: they wind around the photon
+  // sphere many times, and when the loop gives up, `velocity` is a direction
+  // half way through that winding (measured: 117 deg of deflection instead of
+  // the true 252 deg at b = 2.62). Writing it as an escaped direction feeds the
+  // star field an essentially random point on the sky, which is exactly the
+  // speckle Fix 1 would otherwise uncover once `starLod` stops fading it out.
+  //
+  // A photon still orbiting after 768 steps has passed the photon sphere far
+  // more slowly than any escaping ray: black is a much better approximation of
+  // its (infinitely thin, infinitely wound) contribution than a truncated
+  // direction, so it is folded into the shadow. With the relaxed far-field step
+  // above this band is ~2.3 px at 720p, just outside the shadow edge.
+  //
+  // The loop can only end three ways — fell in, escaped, ran out of steps — so
+  // "neither flag set" identifies the third case exactly, and after this the
+  // G-buffer never contains a sample with both flags clear.
+  if (swallowed < 0.5 && escaped < 0.5) {
+    swallowed = 1.0;
   }
 
   return GBuffer(

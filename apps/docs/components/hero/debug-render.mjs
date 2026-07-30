@@ -58,7 +58,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SETTINGS = {
   cameraY: 0.085,
   distance: 13.5,
-  diskRadius: 10.8,
+  diskRadius: 6.9,
   fov: 2.67,
   centerY: 0,
   debugView: 0,
