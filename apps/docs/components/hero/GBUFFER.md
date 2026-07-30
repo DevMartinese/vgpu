@@ -354,8 +354,7 @@ expensive one's live values.
 
 ```wgsl
 export struct StarLook {  // uniform payload, mirrored by HeroSettings.stars
-  brightness: f32, brightnessMin: f32, brightnessMax: f32,
-  density: f32, twinkle: f32,
+  brightness: f32, density: f32, contrast: f32, warmth: f32, twinkle: f32,
 }
 
 export fn shadeStars(direction: vec3f, look: StarLook, time: f32, ddx: vec3f, ddy: vec3f) -> vec3f
@@ -373,12 +372,58 @@ export fn shadeStars(direction: vec3f, look: StarLook, time: f32, ddx: vec3f, dd
   against the disk. Apart from that, `time` is the only thing that may move
   (e.g. twinkle).
 - Returns linear HDR color.
-- Star emission is `brightness * mix(brightnessMin, brightnessMax, hash)`: the
-  global `brightness` scales the complete field, while `brightnessMin` and
-  `brightnessMax` set the faintest and strongest per-star emission respectively.
-  The star hash is stable, so this does not animate the sky.
-- Stars have one uniform angular point radius. Bright anchors are distinguished
-  by emission, never by a larger footprint.
+
+##### The field itself (three species, power-law magnitudes)
+
+Three jittered cube-face cell grids, each with its own angular star size, and a
+power-law brightness distribution *inside* every one of them:
+
+| species | cells / face | fill | angular radius | = px @720p | peak | count in frame |
+|---|---|---|---|---|---|---|
+| anchors | 36 | 0.75 | 1.10e-3 rad | 1.11 (`gain` 1.0) | 1.00 | ~280 |
+| field | 93 | 0.75 | 0.70e-3 rad | 0.70 (`gain` 0.49) | 0.45 | ~1890 |
+| dust | 151 | 0.75 | 0.40e-3 rad | 0.40 (`gain` 0.16) | 0.22 | ~4980 |
+
+- **Magnitudes are drawn from truncated star counts**, `P(flux > f) ~ f^-2` on
+  `[peak / contrast, peak]`, inverted in closed form. `contrast` (the panel's
+  *magnitude range*) is the brightest:faintest ratio inside a species; at the
+  shipped `13` about 2% of a species lands within a factor of two of its peak, so
+  bright stars are rare and each reads as an individual. Slope 2 rather than the
+  Euclidean 1.5 both biases a little further towards faint stars and collapses the
+  inverse CDF to one `inverseSqrt` and the mean to `2 / (contrast + 1)` — which
+  matters at one hash per species. The tone map then spreads the ~7200 stars in a
+  1280x720 frame over roughly 25 at display 210+, 175 at 160+, 630 at 90+ and
+  ~4700 visible at all; the rest is sub-threshold texture. `contrast = 1` collapses
+  the distribution and reproduces the old uniform field.
+- `brightness` is a **pure exposure**: `stars.wgsl` owns the absolute scale
+  (`STAR_INTENSITY` plus each species' peak) and `1.0` is the calibrated look,
+  with the brightest anchors landing at the top of the ACES curve. `density`
+  multiplies every species' per-cell probability (`fill`), so it is a true
+  population knob — the previous one was clamped to 1 inside the shader and dead
+  above it, which is why the shipped `2.92` did nothing.
+- Star size varies **per species, never per star**: brightness is the hierarchy
+  inside a species, angular size is the hierarchy between them (and it is what the
+  prefilter turns into `gain`, so the three read as three distances).
+- **Colour** is a chroma-only temperature ramp, ~3900 K to ~9500 K, both ends
+  normalised to Rec.709 luma 1, blended toward white by `warmth`. Temperature
+  therefore cannot change a star's brightness at any setting. NOTE: `tonemap` in
+  `shade.wgsl` runs `SATURATION = 0`, i.e. the hero is fully desaturated on output,
+  so this is currently invisible **by construction** (measured: max channel spread
+  0 over a whole 1280x720 frame). It costs ~4 ALU per star and turns on the moment
+  that constant is lifted off zero.
+- **Gnomonic correction** — cube-face cells are equal area in `(u, v)`, not in
+  solid angle (`dOmega/dA = (1 + u^2 + v^2)^-1.5`, 1 at a face centre and 1/5.2 at
+  a cube corner). So `fill` is scaled by `(1 + u^2 + v^2)^-1.5` and the angular
+  radius by `(1 + u^2 + v^2)^0.75`: stars per steradian and angular star size are
+  both constant across the sky. Without it the frame carries a smooth 2x density
+  ramp that slides as the mouse yaws. The two factors cancel exactly in
+  `fill * (radius * cells)^2`, so the mean radiance below is uniform too — which
+  is the invariant an isotropic field must have.
+- Resolution dependence is deliberate: `gain` grows with pixel density, so a
+  sub-pixel star's peak value rises as pixels shrink (radiance is what is
+  conserved, not the pixel value). At dpr 2 the dust species crosses one pixel and
+  the field reads brighter and denser. The old field did the same; it is inherent
+  to flux-conserving point sampling.
 
 #### Lensing aliasing — the sky PREFILTER (read this before tuning stars)
 
@@ -417,7 +462,8 @@ shadow at 720p (24 % of the half-height, i.e. everything out to ~1.32 shadow
 radii), which is precisely the annulus where the lensed images pile up. The
 Einstein ring was the one thing guaranteed not to render.
 
-What replaced it lives in `stars.wgsl` (`skyFilter`, `starLayer`) and is a
+What replaced it lives in `stars.wgsl` (`skyFilter`, `resolveSpecies`,
+`starSpecies`) and is a
 flux-conserving prefilter — a cone trace of a point sky:
 
 1. **The filter is a pixel, and it is elliptical in sky space.** `shade.wgsl`
@@ -431,36 +477,65 @@ flux-conserving prefilter — a cone trace of a point sky:
    shipped camera); it turns every star into a tangential dash. Do not go back to
    a scalar.
 2. **Every star is at least one pixel wide, and pays for it in brightness.**
-   `starPixels = UNIFORM_POINT_RADIUS / sqrt(|det J|)` is the star's own radius in
-   pixels — the determinant carries both the local magnification and the
-   resolution — and `gain = min(1, starPixels^2)` is the fraction of the pixel it
-   covers, i.e. the flux-conserving dimming. This also fixes the sub-pixel
+   `starPixels = faceRadius / sqrt(|det J|)` is the star's own radius in pixels —
+   the determinant carries both the local magnification and the resolution — and
+   `gain = min(1, starPixels^2)` is the fraction of the pixel it covers, i.e. the
+   flux-conserving dimming. `faceRadius` is per SPECIES (the three have different
+   angular sizes), the determinant is per pixel, so `SkyFilter` exports
+   `pixelsPerFace = 1 / sqrt(|det J|)` and each species converts with it. This also fixes the sub-pixel
    sampling: at `>= 1 px` the 4.9e-4 f16 quantum of `gSky` no longer matters, so
    the sky stops flickering as the scene yaws, and `gSky` does not need a higher
    precision format.
-3. **Four cells per layer, not one.** A prefiltered star is wider than the margin
-   the per-cell jitter leaves, so a single-cell lookup clipped stars near a cell
-   edge into half moons; the 2x2 block also starts summing the several stars a
-   compressed pixel really contains.
+3. **One tap per species, and the population is designed around it.** Budget:
+   three `pcg3d` per pixel for the whole sky — the count this file had *before* the
+   prefilter, and a quarter of the 2x2-tap version that first shipped with it.
+   Everything the prefilter adds is per-pixel, not per-star (one cube-face
+   projection pair, one 2x2 inverse, two square roots).
+
+   A prefiltered star is at least a pixel wide, so with a single tap it has to fit
+   inside its own cell — only the pixels whose own cell owns the star can see it.
+   That is why `fill` is high and `cells` is low: a given star count is reachable
+   with many sparse cells or few crowded ones, and only the crowded layout is safe.
+   At the shipped numbers a star's radius is 0.05 / 0.12 / 0.20 of a cell at the
+   frame edge (0.09 / 0.22 / 0.36 mid-frame). Worst case — the 0.8 jitter pushing a
+   dust star to 0.1 cells from an edge — cuts the profile where the squared
+   smoothstep has already fallen to 0.25 and costs ~8% of that star's flux: a
+   brightness nudge on the faintest species, not a shape (at 1 px radius a "half
+   moon" is one pixel). Closer in, where a cell compresses to about a pixel, the
+   clip reaches ~15-20%, and that band is exactly where the mean-radiance limit
+   takes over, so it is absorbed rather than displayed. Measured cost of the whole
+   trade-off: the radial profile of the sky moves by 4-18% against the 2x2 version
+   (`/home/user/reports/stars-rewrite/`), with no visible clipping or grid.
+
+   Do not "fix" a clipping worry by making cells finer — that makes it worse. Make
+   `fill` bigger and `cells` smaller.
 4. **The mean-radiance limit.** Once a pixel spans more than a few cells along the
    footprint's major axis, no small tap count can find all the stars in it, and
    the exact band-limited value stops depending on which ones they are:
-   `mean = magnitude * density * STAR_FLUX_AREA * (UNIFORM_POINT_RADIUS * cells)^2`
-   — a constant, the layer's own surface brightness, with the footprint cancelled
-   out. That is Liouville again, and it is what `starLayer` cross-fades to between
-   1 and 3 cells per pixel, per layer (the 34-, 92- and 210-cell grids alias at
-   very different rates, which is exactly what one global threshold could not
-   express). The old comment called this mean "essentially black"; it is small,
+   `mean = peak * E[flux] * fill * STAR_FLUX_AREA * (faceRadius * cells)^2`
+   — a constant, the species' own surface brightness, with the footprint cancelled
+   out. That is Liouville again, and it is what `starSpecies` cross-fades to
+   between 1 and 3 cells per pixel, per species (the 36-, 93- and 151-cell grids
+   alias at very different rates, which is exactly what one global threshold could
+   not express). `E[flux] = 2 / (contrast + 1)` is the closed-form mean of the
+   count distribution, so the limit stays exact for any panel setting. The old comment called this mean "essentially black"; it is small,
    but it is the same brightness the unlensed sky already has, which is why fading
    past it left a visible hole.
 
-Measured effect on the sky alone (`--disk.brightness 0`, 1280x720, radial mean of
-the de-gamma'd image): the 170–230 px band goes from **exactly 0** to
-`0.5–1.5e-4`, the far field (>= 410 px) is unchanged within +/-13 %, and the
-transition band (250–390 px) reads 0.2–0.8x of the old value because the same
-flux is now spread over many faint pixels instead of a few bright ones (ACES
-compresses the faint end, so display-space energy drops even though radiance is
-conserved).
+Measured effect of the prefilter itself on the sky alone (`--disk.brightness 0`,
+1280x720, radial mean of the de-gamma'd image): the 170–230 px band goes from
+**exactly 0** to `0.5–1.5e-4`, the far field (>= 410 px) is unchanged within
++/-13 %, and the transition band (250–390 px) reads 0.2–0.8x of the old value
+because the same flux is now spread over many faint pixels instead of a few bright
+ones (ACES compresses the faint end, so display-space energy drops even though
+radiance is conserved).
+
+Measured effect of the **field rewrite** on top of that (same method, uniform field
+-> three species with power-law magnitudes): the far field drops to 0.55x and the
+190–270 px ring band to 0.6-0.8x, i.e. the ring band gained ~30% *relative* to the
+far field. The old field reached its brightness by carpeting the sky in ~6000
+identical near-threshold dots; the new one spends the same order of flux on a
+distribution, which is dimmer in total and reads far brighter per star.
 
 Prerequisite, and the reason the two fixes ship together: the out-of-steps rays
 just outside the shadow (see the `flags` bullet in the layout section) used to be
@@ -599,10 +674,10 @@ image as the page.
 
 | Geometry (re-bakes) | | Disk (per frame) | | Stars (per frame) | |
 |---|---|---|---|---|---|
-| `cameraY` | `0.085` | `brightness` | `0.098` | `brightness` (global) | `3` |
-| `distance` | `13.5` | `speed` | `0.75` | `brightnessMin` | `4` |
-| `diskRadius` | `6.9` | `stretch` | `5.75` | `brightnessMax` | `4` |
-| `fov` | `2.67` | `detail` | `3.44` | `density` | `2.92` |
+| `cameraY` | `0.085` | `brightness` | `0.098` | `brightness` (exposure) | `1` |
+| `distance` | `13.5` | `speed` | `0.75` | `density` | `1` |
+| `diskRadius` | `6.9` | `stretch` | `5.75` | `contrast` (magnitude range) | `13` |
+| `fov` | `2.67` | `detail` | `3.44` | `warmth` (colour temperature) | `0.5` |
 | `centerY` | `0` | `turbulence` | `4.46` | `twinkle` | `0` |
 | | | `density` | `1.38` | | |
 | | | `doppler` | `1.21` | | |
@@ -617,17 +692,17 @@ Two things to know about these values:
   internal gain, so the useful range of this knob is near zero; its slider is
   `0..0.6` with a `0.002` step for that reason. If `disk.wgsl` ever rebalances
   its gain, this default has to be re-picked with it.
-- **The three star brightness defaults are deliberately pinned at their slider
-  maximums** (`brightness` `3` of `0..3`, `brightnessMin` and `brightnessMax` `4`
-  of `0..4`) because the design calls for the brightest possible field. Two
-  consequences worth knowing before you touch them:
-  - `brightnessMin === brightnessMax` makes emission
-    `brightness * mix(min, max, hash)` independent of the per-star hash, so every
-    star renders at **identical** brightness. Drop `brightnessMin` to restore the
-    faint end and the variation.
-  - Being pinned, they cannot be tuned upward from the panel. If the field needs
-    to go brighter still, widen the slider in `hero-black-hole.tsx` rather than
-    assuming the look is maxed out.
+- **The star defaults sit mid-slider on purpose**, unlike the pinned-at-maximum
+  set they replace (`brightness 3` of `0..3` with `brightnessMin === brightnessMax
+  === 4`, which made every star identical, plus a `density 2.92` the shader
+  clamped to 1 — three effectively dead knobs). Now `brightness` is a pure
+  exposure with `1.0` calibrated and headroom to `3`, and `density` scales the
+  per-cell probability directly. Two things to know:
+  - `density` is honest up to ~1.3; past that the species saturate one by one as
+    `fill * density` clamps at 1 (the shipped `fill` is `0.75` for all three), so
+    the slider's top end compresses rather than dying.
+  - `warmth` is a no-op in the shipped image because `tonemap` runs
+    `SATURATION = 0`. It is not broken — see the `stars.wgsl` section.
 - Every other default is kept with headroom on both sides, and each defaults
   revision has needed the check: `detail`/`turbulence` were once pinned at their
   maximum, and the star sliders themselves were widened from `0..1` / `0..3` to a
@@ -870,7 +945,7 @@ node apps/docs/components/hero/debug-render.mjs                        # all vie
 node apps/docs/components/hero/debug-render.mjs --size 960x540 --time 4
 node apps/docs/components/hero/debug-render.mjs --views final,density
 node apps/docs/components/hero/debug-render.mjs --disk.stretch 3 --disk.detail 1.6
-node apps/docs/components/hero/debug-render.mjs --stars.density 2 --stars.twinkle 0.5
+node apps/docs/components/hero/debug-render.mjs --stars.density 2 --stars.contrast 40
 node apps/docs/components/hero/debug-render.mjs --diskRadius 12 --cameraY 0.3
 node apps/docs/components/hero/debug-render.mjs --set '{"disk":{"brightness":2}}' --json
 node apps/docs/components/hero/debug-render.mjs --views final,hit2                 # second-hit check

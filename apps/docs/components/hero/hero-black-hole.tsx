@@ -284,15 +284,23 @@ export function HeroBlackHole() {
       diskSpares.add(settings.disk, 'spare3', -2, 2, 0.01).name('disk spare 3');
 
       // --- stars.wgsl owns this block (StarLook) ---
-      const stars = panel.addFolder('stars (per frame)').close();
-      // Per-star emission is `brightness * mix(brightness min, brightness max, hash)`.
-      stars.add(settings.stars, 'brightness', 0, 3, 0.01).name('brightness (global)');
-      // Shared 0..4 scale: min and max are the two ends of one emission range,
-      // so a common axis makes them comparable. It also leaves headroom over the
-      // shipped defaults (1 and 2.93), which were pinned at the old 1 / 3 tops.
-      stars.add(settings.stars, 'brightnessMin', 0, 4, 0.01).name('brightness min');
-      stars.add(settings.stars, 'brightnessMax', 0, 4, 0.01).name('brightness max');
-      stars.add(settings.stars, 'density', 0, 6, 0.01).name('density');
+      const stars = panel.addFolder('star field (per frame)').close();
+      // Pure exposure: stars.wgsl owns the absolute scale, and 1.0 is the
+      // calibrated look (brightest anchors at the top of the ACES curve).
+      stars.add(settings.stars, 'brightness', 0, 3, 0.01).name('exposure');
+      // A real population multiplier: it scales each species' per-cell
+      // probability, so the whole 0..2.5 range moves the star count (the old
+      // slider was clamped to 1 inside the shader and dead above it). The three
+      // species saturate at different points past ~2.2.
+      stars.add(settings.stars, 'density', 0, 2.5, 0.01).name('density');
+      // Dynamic range of the power law the magnitudes are drawn from. 1 = every
+      // star identical (the old look); 30 = the shipped sky; higher = starker,
+      // with rarer bright stars over a fainter wash.
+      stars.add(settings.stars, 'contrast', 1, 80, 0.5).name('magnitude range');
+      // Chroma-only per-star colour temperature (warm K/M <-> blue-white B/A).
+      // Currently a no-op in the final image: `tonemap` in shade.wgsl runs
+      // SATURATION = 0, which desaturates the hero completely.
+      stars.add(settings.stars, 'warmth', 0, 1, 0.01).name('colour temperature');
       stars.add(settings.stars, 'twinkle', 0, 1, 0.01).name('twinkle');
 
       const debug = panel.addFolder('debug');
@@ -304,7 +312,7 @@ export function HeroBlackHole() {
         'flags (hit/hole/sky)': 3,
         'lensed ray dir': 4,
         'disk density': 5,
-        'sky footprint / star LOD': 6,
+        'sky footprint / prefilter': 6,
         'second disk hit': 7,
       }).name('g-buffer view');
       // A/B for the second baked disk crossing: 1 shows what the renderer looked

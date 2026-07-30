@@ -43,13 +43,18 @@ export interface DiskLook {
  * Field names must match the WGSL struct one to one.
  */
 export interface StarLook {
-  /** Global multiplier for all hash-mapped star emission. */
+  /** Global exposure of the whole field; 1.0 is the tuned look. */
   brightness: number;
-  /** Emission assigned to the faintest star before `brightness`. */
-  brightnessMin: number;
-  /** Emission assigned to the strongest star before `brightness`. */
-  brightnessMax: number;
+  /** Population multiplier on every species' per-cell probability. */
   density: number;
+  /**
+   * Brightest-to-faintest flux ratio inside one species — the dynamic range of
+   * the power law the field's magnitudes are drawn from. Higher = a starker sky
+   * (rarer bright stars, more of the population below the visual threshold).
+   */
+  contrast: number;
+  /** Amount of per-star colour temperature; 0 = every star neutral white. */
+  warmth: number;
   twinkle: number;
 }
 
@@ -122,15 +127,21 @@ export function defaultHeroSettings(): HeroSettings {
       spare3: 0.69,
     },
     stars: {
-      // All three brightness knobs ship pinned at the top of their sliders
-      // (0..3, 0..4, 0..4). Note min === max: emission is
-      // `brightness * mix(min, max, hash)`, so the per-star hash stops mattering
-      // and every star renders at the same brightness. That is intentional —
-      // lower `brightnessMin` to bring the faint end, and the variation, back.
-      brightness: 3,
-      brightnessMin: 4,
-      brightnessMax: 4,
-      density: 2.92,
+      // The field is calibrated so that `brightness: 1` IS the intended look:
+      // stars.wgsl folds in its own `STAR_INTENSITY` and every species' peak, so
+      // this knob is a pure exposure and 1.0 puts the brightest anchors right at
+      // the top of the ACES curve. `density` is a true population multiplier now
+      // (it scales each species' per-cell probability, not a value that gets
+      // clamped away), and `contrast` is the brightest:faintest ratio of the
+      // power law the magnitudes come from.
+      brightness: 1,
+      density: 1,
+      contrast: 13,
+      // Chroma-only star temperature. NOTE the shipped tone map runs
+      // `SATURATION = 0` (shade.wgsl), so this is currently invisible by
+      // construction; it costs ~4 ALU per star and turns on the moment that
+      // constant is lifted.
+      warmth: 0.5,
       twinkle: 0,
     },
   };

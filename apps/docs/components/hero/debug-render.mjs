@@ -30,7 +30,7 @@
 //   --bakeYaw <radians>  CAMERA yaw baked into the G-buffer (default 0). Ground truth
 //                        for the rotation: `--yaw t` must match `--bakeYaw -t`.
 //   --disk.<key> <v>     any DiskLook field (brightness, speed, stretch, detail, ...)
-//   --stars.<key> <v>    any StarLook field (brightness, density, twinkle, ...)
+//   --stars.<key> <v>    any StarLook field (brightness, density, contrast, warmth, twinkle)
 //   --noiseSize <n>      edge of the tiled 3D noise lattice (default 64; try 128 to
 //                        A/B whether the tiling repeats visibly)
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
@@ -80,12 +80,12 @@ const DEFAULT_SETTINGS = {
     spare3: 0.69,
   },
   stars: {
-    // Pinned at the slider tops; min === max collapses the per-star variation.
-    // Keep in sync with defaultHeroSettings() in renderer.ts.
-    brightness: 3,
-    brightnessMin: 4,
-    brightnessMax: 4,
-    density: 2.92,
+    // `brightness: 1` is the calibrated look (stars.wgsl owns the absolute
+    // scale). Keep in sync with defaultHeroSettings() in renderer.ts.
+    brightness: 1,
+    density: 1,
+    contrast: 13,
+    warmth: 0.5,
     twinkle: 0,
   },
 };
