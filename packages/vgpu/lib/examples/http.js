@@ -1,10 +1,14 @@
 import { network, integrity } from './errors.js';
 export const LIMITS={discovery:32768,index:1048576,manifest:262144,file:2097152,pull:33554432};
+// Hosts the CLI will talk to. vgpu.sh is the official origin; vgpu.labs.vercel.dev stays
+// accepted for --base-url during the migration. www.vgpu.sh is deliberately NOT trusted:
+// it redirects to the apex, and requestBytes uses redirect:'error', so it can never work.
+export const TRUSTED_HOSTS=['vgpu.sh','vgpu.labs.vercel.dev'];
 export function trustedOrigin(baseUrl) {
  let u; try{u=new URL(baseUrl);}catch{throw integrity('Invalid examples API origin');}
  const loop=['127.0.0.1','localhost','::1'].includes(u.hostname);
  if (u.protocol!=='https:' && !(u.protocol==='http:'&&loop)) throw integrity('Examples API requires HTTPS');
- if (!loop && (u.hostname!=='vgpu.labs.vercel.dev'||u.port)) throw integrity('Untrusted examples API host');
+ if (!loop && (!TRUSTED_HOSTS.includes(u.hostname)||u.port)) throw integrity('Untrusted examples API host');
  if(u.username||u.password||u.search||u.hash) throw integrity('Invalid examples API origin');
  return u.origin;
 }

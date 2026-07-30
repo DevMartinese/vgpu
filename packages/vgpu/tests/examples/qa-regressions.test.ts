@@ -13,7 +13,7 @@ import { pullExample } from "../../lib/examples/pull.js";
 import { runExamples } from "../../lib/examples/run.js";
 const cleanup:(()=>Promise<void>)[]=[];afterEach(async()=>{while(cleanup.length)await cleanup.pop()!()});
 async function temp(prefix:string){const p=await mkdtemp(join(tmpdir(),prefix));cleanup.push(()=>rm(p,{recursive:true,force:true}));return p}
-const rev="a".repeat(64),sha="b".repeat(64),origin="https://vgpu.labs.vercel.dev";
+const rev="a".repeat(64),sha="b".repeat(64),origin="https://vgpu.sh";
 
 test("cache rejects symlinked root, intermediate, and leaf on reads and writes",async()=>{const base=await temp("cache-links-"),outside=await temp("cache-outside-");await symlink(outside,join(base,"root-link"));const rootLink=new ExamplesCache(join(base,"root-link"));await expect(rootLink.write(rootLink.discoveryPath(),Buffer.from("x"))).rejects.toMatchObject({code:"VGPU-EXAMPLES-FILESYSTEM"});
  const cache=new ExamplesCache(join(base,"cache"));await cache.write(cache.discoveryPath(),Buffer.from("ok"));await symlink(outside,join(cache.root,"v1"));await expect(cache.write(cache.indexPath(rev),Buffer.from("escape"))).rejects.toMatchObject({code:"VGPU-EXAMPLES-FILESYSTEM"});await rm(join(cache.root,"v1"));await mkdir(cache.revisionDir(rev),{recursive:true});await writeFile(join(outside,"object"),"outside");await symlink(join(outside,"object"),cache.indexPath(rev));await expect(cache.read(cache.indexPath(rev))).rejects.toMatchObject({code:"VGPU-EXAMPLES-FILESYSTEM"});await expect(cache.write(cache.indexPath(rev),Buffer.from("replace"))).rejects.toMatchObject({code:"VGPU-EXAMPLES-FILESYSTEM"});expect(await readFile(join(outside,"object"),"utf8")).toBe("outside")});

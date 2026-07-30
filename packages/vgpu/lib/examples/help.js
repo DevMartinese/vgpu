@@ -1,6 +1,6 @@
 export const examplesHelp = `vgpu examples — inspect canonical gallery source (never executes code)
 
-Official origin: https://vgpu.labs.vercel.dev
+Official origin: https://vgpu.sh
 
 Usage:
   vgpu examples search <query> [--any] [--limit <n>] [--revision <sha256>] [--offline] [--pretty]
