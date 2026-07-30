@@ -127,8 +127,11 @@ export default function HomePage() {
         </section>
 
         <section className="mx-auto mb-24 mt-24 max-w-6xl px-6 lg:px-12">
-          <div className="mb-6 flex items-center justify-between gap-4">
-            <h2 className="text-2xl text-gray-12">Examples</h2>
+          {/* The heading carries the same type classes as the other two
+              sections; the bottom margin lives on this row instead of on the
+              h2 so the "View all" link is spaced with it. */}
+          <div className="mb-10 flex items-center justify-between gap-4">
+            <h2 className="text-2xl text-gray-12 md:text-3xl">Examples</h2>
             <Link href="/examples" className="text-sm text-gray-9 transition-colors hover:text-gray-12">View all →</Link>
           </div>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -158,7 +161,7 @@ export default function HomePage() {
         </section>
 
         <section className="mx-auto max-w-6xl px-6 lg:px-12">
-          <h2 className="mb-12 text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
+          <h2 className="mb-10 text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
           <div className="grid gap-4 md:grid-cols-2">
             {docLinks.map(([href, title, description]) => (
               <Link key={href} href={href} className="group rounded-lg border border-gray-4 bg-gray-1 p-6 transition-all hover:border-gray-5">
