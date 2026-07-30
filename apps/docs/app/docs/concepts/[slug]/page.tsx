@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { MarkdownContent } from '@/components/markdown-content';
 import { getConceptPage, conceptSlugs } from '@/lib/concepts';
 import { apiRecords, recordHref } from '@/lib/manifest';
+import { docsHref } from '@/lib/nav';
 
 interface ConceptPageProps {
   params: Promise<{ slug: string }>;
@@ -20,10 +21,6 @@ export async function generateMetadata({ params }: ConceptPageProps) {
     title: concept.frontmatter.title,
     description: concept.frontmatter.summary,
   };
-}
-
-function docsHref(href: string) {
-  return `/docs${href}`;
 }
 
 export default async function ConceptPage({ params }: ConceptPageProps) {

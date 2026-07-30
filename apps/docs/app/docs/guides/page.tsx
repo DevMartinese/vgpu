@@ -2,15 +2,12 @@ import Link from 'next/link';
 import { DocsPageShell } from '@/components/docs-page-shell';
 import type { Metadata } from 'next';
 import { guideRecords, recordHref, titleForRecord } from '@/lib/manifest';
+import { docsHref } from '@/lib/nav';
 
 export const metadata: Metadata = {
   title: 'Guides',
   description: 'Task-oriented guides for using vgpu effectively.',
 };
-
-function docsHref(href: string) {
-  return `/docs${href}`;
-}
 
 export default function GuidesPage() {
   return (

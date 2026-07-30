@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { MarkdownContent } from '@/components/markdown-content';
 import { getContentPage, collectionSlugs } from '@/lib/concepts';
 import { apiRecords, recordHref } from '@/lib/manifest';
+import { docsHref } from '@/lib/nav';
 
 interface GetStartedPageProps {
   params: Promise<{ slug: string }>;
@@ -20,10 +21,6 @@ export async function generateMetadata({ params }: GetStartedPageProps) {
     title: page.frontmatter.title,
     description: page.frontmatter.summary,
   };
-}
-
-function docsHref(href: string) {
-  return `/docs${href}`;
 }
 
 export default async function GetStartedSlugPage({ params }: GetStartedPageProps) {

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { DocsPageShell } from '@/components/docs-page-shell';
 import type { Metadata } from 'next';
 import { referenceGroups, recordHref } from '@/lib/manifest';
+import { docsHref } from '@/lib/nav';
 
 export const metadata: Metadata = {
   title: 'Reference',
@@ -9,10 +10,6 @@ export const metadata: Metadata = {
 };
 
 const featuredSymbols = ['init', 'Gpu', 'Effect', 'Draw', 'Compute', 'Frame', 'Bundle', 'Target', 'SharedUniforms', 'PingPongStorage'];
-
-function docsHref(href: string) {
-  return `/docs${href}`;
-}
 
 export default function ReferencePage() {
   const allRecords = referenceGroups.flatMap((group) => group.records);

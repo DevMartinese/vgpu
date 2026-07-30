@@ -58,6 +58,12 @@ const nextConfig = {
       { source: '/reference', destination: '/docs/reference', permanent: false },
       { source: '/reference/:path*', destination: '/docs/reference/:path*', permanent: false },
       { source: '/cli', destination: '/docs/cli', permanent: false },
+      // ML shipped after the /docs restructure and never got its pair. The topic
+      // markdown links between its pages with logical paths (/ml/browser and
+      // friends, straight out of docs/topics/ml.docs.md), exactly like every other
+      // section does, so without these it is the one section whose cross-links 404.
+      { source: '/ml', destination: '/docs/ml', permanent: false },
+      { source: '/ml/:path*', destination: '/docs/ml/:path*', permanent: false },
       { source: '/api', destination: '/docs/reference', permanent: false },
       { source: '/packages', destination: '/docs/reference', permanent: false },
       { source: '/packages/vgpu/Pass', destination: '/docs/reference/vgpu/effect#effect', permanent: false },

@@ -1,14 +1,10 @@
 import Link from 'next/link';
-import type { NavItem } from '@/lib/nav';
+import { docsHref, type NavItem } from '@/lib/nav';
 
 interface PageNavigationProps {
   prev: NavItem | null;
   next: NavItem | null;
   docs?: boolean;
-}
-
-function docsHref(href: string) {
-  return href === '/examples' ? href : `/docs${href}`;
 }
 
 export function PageNavigation({ prev, next, docs = false }: PageNavigationProps) {

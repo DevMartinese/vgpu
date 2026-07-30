@@ -79,7 +79,7 @@ export function HeroTabs() {
         {tabs.map((tab, index) => (
           <Fragment key={tab}>
             {index > 0 && (
-              <span aria-hidden className="px-2 text-white/30">
+              <span aria-hidden className="px-2 text-white">
                 ·
               </span>
             )}

@@ -1,13 +1,9 @@
 import Link from 'next/link';
-import type { NavItem } from '@/lib/nav';
+import { docsHref, type NavItem } from '@/lib/nav';
 
 interface BreadcrumbsProps {
   items: NavItem[];
   docs?: boolean;
-}
-
-function docsHref(href: string) {
-  return href === '/examples' ? href : `/docs${href}`;
 }
 
 export function Breadcrumbs({ items, docs = false }: BreadcrumbsProps) {

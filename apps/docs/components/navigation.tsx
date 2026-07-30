@@ -3,13 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { navSections, type NavGroup, type NavItem, type NavSection } from '@/lib/nav';
+import { docsHref, navSections, type NavGroup, type NavItem, type NavSection } from '@/lib/nav';
 import { PackageNav } from './package-nav';
 import { Wordmark } from './wordmark';
-
-function docsHref(href: string) {
-  return href === '/examples' ? href : `/docs${href}`;
-}
 
 export function Navigation() {
   const pathname = usePathname();
@@ -58,7 +54,10 @@ export function Navigation() {
                 section={section}
                 pathname={navPathname}
                 onNavigate={() => setMobileMenuOpen(false)}
-                className={idx > 0 ? 'mt-4' : ''}
+                /* mt-3, not mt-4: the section rows grew from py-1 to py-1.5 for a
+                   more forgiving target, and the gap between sections gives that
+                   height back so the menu stays the same length overall. */
+                className={idx > 0 ? 'mt-3' : ''}
               />
             ))}
           </nav>
@@ -114,7 +113,7 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
           aria-current={pathname === section.href ? 'page' : undefined}
           /* Same full-row target and hover as the collapsible sections below,
              so a flat section does not feel different to hit. */
-          className={`${titleClassName} block rounded-md px-3 py-1 transition-colors hover:bg-gray-1 hover:text-gray-12`}
+          className={`${titleClassName} block rounded-md px-3 py-1.5 transition-colors hover:bg-gray-1 hover:text-gray-12`}
         >
           {section.title}
         </Link>
@@ -131,12 +130,12 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
           for a section with no page of its own), chevron collapses — they stay
           siblings rather than nesting, since a button inside a link is invalid
           and would swallow the collapse click. */}
-      <div className="group mb-1 flex items-center rounded-md transition-colors hover:bg-gray-1">
+      <div className="group mb-0.5 flex items-center rounded-md transition-colors hover:bg-gray-1">
         {section.href ? (
           <Link
             href={docsHref(section.href)}
             onClick={onNavigate}
-            className={`${titleClassName} flex-1 py-1 pl-3 hover:text-gray-12`}
+            className={`${titleClassName} flex-1 py-1.5 pl-3 hover:text-gray-12`}
           >
             {section.title}
           </Link>
@@ -144,7 +143,7 @@ function NavSectionBlock({ section, pathname, onNavigate, className }: NavSectio
           <button
             type="button"
             onClick={() => setManualOpen(!open)}
-            className={`${titleClassName} flex-1 py-1 pl-3 text-left hover:text-gray-12`}
+            className={`${titleClassName} flex-1 py-1.5 pl-3 text-left hover:text-gray-12`}
           >
             {section.title}
           </button>

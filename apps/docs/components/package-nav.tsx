@@ -2,11 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import type { NavGroup, NavItem } from '@/lib/nav';
-
-function docsHref(href: string) {
-  return href === '/examples' ? href : `/docs${href}`;
-}
+import { docsHref, type NavGroup, type NavItem } from '@/lib/nav';
 
 interface PackageNavProps {
   groups: NavGroup[];
