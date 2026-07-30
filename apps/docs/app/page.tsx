@@ -64,7 +64,7 @@ export default function HomePage() {
             className="pointer-events-none absolute inset-x-0 top-1/2 z-[1] h-[62%] -translate-y-1/2"
             style={{
               background:
-                'radial-gradient(ellipse 50% 50% at 50% 50%, #000 31%, rgba(0,0,0,0) 100%)',
+                'radial-gradient(ellipse 50% 50% at 50% 50%, #000 31%, rgba(0,0,0,0) 60%)',
             }}
           />
 
@@ -99,10 +99,10 @@ export default function HomePage() {
               pointer-events is inherited. */}
           <div
             data-hero-overlay
-            className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-8 px-6 lg:gap-10"
+            className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-10 px-6 lg:gap-12"
           >
             <h1
-              className="pointer-events-auto max-w-[798px] text-center font-light leading-[1.4] text-white"
+              className="pointer-events-auto max-w-[798px] text-center font-light leading-[1.25] text-white"
               /* Sized off the viewport HEIGHT, not the width: the tagline has
                  to stay inside the black hole's shadow, and the shadow is a
                  circle scaled by the shorter axis. 2.4svh = 21.6px at 900px
