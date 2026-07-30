@@ -300,9 +300,16 @@ time them, under **perf A/B (disk noise + precision)**:
 
 | Control | What it does |
 |---|---|
-| `shade variant` | `analytic (control)` = eight inline hashes (the pre-optimization code, verbatim); `tiled volume` = one trilinear fetch (ships); `tiled + f16` = the tiled path with the noise/emission arithmetic in half precision. Instant, no re-bake. |
-| `measure frame time` | Times ~180 frames of the real loop and writes the headline to `last measurement`; the full result goes to the console. |
-| `A/B all variants` | Measures every available arm back to back and prints the chained ratios (`analytic → tiled` is the volume win, `tiled → tiled+f16` is the precision one). Prefer this — it removes the transcription step and keeps all arms on the same thermal state. |
+| **`▶ measure (A/B all)`** | The whole harness, one click. Times ~180 frames of the real loop for every arm the device can run, back to back, then prints the chained verdict (`analytic → tiled` is the volume win, `tiled → tiled+f16` is the precision one) plus the full JSON, and puts that JSON on the clipboard. Nothing else needs to be touched to produce a reportable number. |
+| `last measurement` | The verdict, with `(copied)` when the clipboard has it. If the page lost focus during the run the browser refuses the write, so it says `(click the page to copy)` and the next click anywhere does it. |
+| `one variant at a time` (closed) | `shade variant` switches arms — `analytic (control)` = eight inline hashes (the pre-optimization code, verbatim); `tiled volume` = one trilinear fetch (ships); `tiled + f16` = the tiled path with the noise/emission arithmetic in half precision. Instant, no re-bake. `measure this variant` times only that one. For LOOKING at an arm; two arms measured minutes apart, at different thermal states, are not a comparison. |
+
+What lands on the clipboard is the pasteable form of the whole run: the verdict
+string, every arm's full `MeasureResult` (both medians, both means, sample count,
+method, resolution), and the context nobody remembers to include — timestamp,
+user agent, `devicePixelRatio` and which variants the adapter could compile. The
+console gets the identical text: `JSON.stringify(..., null, 2)`, never the raw
+object, because Chrome copies a logged object as the literal string `{...}`.
 
 `tiled + f16` only appears when the adapter offers the `shader-f16` device
 feature. When it does not, the dropdown lists two arms and the panel says so in a

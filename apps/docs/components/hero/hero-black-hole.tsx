@@ -139,6 +139,220 @@ export function HeroBlackHole() {
       const panel = new GUI({ title: 'black hole' });
       panel.domElement.style.top = '72px';
 
+      // --- perf A/B ---------------------------------------------------------
+      // Deliberately the FIRST folder: everything below it is a knob you go
+      // looking for, and this is the one control whose entire value is that you
+      // do not have to. Open `?debug`, click the button at the top, paste.
+      //
+      // One independently compiled shade pipeline per variant (see
+      // precision.mjs). Switching is a pipeline swap, not a re-bake: the G-buffer
+      // is pure geometry and knows nothing about the disk's noise or precision.
+      //
+      // The list comes from the RENDERER, not from this file: `tiled-f16` only
+      // exists if the adapter offered `shader-f16`, and offering an option that
+      // silently draws `tiled` instead would fake a measurement.
+      const variants = rendererRef.current?.availableVariants() ?? [];
+      const perf = panel.addFolder('perf A/B (disk noise + precision)');
+      const readout = { result: 'press "measure (A/B all)"' };
+      let busy = false;
+      /** A copy waiting for the page to be clicked back into focus (see `publish`). */
+      let pendingCopy: (() => void) | null = null;
+
+      /**
+       * Pasted measurements come from machines nobody here can inspect, and the
+       * first two questions are always "which GPU" and "at what resolution".
+       * The second is in every `MeasureResult`; this answers the first as far as
+       * a page is allowed to, and records which arms the device could even run.
+       */
+      const measurementContext = () => ({
+        when: new Date().toISOString(),
+        userAgent: navigator.userAgent,
+        devicePixelRatio: window.devicePixelRatio,
+        variantsAvailable: variants,
+      });
+
+      /**
+       * Copies text, with a hard time limit and a fallback. Returns whether the
+       * clipboard actually ended up holding it.
+       *
+       * `navigator.clipboard.writeText` does not merely REJECT when the browser
+       * is unhappy about focus: it can stay pending forever (observed here in a
+       * Chromium window that never took OS focus), and an `await` on it would
+       * leave the panel frozen on the previous headline with no explanation.
+       * Hence the race. The `execCommand` fallback after it is deprecated but
+       * synchronous, so it cannot hang, and it still works in the case the
+       * async API is fussiest about — a page that has not been clicked recently,
+       * which is exactly where a measurement lands after running for ~20 s.
+       */
+      const copyText = async (text: string): Promise<boolean> => {
+        try {
+          if (navigator.clipboard) {
+            const written = navigator.clipboard.writeText(text).then(() => true);
+            const timeout = new Promise<boolean>((resolve) => { window.setTimeout(() => resolve(false), 1500); });
+            if (await Promise.race([written, timeout])) return true;
+          }
+        } catch {
+          // Fall through: a rejection and a timeout deserve the same second try.
+        }
+        const scratch = document.createElement('textarea');
+        scratch.value = text;
+        // Off-screen but focusable and selectable — `execCommand('copy')` copies
+        // the selection, so the node has to be in the document and not hidden.
+        Object.assign(scratch.style, { position: 'fixed', top: '0', left: '-9999px', opacity: '0' });
+        document.body.appendChild(scratch);
+        scratch.select();
+        try {
+          return document.execCommand('copy');
+        } catch {
+          return false;
+        } finally {
+          scratch.remove();
+        }
+      };
+
+      /**
+       * Where a finished measurement goes: the console AND the clipboard.
+       *
+       * The console gets `JSON.stringify(payload, null, 2)` rather than the
+       * object, because Chrome copies a logged object as the literal text
+       * `{...}` — the single thing anyone wants to do with a measurement, paste
+       * it somewhere, silently produced nothing. Stringifying also freezes the
+       * values at log time instead of leaving DevTools to expand them later.
+       *
+       * The clipboard write is best effort and SAYS SO when it fails instead of
+       * claiming a copy that did not happen: `writeText` rejects on a document
+       * that lost focus, and a full A/B run takes several seconds per arm —
+       * plenty of time to click away. The console line is the fallback.
+       */
+      const publish = async (headline: string, payload: unknown): Promise<void> => {
+        const json = JSON.stringify(payload, null, 2);
+        console.log(`[hero] ${headline}\n${json}`);
+        if (await copyText(json)) {
+          readout.result = `${headline} (copied)`;
+          return;
+        }
+        // The clipboard refuses to write for a page that is not the focused one,
+        // and a full A/B run takes ~20 s — clicking away during it is normal, so
+        // this is a routine outcome rather than an error. Instead of sending the
+        // reader to DevTools, arm a one-shot retry on the next click anywhere:
+        // that click restores focus, and the copy the reader asked for happens
+        // one gesture later instead of not at all.
+        readout.result = `${headline} (click the page to copy)`;
+        console.warn('[hero] clipboard blocked because the page was not focused — click the page to copy it, or take the JSON above');
+        if (pendingCopy) window.removeEventListener('pointerdown', pendingCopy);
+        pendingCopy = () => {
+          pendingCopy = null;
+          void copyText(json).then((ok) => {
+            readout.result = `${headline} ${ok ? '(copied)' : '(NOT copied — JSON is in the console)'}`;
+          });
+        };
+        window.addEventListener('pointerdown', pendingCopy, { once: true });
+      };
+
+      /**
+       * Runs one measurement of whatever variant is currently selected.
+       *
+       * Reports the headline into the panel field and returns the result; it
+       * does NOT publish, because during an A/B run the thing worth putting on
+       * the clipboard is the whole comparison, not its last arm.
+       */
+      const runMeasure = async (label?: string): Promise<MeasureResult | undefined> => {
+        const renderer = rendererRef.current;
+        if (!renderer || busy) return undefined;
+        busy = true;
+        readout.result = `measuring ${label ?? settings.diskNoise}…`;
+        try {
+          const result = await renderer.measure();
+          readout.result = formatMeasurement(result);
+          if (result.vsyncCapped) {
+            console.warn(
+              '[hero] wall-clock is vsync-capped — the frame is waiting for the display, so ms/frame ' +
+              'cannot separate the variants. Compare the GPU number instead.',
+            );
+          }
+          return result;
+        } catch (error) {
+          readout.result = 'failed — see console';
+          console.error('[hero] measure failed', error);
+          return undefined;
+        } finally {
+          busy = false;
+        }
+      };
+
+      const perfActions = {
+        /**
+         * The whole harness in one click: measures every arm this device can
+         * actually run, back to back, and publishes the chained verdict.
+         *
+         * Worth having over "switch, measure, write it down, switch back": it
+         * removes the transcription step and, more importantly, it measures all
+         * arms seconds apart on the same thermal state, which is the main way a
+         * hand-run A/B goes wrong.
+         */
+        measureAll: () => {
+          void (async () => {
+            const restore = settings.diskNoise;
+            const refresh = () => panel.controllersRecursive().forEach((c) => c.updateDisplay());
+            const results: MeasureResult[] = [];
+            for (const variant of variants) {
+              settings.diskNoise = variant;
+              refresh();
+              const result = await runMeasure(variant);
+              if (!result) { settings.diskNoise = restore; refresh(); return; }
+              // Progress only — the full JSON is published once, at the end.
+              console.log(`[hero] ${formatMeasurement(result)}`);
+              results.push(result);
+            }
+            settings.diskNoise = restore;
+            refresh();
+            const verdict = formatComparison(results);
+            await publish(`A/B ${verdict}`, { ...measurementContext(), verdict, results });
+          })();
+        },
+        /** One arm, for staring at a variant while tuning it. */
+        measureOne: () => {
+          void (async () => {
+            const result = await runMeasure();
+            if (result) await publish(formatMeasurement(result), { ...measurementContext(), result });
+          })();
+        },
+      };
+
+      // Styled as the primary action rather than being one of three equal rows:
+      // the previous layout made a one-click flow look like a three-step one.
+      const primary = perf.add(perfActions, 'measureAll').name('▶ measure (A/B all)');
+      const primaryButton = primary.domElement.querySelector('button');
+      if (primaryButton) {
+        Object.assign(primaryButton.style, {
+          background: '#1f6feb',
+          color: '#fff',
+          fontWeight: '600',
+          height: '30px',
+        });
+      }
+      // Disabled = read-only text field. `.listen()` polls the object, so the
+      // async handlers above can just assign to `readout.result`.
+      perf.add(readout, 'result').name('last measurement').disable().listen();
+      // Say WHY the f16 arm is missing rather than leaving a hole in the list: on
+      // an adapter without `shader-f16` the variant cannot be compiled at all,
+      // and a reader comparing notes with someone else's machine needs to know
+      // that is the reason and not a mistake.
+      if (!variants.includes('tiled-f16')) {
+        const note = { f16: 'unavailable — this adapter has no `shader-f16`' };
+        perf.add(note, 'f16').name('tiled + f16').disable();
+      }
+
+      // Secondary and closed: picking one arm by hand is the old flow. It is
+      // kept because it is the only way to LOOK at a single variant, but it is
+      // not how you get a number worth reporting — two arms measured minutes
+      // apart, with the machine in different thermal states, are not comparable.
+      const perfSingle = perf.addFolder('one variant at a time').close();
+      perfSingle
+        .add(settings, 'diskNoise', Object.fromEntries(variants.map((variant) => [VARIANT_LABELS[variant], variant])))
+        .name('shade variant');
+      perfSingle.add(perfActions, 'measureOne').name('measure this variant');
+
       // Geometry invalidates the baked G-buffer. No onChange wiring needed: the
       // renderer polls BAKE_KEYS every frame and re-bakes on a throttle with a
       // trailing edge, so dragging a slider stays smooth and the released value
@@ -205,95 +419,6 @@ export function HeroBlackHole() {
         'front hit only': 1,
         'front + hidden hit': 2,
       }).name('disk layers');
-
-      // --- perf A/B ---------------------------------------------------------
-      // One independently compiled shade pipeline per variant (see
-      // precision.mjs). Switching is a pipeline swap, not a re-bake: the G-buffer
-      // is pure geometry and knows nothing about the disk's noise or precision.
-      //
-      // The list comes from the RENDERER, not from this file: `tiled-f16` only
-      // exists if the adapter offered `shader-f16`, and offering an option that
-      // silently draws `tiled` instead would fake a measurement.
-      const variants = rendererRef.current?.availableVariants() ?? [];
-      const perf = panel.addFolder('perf A/B (disk noise + precision)');
-      const readout = { result: 'press "measure frame time"' };
-      let busy = false;
-
-      /**
-       * Runs one measurement of whatever variant is currently selected.
-       *
-       * The panel field only ever shows the headline; the full result (both
-       * medians, both means, sample count, method, resolution) goes to the
-       * console, because that is what you actually want to paste somewhere.
-       */
-      const runMeasure = async (label?: string): Promise<MeasureResult | undefined> => {
-        const renderer = rendererRef.current;
-        if (!renderer || busy) return undefined;
-        busy = true;
-        readout.result = `measuring ${label ?? settings.diskNoise}…`;
-        try {
-          const result = await renderer.measure();
-          readout.result = formatMeasurement(result);
-          console.log(`[hero] ${result.variant}: ${formatMeasurement(result)}`, result);
-          if (result.vsyncCapped) {
-            console.warn(
-              '[hero] wall-clock is vsync-capped — the frame is waiting for the display, so ms/frame ' +
-              'cannot separate the two variants. Compare the GPU number instead.',
-            );
-          }
-          return result;
-        } catch (error) {
-          readout.result = 'failed — see console';
-          console.error('[hero] measure failed', error);
-          return undefined;
-        } finally {
-          busy = false;
-        }
-      };
-
-      const perfActions = {
-        'measure frame time': () => { void runMeasure(); },
-        /**
-         * Measures every available arm back to back and prints the chained ratios.
-         *
-         * Worth having over "switch, measure, write it down, switch back": it
-         * removes the transcription step and, more importantly, it measures all
-         * arms seconds apart on the same thermal state, which is the main way a
-         * hand-run A/B goes wrong.
-         */
-        'A/B all variants': () => {
-          void (async () => {
-            const restore = settings.diskNoise;
-            const refresh = () => panel.controllersRecursive().forEach((c) => c.updateDisplay());
-            const results: MeasureResult[] = [];
-            for (const variant of variants) {
-              settings.diskNoise = variant;
-              const result = await runMeasure(variant);
-              if (!result) { settings.diskNoise = restore; refresh(); return; }
-              results.push(result);
-            }
-            settings.diskNoise = restore;
-            refresh();
-            readout.result = formatComparison(results);
-            console.log(`[hero] A/B ${formatComparison(results)}`, results);
-          })();
-        },
-      };
-      perf.add(settings, 'diskNoise', Object.fromEntries(variants.map((variant) => [VARIANT_LABELS[variant], variant])))
-        .name('shade variant');
-      perf.add(perfActions, 'measure frame time');
-      perf.add(perfActions, 'A/B all variants');
-      // Disabled = read-only text field. `.listen()` polls the object, so the
-      // async handlers above can just assign to `readout.result`.
-      perf.add(readout, 'result').name('last measurement').disable().listen();
-      // Say WHY the f16 arm is missing rather than leaving a hole in the list: on
-      // an adapter without `shader-f16` the variant cannot be compiled at all,
-      // and a reader comparing notes with someone else's machine needs to know
-      // that is the reason and not a mistake.
-      if (!variants.includes('tiled-f16')) {
-        const note = { f16: 'unavailable — this adapter has no `shader-f16`' };
-        perf.add(note, 'f16').name('tiled + f16').disable();
-      }
 
       const actions = {
         'copy JSON': () => {
