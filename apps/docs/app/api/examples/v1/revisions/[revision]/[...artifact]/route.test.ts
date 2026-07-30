@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -123,6 +123,59 @@ describe('examples API App Router handlers', () => {
     const manifest = await revisionRoute.GET(request('/ignored'), context(set.revision, manifestPath));
     expect(manifest.headers.get('content-type')).toBe('application/json; charset=utf-8');
     expect((await manifest.json()).files.map(({ path }: { path: string }) => path)).toEqual(fractal.files.map(({ path }) => path));
+  });
+
+  it('serves the committed deployment tree when no artifact store is configured', async () => {
+    // Production default: VERCEL set, no store mode, no blob token. The API must read the generated
+    // tree that shipped with the deployment -- the deploy is the publication step -- rather than
+    // reaching for an object store it has no credential for.
+    const previousVercel = process.env.VERCEL;
+    const previousToken = process.env.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN;
+    delete process.env.VGPU_EXAMPLES_ARTIFACT_STORE;
+    delete process.env.VGPU_EXAMPLES_LOCAL_ROOT;
+    delete process.env.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN;
+    process.env.VERCEL = '1';
+    try {
+      const committed = JSON.parse(
+        await readFile(resolve(process.cwd(), 'apps/docs/generated/examples-api/examples/v1/latest.json'), 'utf8'),
+      );
+
+      const discovery = await discoveryRoute.GET(request('/.well-known/vgpu-examples.json'));
+      expect(discovery.status).toBe(200);
+
+      const latest = await latestRoute.GET(request('/api/examples/v1/latest.json'));
+      expect(latest.status).toBe(200);
+      expect(await latest.json()).toEqual(committed);
+
+      // The committed revision must be fully servable, not just the pointer.
+      const index = await revisionRoute.GET(request('/ignored'), context(committed.revision, ['index.json']));
+      expect(index.status).toBe(200);
+      expect((await index.json()).revision).toBe(committed.revision);
+    } finally {
+      process.env.VGPU_EXAMPLES_ARTIFACT_STORE = 'local';
+      process.env.VGPU_EXAMPLES_LOCAL_ROOT = root;
+      if (previousVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previousVercel;
+      if (previousToken !== undefined) process.env.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN = previousToken;
+    }
+  });
+
+  it('still fails closed when blob mode is selected without a token', async () => {
+    // The dormant versioned mode must never degrade into serving deployment files: an operator who
+    // asks for the verified object store and supplies no credential gets an error, not a fallback.
+    const previousToken = process.env.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN;
+    process.env.VGPU_EXAMPLES_ARTIFACT_STORE = 'blob';
+    delete process.env.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN;
+    try {
+      const response = await discoveryRoute.GET(request('/.well-known/vgpu-examples.json'));
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: { code: 'VGPU-EXAMPLES-STORAGE', message: 'Artifact storage verification failed' },
+      });
+    } finally {
+      process.env.VGPU_EXAMPLES_ARTIFACT_STORE = 'local';
+      if (previousToken !== undefined) process.env.VGPU_EXAMPLES_VERCEL_BLOB_READ_WRITE_TOKEN = previousToken;
+    }
   });
 
   it('does not follow a symlinked local-store parent outside the configured root', async () => {

@@ -46,6 +46,17 @@ const symbolRedirects = docsManifest.records
 const nextConfig = {
   pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
   reactStrictMode: true,
+  // The examples API serves the generated tree straight from the deployment, reading it with fs at
+  // request time. Static tracing cannot see a path built at runtime, so these routes must be told
+  // to bundle the tree explicitly or every artifact 404s in production.
+  // Keys are picomatch globs, not literal route paths, so a dynamic segment cannot be written
+  // out: `[revision]` and `[...artifact]` would parse as character classes and match nothing.
+  // `check:examples-api-tracing` fails the build if any of the three routes loses the tree.
+  outputFileTracingIncludes: {
+    '/.well-known/vgpu-examples.json': ['./generated/examples-api/**/*'],
+    '/api/examples/v1/latest.json': ['./generated/examples-api/**/*'],
+    '/api/examples/v1/revisions/**': ['./generated/examples-api/**/*'],
+  },
   async redirects() {
     return [
       { source: '/api', destination: '/reference', permanent: true },

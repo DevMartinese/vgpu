@@ -220,6 +220,8 @@ jobs:
         run: pnpm --filter docs build
       - name: Check docs example bundle isolation and budgets
         run: pnpm --filter docs check:example-bundles
+      - name: Check the examples API artifact tree is bundled into its routes
+        run: pnpm --filter docs check:examples-api-tracing
 
   docs-generated:
     # Guards that the committed docs manifest + generated skill are in sync with their sources
