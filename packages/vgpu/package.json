@@ -45,9 +45,9 @@
     "pngjs": "^7.0.0"
   },
   "peerDependencies": {
-    "@vgpu/adapter-node": "^0.1.6",
-    "@vgpu/wgsl": "^0.1.6",
-    "vgpu": "^0.1.6"
+    "@vgpu/adapter-node": ">=0.1.6 <1.0.0",
+    "@vgpu/wgsl": ">=0.1.6 <1.0.0",
+    "vgpu": ">=0.1.6 <1.0.0"
   },
   "peerDependenciesMeta": {
     "@vgpu/adapter-node": {
