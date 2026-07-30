@@ -1285,6 +1285,59 @@ node apps/docs/components/hero/debug-render.mjs --views final --ssaa 3 --out /tm
 node apps/docs/components/hero/debug-render.mjs --views final --crop 740,225,60,60,10   # 10x ring zoom
 ```
 
+#### Exit codes — the harness fails loudly, so you can trust it
+
+**`0` means the render is trustworthy. Nothing else does.** Script it, gate CI on
+it, let an agent believe it.
+
+`1` means the PNGs are NOT trustworthy, for one of three reasons, printed to
+stderr in a banner that quotes the underlying error verbatim:
+
+1. **The device reported an error** — the primary check. Both error channels are
+   captured for the whole run:
+   - `gpu.onError`, vgpu's own channel: `CreateRenderPipeline` runs inside a
+     validation error scope, so a pipeline that does not validate arrives here as
+     `VGPU-COMPILE-FAILED`.
+   - the device's `uncapturederror` channel: `createShaderModule` is *not* inside
+     a vgpu error scope, so the WGSL diagnostic itself — Dawn's line number and
+     caret — only ever appears here.
+2. **The harness threw** (bad flag, unknown view, resolver failure). Any GPU
+   errors collected before the throw are printed with it, because they are
+   usually the real cause: a shader module that failed to compile reflects wrong,
+   and it is the wrong reflection that throws (you get a confusing
+   `cannot satisfy filtering texture 'gHit1'` whose actual cause is a missing
+   `)` in `stars.wgsl`).
+3. **A view came out all black** (every RGB byte `0`) and no GPU error explains
+   it — a secondary, belt-and-braces guard. A black frame is what a failed shader
+   leaves behind, since the pass never overwrites the clear colour. But it *can*
+   be legitimate: `--disk.brightness 0 --stars.brightness 0` is honestly black.
+   Pass **`--allow-black`** for those runs.
+
+`--json` carries the same verdict as `"ok": true|false`, plus `gpuErrors`,
+`thrown` and `blackViews`.
+
+> Why this exists: with no listener on either channel, vgpu `console.error`s the
+> compile failure and carries on, and dawn.node just prints the WGSL diagnostic to
+> stdout. The frame was then submitted with an invalid pipeline, the target kept
+> its clear colour, and the harness printed `mean=0 std=0` and **exited 0** — a
+> false pass that fooled two separate agents into "shipping" a hero that rendered
+> nothing. A parenthesis-level parse error was worse: the bogus reflection threw,
+> the device was never disposed, Dawn's handles kept the loop alive and the
+> process **hung forever** instead of failing. Both now exit `1` in ~1 s.
+>
+> Regression test, any time you touch the harness:
+> ```bash
+> # 1. break it on purpose -> must exit 1 with the WGSL error visible
+> sed -i 's/^  let magnitude = abs(direction);/  let magnitude: f32 = abs(direction);/' \
+>   apps/docs/components/hero/stars.wgsl
+> node apps/docs/components/hero/debug-render.mjs --views final --size 320x180; echo "exit=$?"
+> git checkout apps/docs/components/hero/stars.wgsl
+> # 2. healthy render -> exit 0, PNGs byte-identical to before your change
+> # 3. legitimately black -> exit 0
+> node apps/docs/components/hero/debug-render.mjs --views final \
+>   --disk.brightness 0 --stars.brightness 0 --allow-black; echo "exit=$?"
+> ```
+
 - `--ssaa n` renders `n x --size` and box-downsamples **in linear light** (decode
   2.2, average, re-encode), with the BAKE running at the supersampled resolution
   too — real geodesics per sub-sample, not a post filter. This is the reference
