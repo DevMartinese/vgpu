@@ -33,7 +33,7 @@ export async function CodeViewer({ files, activeFile }: CodeViewerProps) {
 
   if (!selected) {
     return (
-      <div className="rounded-lg border border-gray-4 bg-gray-1 p-4 text-sm text-gray-9">
+      <div className="rounded-lg border border-gray-4 bg-gray-1 p-4 text-sm text-gray-11">
         No source files available.
       </div>
     );
@@ -53,7 +53,7 @@ export async function CodeViewer({ files, activeFile }: CodeViewerProps) {
                 href={`?file=${encodeURIComponent(file.name)}`}
                 scroll={false}
                 className={`px-4 py-2.5 text-sm border-r border-gray-4 whitespace-nowrap transition-colors hover:text-gray-12 ${
-                  isActive ? 'bg-[#0a0a0a] text-gray-12' : 'text-gray-9'
+                  isActive ? 'bg-[#0a0a0a] text-gray-12' : 'text-gray-11'
                 }`}
               >
                 {file.name}

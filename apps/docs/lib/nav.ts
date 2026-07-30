@@ -122,13 +122,20 @@ export const navSections: NavSection[] = [
   {
     title: 'Guides',
     href: '/guides',
-    groups: guideGroups.map((group) => ({
-      title: group.title,
-      items: group.slugs.flatMap((slug) => {
-        const record = getGuideRecord(slug);
-        return record ? [{ title: titleForRecord(record), href: `/guides/${record.symbol}` }] : [];
-      }),
-    })).filter((group) => group.items.length > 0),
+    // The overview link is a real item in the chain (same pattern as ML's
+    // "Overview" below), not just the section header, so the guides index
+    // page gets Previous/Next like every other section: it should not be
+    // the one page in the sidebar you can only reach and never leave.
+    groups: [
+      { title: '', items: [{ title: 'Overview', href: '/guides' }] },
+      ...guideGroups.map((group) => ({
+        title: group.title,
+        items: group.slugs.flatMap((slug) => {
+          const record = getGuideRecord(slug);
+          return record ? [{ title: titleForRecord(record), href: `/guides/${record.symbol}` }] : [];
+        }),
+      })).filter((group) => group.items.length > 0),
+    ],
   },
   {
     title: 'Examples',
