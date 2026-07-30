@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { navSections, type NavGroup, type NavItem, type NavSection } from '@/lib/nav';
 import { PackageNav } from './package-nav';
+import { Wordmark } from './wordmark';
 
 function docsHref(href: string) {
   return href === '/examples' ? href : `/docs${href}`;
@@ -40,17 +41,11 @@ export function Navigation() {
       >
         <div className="h-full flex flex-col">
           <div className="h-16 px-6 flex items-center border-b border-gray-4">
-            <Link
-              href="/"
-              className="flex items-center gap-3 group"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
-                <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
-              </svg>
-              <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
+            {/* Dropped the `group` class along with the inlined mark: nothing
+                inside was using group-hover. */}
+            <Wordmark onClick={() => setMobileMenuOpen(false)}>
               <span className="text-xs text-gray-9 bg-gray-2 px-1.5 py-0.5 rounded">Docs</span>
-            </Link>
+            </Wordmark>
           </div>
 
           <nav className="flex-1 overflow-y-auto py-6 px-3">

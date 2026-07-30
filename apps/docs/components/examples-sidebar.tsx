@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { examplesMetadata } from '@/lib/examples-metadata';
+import { Wordmark } from './wordmark';
 
 export function ExamplesSidebar() {
   const pathname = usePathname();
@@ -10,12 +11,7 @@ export function ExamplesSidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-gray-4 bg-black lg:flex lg:flex-col">
       <div className="border-b border-gray-4 px-5 py-5">
-        <Link href="/" className="flex items-center gap-3">
-          <svg className="h-3.5 w-3.5" viewBox="0 0 76 65" fill="white" aria-hidden="true">
-            <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
-          </svg>
-          <span className="text-[15px] font-semibold text-gray-12">vgpu</span>
-        </Link>
+        <Wordmark />
         <Link href="/docs" className="mt-3 inline-block text-sm text-gray-9 transition-colors hover:text-gray-12">
           Docs →
         </Link>

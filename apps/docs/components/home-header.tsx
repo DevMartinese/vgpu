@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Wordmark } from './wordmark';
 
 const navLinks = [
   // No "Docs" entry: /docs redirects to /docs/get-started, so it landed on the
@@ -21,15 +22,10 @@ export function HomeHeader() {
       data-hero-overlay
       className="absolute inset-x-0 top-0 z-30 flex items-center justify-between px-6 py-6 lg:px-[46px] lg:py-[27px]"
     >
-      <Link
-        href="/"
-        className="flex items-center gap-2 text-[14px] leading-none text-[#D9D9D9] transition-opacity hover:opacity-75 lg:text-[16px]"
-      >
-        <svg className="h-[10px] w-[12px]" viewBox="0 0 76 65" fill="currentColor" aria-hidden="true">
-          <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" />
-        </svg>
-        <span>VGPU</span>
-      </Link>
+      {/* The shared mark, identical to the docs and examples sidebars. This
+          header used to roll its own lighter, smaller variant, which read as a
+          different logo the moment you navigated. */}
+      <Wordmark className="transition-opacity hover:opacity-75" />
       <nav
         aria-label="Primary"
         className="flex items-center gap-3 text-[13px] leading-none text-white sm:gap-4 sm:text-[15px] lg:gap-5 lg:text-[16px]"
