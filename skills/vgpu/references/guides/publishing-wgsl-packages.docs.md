@@ -3,7 +3,7 @@
 ---
 title: Publishing WGSL module packages
 summary: Ship reusable WGSL modules as an npm package — exports map pointing at .wgsl files, files array, how consumers install and import it, the monorepo workspace:* case, and how to verify resolution with npx vgpu check.
-keywords: publish wgsl package, publishing wgsl packages, publish shaders, custom wgsl module, custom wgsl package, third-party wgsl package, share shaders, shared shaders, share wgsl, reusable shaders, shader library, wgsl library, exports map, package exports, package.json exports, files array, wgsl module package, npm package wgsl, monorepo, workspace, workspace:*, pnpm workspace, turborepo, workspace package, @packages/shaders, node_modules, resolution, resolver, bare specifier, VGPU-WGSL-PKG-NOTFOUND
+keywords: publish wgsl package, publishing wgsl packages, publish shaders, custom wgsl module, custom wgsl package, third-party wgsl package, share shaders, shared shaders, share wgsl, reusable shaders, shader library, wgsl library, exports map, package exports, package.json exports, files array, wgsl module package, npm package wgsl, monorepo, workspace, workspace:*, pnpm workspace, turborepo, workspace package, @packages/shaders, node_modules, resolution, resolver, bare specifier
 ---
 
 # Publishing WGSL module packages
