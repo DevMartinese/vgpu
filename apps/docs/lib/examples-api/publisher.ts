@@ -36,10 +36,8 @@ export async function publishArtifactSet(
       await verifyPublishedObject(publisher, artifact);
     } catch (verifyError) {
       if (writeError === undefined) throw verifyError;
-      throw new Error(
-        `Immutable write failed for ${artifact.key}: ${(verifyError as Error).message}`,
-        { cause: writeError },
-      );
+      const detail = verifyError instanceof Error ? verifyError.message : String(verifyError);
+      throw new Error(`Immutable write failed for ${artifact.key}: ${detail}`, { cause: writeError });
     }
   }
   const discovery = set.artifacts.find((artifact) => artifact.key === set.discoveryKey)!;
