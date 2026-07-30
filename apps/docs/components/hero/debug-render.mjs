@@ -48,6 +48,23 @@
 //                        same rect lands on the same features at any `--ssaa`.
 //   --set <json>         deep-merged JSON settings patch (wins over flags)
 //   --json               print the resolved settings and per-image stats as JSON
+//   --allow-black        do not fail on an all-black image (see "Exit codes")
+//
+// Exit codes — this harness is meant to be trusted by CI and by agents:
+//   0  every requested view rendered and the GPU reported no error
+//   1  something is wrong; the PNGs are NOT trustworthy. Three ways to get here:
+//      * the GPU reported an error (WGSL that does not compile, a pipeline that
+//        does not validate, a bad binding). PRIMARY detection: every error the
+//        device reports is captured (`gpu.onError` plus the device's
+//        `uncapturederror` channel) and printed verbatim, including Dawn's WGSL
+//        line/caret diagnostic. Without this a broken shader used to write a
+//        black PNG, report `mean=0 std=0` and still exit 0 — a false pass.
+//      * the harness threw (bad flag, missing view, resolver failure).
+//      * SECONDARY, belt-and-braces: a rendered view is all black (every RGB
+//        byte 0) and no GPU error explained it. A black frame is the classic
+//        symptom of a shader that silently failed, but it CAN be legitimate —
+//        `--disk.brightness 0 --stars.brightness 0` is genuinely black — so
+//        pass `--allow-black` for those runs.
 //
 // The WGSL import graph (shade.wgsl -> gbuffer/disk/stars) is resolved with
 // `resolveShader`, the same resolver the webpack/turbopack loader uses in the app.
@@ -125,7 +142,7 @@ const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float']
 const AA_FORMAT = 'rg8unorm';
 
 function parseArgs(argv) {
-  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE, ssaa: 1, crop: undefined };
+  const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, allowBlack: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE, ssaa: 1, crop: undefined };
   const patch = {};
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -134,6 +151,8 @@ function parseArgs(argv) {
     const key = (eq === -1 ? token.slice(2) : token.slice(2, eq)).trim();
     const readValue = () => (eq === -1 ? argv[++i] : token.slice(eq + 1));
     if (key === 'json') { options.json = true; continue; }
+    // Boolean, so it must be matched before the generic `--<key> <value>` fallthrough.
+    if (key === 'allow-black' || key === 'allowBlack') { options.allowBlack = true; continue; }
     const value = readValue();
     if (value === undefined) throw new Error(`missing value for --${key}`);
     if (key === 'out') { options.out = value; continue; }
@@ -258,6 +277,105 @@ function cropZoom(rgba, width, height, rect) {
   return { rgba: out, width: w * scale, height: h * scale };
 }
 
+/**
+ * Captures every error the device reports, from both channels, for the lifetime
+ * of the run. THIS is the primary "did the render actually work" signal.
+ *
+ * Two channels, because a broken shader shows up on both and neither one alone
+ * is enough:
+ *
+ *  - `gpu.onError` — vgpu's own channel. Pipeline creation runs inside a
+ *    validation error scope, so `CreateRenderPipeline` failures arrive here as
+ *    `VGPU-COMPILE-FAILED`. Crucially, with NO listener registered vgpu just
+ *    `console.error`s them and carries on: the frame is submitted with an
+ *    invalid pipeline, the target keeps its clear colour, and the harness used
+ *    to print `mean=0 std=0` and exit 0.
+ *  - the device's `uncapturederror` channel — `createShaderModule` is NOT inside
+ *    a vgpu error scope, so the WGSL diagnostic itself (with Dawn's line number
+ *    and caret) lands here. With no listener the Node binding prints it to
+ *    stdout and nothing else happens, which is how the real message got lost.
+ *
+ * Both listeners are attached because dawn.node delivers to `addEventListener`
+ * AND to `onuncapturederror`, and relying on only one of them would be a bet.
+ * The same error object arriving twice is dropped by identity; a genuinely
+ * repeated error (the same broken pipeline across several views) is collapsed by
+ * text into one entry with a count.
+ */
+function watchGpuErrors(gpu) {
+  const errors = [];
+  const byKey = new Map();
+  const delivered = new WeakSet();
+  const record = (channel, raw) => {
+    if (raw !== null && typeof raw === 'object') {
+      if (delivered.has(raw)) return;
+      delivered.add(raw);
+    }
+    const text = describeGpuError(raw);
+    const key = `${channel}\n${text}`;
+    const existing = byKey.get(key);
+    if (existing) { existing.count++; return; }
+    const entry = { channel, text, count: 1 };
+    byKey.set(key, entry);
+    errors.push(entry);
+  };
+
+  const releases = [];
+  releases.push(gpu.onError((error) => record('vgpu', error)));
+
+  const device = gpu.gpu;
+  const onUncaptured = (event) => record('device', event?.error ?? event);
+  if (typeof device.addEventListener === 'function') {
+    device.addEventListener('uncapturederror', onUncaptured);
+    releases.push(() => device.removeEventListener?.('uncapturederror', onUncaptured));
+  }
+  const previous = device.onuncapturederror;
+  device.onuncapturederror = onUncaptured;
+  releases.push(() => { device.onuncapturederror = previous ?? null; });
+
+  return { errors, release() { for (const undo of releases) { try { undo(); } catch { /* teardown is best effort */ } } } };
+}
+
+/** Flattens a `VGPUError` or a native `GPUError` into something worth printing. */
+function describeGpuError(error) {
+  if (error === null || error === undefined) return 'unknown GPU error';
+  if (typeof error !== 'object') return String(error);
+  const name = error.name ?? error.constructor?.name ?? 'Error';
+  const where = [error.code, error.where].filter(Boolean).join(' @ ');
+  const lines = [`${name}${where ? ` [${where}]` : ''}: ${String(error.message ?? error).trim()}`];
+  if (error.fix) lines.push(`fix: ${error.fix}`);
+  if (error.detail && typeof error.detail === 'object') lines.push(`detail: ${JSON.stringify(error.detail)}`);
+  // The interesting text — Dawn's WGSL diagnostic — hangs off `cause` when vgpu
+  // wrapped a native GPUValidationError, so never drop it.
+  const cause = error.cause;
+  if (cause !== null && cause !== undefined) {
+    const causeMessage = typeof cause === 'object' ? (cause.message ?? cause.stack ?? '') : String(cause);
+    if (String(causeMessage).trim()) lines.push(`cause (${cause?.constructor?.name ?? typeof cause}): ${String(causeMessage).trim()}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Waits until every error the device is going to report has been delivered.
+ *
+ * `gpu.settled()` drains vgpu's tracked work (including the `popErrorScope`
+ * promises pipeline creation opened). The extra macrotask turn gives dawn.node's
+ * `uncapturederror` callbacks — which are not part of `settled()` — a chance to
+ * land before the harness decides its exit code.
+ */
+async function flushGpuErrors(gpu) {
+  await gpu.settled();
+  await new Promise((done) => setTimeout(done, 0));
+  await gpu.settled();
+}
+
+/** True when every RGB byte is 0. Alpha is ignored: the target is cleared to opaque black. */
+function isAllBlack(rgba) {
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i] !== 0 || rgba[i + 1] !== 0 || rgba[i + 2] !== 0) return false;
+  }
+  return true;
+}
+
 function stats(rgba) {
   let sum = 0;
   let sumSquares = 0;
@@ -288,6 +406,38 @@ async function main() {
 
   await mkdir(options.out, { recursive: true });
   const gpu = await init();
+  // Attached before anything exists on the device, so no error can predate the
+  // listener. This is what turns a silently broken shader into exit 1.
+  const watcher = watchGpuErrors(gpu);
+  const cleanups = [];
+  let outcome;
+  let thrown;
+  try {
+    outcome = await renderViews(gpu, options, settings, names, { bakeWgsl, refineWgsl, shadeWgsl }, cleanups);
+  } catch (error) {
+    // Do not rethrow: the GPU errors collected below are usually the root cause
+    // (a shader that failed to compile makes reflection wrong, and the wrong
+    // reflection is what throws), and they must be printed with it.
+    thrown = error;
+  } finally {
+    // Drain before dispose: once the kernel is disposed it drops undelivered
+    // error reports, which is one of the ways the original failure got lost.
+    try { await flushGpuErrors(gpu); } catch { /* nothing left to flush */ }
+    for (const cleanup of cleanups) { try { cleanup(); } catch { /* best effort */ } }
+    watcher.release();
+    // Always: leaving the device alive keeps Dawn's handles open and the process
+    // hangs instead of reporting the failure it just found.
+    gpu.dispose();
+  }
+  return report(options, settings, outcome, thrown, watcher.errors);
+}
+
+/**
+ * Renders every requested view. Registers its own teardown in `cleanups` so the
+ * caller can dispose the device even when this throws half way through.
+ */
+async function renderViews(gpu, options, settings, names, shaders, cleanups) {
+  const { bakeWgsl, refineWgsl, shadeWgsl } = shaders;
   // True SSAA: the BAKE runs at the supersampled resolution too, so every
   // sub-sample is a real geodesic. That is what makes `--ssaa 3` a reference the
   // photon-ring antialiasing can be judged against rather than a post filter.
@@ -318,6 +468,7 @@ async function main() {
   // harness renders the disk the page renders. Node/Dawn takes the 3D texture
   // and the trilinear repeat sampler through the identical core WebGPU path.
   const noiseVolume = createNoiseVolume(gpu, options.noiseSize, 'hero-debug-noise-volume');
+  cleanups.push(() => noiseVolume.destroy());
   const noiseSampler = noiseVolumeSampler(vgpu, gpu);
 
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
@@ -381,7 +532,9 @@ async function main() {
     const pixels = downsampleLinear(rendered, width, height, ssaa);
     const path = join(options.out, `${name}.png`);
     await writePng(path, outWidth, outHeight, pixels);
-    const result = { view: name, debugView, path, ...stats(pixels) };
+    // `black` feeds the secondary guard: an all-black view is what a shader that
+    // failed to compile leaves behind, because the pass never overwrote the clear.
+    const result = { view: name, debugView, path, ...stats(pixels), black: isAllBlack(pixels) };
     if (options.crop) {
       const zoom = cropZoom(pixels, outWidth, outHeight, options.crop);
       result.crop = join(options.out, `${name}-crop.png`);
@@ -390,20 +543,81 @@ async function main() {
     results.push(result);
   }
 
-  noiseVolume.destroy();
-  gpu.dispose();
-
-  if (options.json) {
-    console.log(JSON.stringify({ size: options.size, ssaa, time: options.time, noiseSize: options.noiseSize, settings, images: results }, null, 2));
-    return;
-  }
-  console.log(`hero debug render ${outWidth}x${outHeight} (ssaa ${ssaa}x -> rendered ${width}x${height}) @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
-  for (const result of results) {
-    console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
-  }
+  return { results, outWidth, outHeight, width, height, ssaa };
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+/**
+ * Prints the run and decides the exit code. Returns 0 only when every requested
+ * view rendered, nothing threw, and the device reported no error.
+ */
+function report(options, settings, outcome, thrown, gpuErrors) {
+  const results = outcome?.results ?? [];
+  const requested = options.views.includes('all') ? Object.keys(VIEWS).length : options.views.length;
+  const blackViews = options.allowBlack ? [] : results.filter((result) => result.black).map((result) => result.view);
+  // Primary: a real error from the device. Secondary: the black-image guard, and
+  // only when no error already explains the run — a black frame on its own is not
+  // proof of a bug (`--disk.brightness 0 --stars.brightness 0` is honestly black).
+  const failed = gpuErrors.length > 0 || thrown !== undefined || blackViews.length > 0 || results.length < requested;
+
+  if (options.json) {
+    console.log(JSON.stringify({
+      ok: !failed,
+      size: options.size,
+      ssaa: outcome?.ssaa ?? options.ssaa,
+      time: options.time,
+      noiseSize: options.noiseSize,
+      settings,
+      images: results,
+      gpuErrors: gpuErrors.map((entry) => ({ channel: entry.channel, count: entry.count, message: entry.text })),
+      thrown: thrown === undefined ? undefined : String(thrown?.stack ?? thrown),
+      blackViews,
+    }, null, 2));
+  } else {
+    if (outcome) {
+      console.log(`hero debug render ${outcome.outWidth}x${outcome.outHeight} (ssaa ${outcome.ssaa}x -> rendered ${outcome.width}x${outcome.height}) @ t=${options.time}s noise=${options.noiseSize}^3 -> ${options.out}`);
+    }
+    for (const result of results) {
+      console.log(`  ${result.view.padEnd(8)} debugView=${result.debugView}  mean=${result.mean}  std=${result.std}  ${result.path}`);
+    }
+  }
+
+  if (!failed) return 0;
+
+  // Everything below goes to stderr, verbatim and unabridged. The whole point of
+  // the exit code is that nobody has to go looking for this.
+  const rule = '='.repeat(78);
+  console.error(`\n${rule}\n hero debug render FAILED — the images above are NOT trustworthy\n${rule}`);
+  if (gpuErrors.length) {
+    console.error(` the GPU reported ${gpuErrors.length} distinct error(s):\n`);
+    gpuErrors.forEach((entry, index) => {
+      console.error(`  [${index + 1}] ${entry.channel} channel${entry.count > 1 ? ` (x${entry.count})` : ''}:`);
+      for (const line of entry.text.split('\n')) console.error(`      ${line}`);
+      console.error('');
+    });
+  }
+  if (thrown !== undefined) {
+    console.error(' the harness itself threw:\n');
+    for (const line of String(thrown?.stack ?? thrown).split('\n')) console.error(`      ${line}`);
+    console.error('');
+  }
+  if (blackViews.length) {
+    console.error(` every pixel of ${blackViews.length === 1 ? 'view' : 'views'} ${blackViews.map((view) => `"${view}"`).join(', ')} is black.`);
+    console.error(gpuErrors.length
+      ? '      Expected, given the GPU errors above: the pass never overwrote the clear colour.'
+      : '      No GPU error explains it, so either a shader produced nothing or the settings\n      genuinely render black (e.g. --disk.brightness 0 --stars.brightness 0).\n      Re-run with --allow-black if the black image is what you asked for.');
+    console.error('');
+  }
+  if (results.length < requested) {
+    console.error(` only ${results.length} of ${requested} requested view(s) were written.\n`);
+  }
+  console.error(`${rule}\n hero debug render FAILED (exit 1)\n${rule}`);
+  return 1;
+}
+
+main().then(
+  (code) => { process.exitCode = code; },
+  (error) => {
+    console.error(error);
+    process.exitCode = 1;
+  },
+);
