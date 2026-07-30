@@ -79,6 +79,22 @@ the workflow's `if:` gate.
 If a gate fails the release publishes nothing: fix `main`, then delete and recreate the
 release/tag.
 
+### Release candidates
+
+Run `pnpm changeset version` as usual, then append `-rc.N` by hand to the version of each
+package you intend to publish. Tag the merge commit `vX.Y.Z-rc.N` and create the GitHub
+Release with **Set as a pre-release** ticked: the workflow reads that flag and publishes
+under the `next` dist-tag, so `latest` — and therefore a plain `npm install vgpu` — keeps
+pointing at the last stable. Testers opt in with `npm install vgpu@next`.
+
+Forgetting the checkbox is the one mistake that would push a release candidate to `latest`,
+so the workflow refuses any tag containing a hyphen unless the pre-release flag is set.
+
+Promoting an RC is a clean re-release: version the packages to stable `vX.Y.Z`, tag, and
+publish a normal (non-pre-release) GitHub Release. Do **not** use `npm dist-tag add` — in a
+monorepo it has to be repeated for every package, and one forgotten package leaves `latest`
+silently pointing at a release candidate.
+
 ### npm Trusted Publishing
 
 Publishing uses OIDC, not a token — there is no `NPM_TOKEN` secret. Each published package
