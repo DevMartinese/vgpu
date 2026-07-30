@@ -36,8 +36,26 @@ jobs:
       - name: Build all packages
         run: pnpm build
 
-      - name: Run fast tests
-        run: pnpm test:fast
+      # Release gates. These mirror ci.yml's `test-fast` job, which is the job that runs on a
+      # plain runner with no Docker and no GPU. They run against the checked-out tag, so what
+      # gets published is exactly what was verified.
+      #
+      # The previous gate was `pnpm test:fast`, which only covers adapter-mock, core, wgsl,
+      # render and scripts — it never touched vgpu-api (the `vgpu` package itself), adapter-node
+      # or the CLI, and it skipped typecheck and bundle budgets entirely.
+      - name: Typecheck
+        run: pnpm -w typecheck
+
+      # The full suite, exactly as ci.yml runs it. Tests that need a real GPU (Dawn + Xvfb) are
+      # guarded by `VGPU_DOCKER_TEST` and skip themselves here, so this stays runner-safe while
+      # covering every publishable package. Real-device validation stays in ci.yml's `docker-gpu`
+      # job on `main`; a release tag is only ever cut from an already-green `main`.
+      - name: Run tests
+        run: pnpm exec vitest run
+
+      # Budgets are measured from `dist`, so this has to come after the build.
+      - name: Check bundle budgets
+        run: pnpm bundle-check
 
       - name: Upgrade npm for OIDC publishing
         run: npm install -g npm@^11.5.1
