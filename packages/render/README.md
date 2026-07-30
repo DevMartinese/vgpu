@@ -1,6 +1,6 @@
 # @vgpu/render
 
-> 0.1.6 — slim legacy/utility render package
+Slim legacy/utility render package, kept for compatibility while the old thick render surface is removed from the public path.
 
 New applications should use the public `vgpu` package. `@vgpu/render` remains as a slim package for edit/inspect/utils/perf helpers and compatibility while the old thick render surface is removed from the public path.
 
