@@ -4,10 +4,23 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { InlineCode, stripBackticks } from './inline-code';
 
-/** `backtick` spans render mono; the rest stays in the page serif. */
+/**
+ * `backtick` spans are atomic (never broken across lines); `mono` decides
+ * whether they are also *presented* as code. See InlineCode.
+ *
+ * The two tabs differ in kind, not in taste. Skill is a shell command you paste
+ * into a terminal, so mono is carrying meaning: "this is literal, type it
+ * exactly". Prompt is a sentence you paste into an agent — the whole line is
+ * natural language, including the command it happens to name, so setting that
+ * fragment as code mislabelled it; it read as two registers spliced together
+ * when it is one instruction throughout.
+ *
+ * Prompt stays fenced regardless, because "npx vgpu docs" must not wrap: unset,
+ * it breaks after "vgpu" on a phone and strands "docs" alone on line two.
+ */
 const tabContent = {
-  Prompt: 'Setup vgpu on my project, run `npx vgpu docs`',
-  Skill: '`npx skills add vercel-labs/vgpu`',
+  Prompt: { text: 'Setup vgpu on my project, run `npx vgpu docs`', mono: false },
+  Skill: { text: '`npx skills add vercel-labs/vgpu`', mono: true },
 } as const;
 
 type Tab = keyof typeof tabContent;
@@ -39,7 +52,7 @@ export function HeroTabs() {
   const [leavingTab, setLeavingTab] = useState<Tab | null>(null);
   const [copied, setCopied] = useState(false);
   const parkTimer = useRef<number | undefined>(undefined);
-  const content = tabContent[activeTab];
+  const content = tabContent[activeTab].text;
 
   const selectTab = (tab: Tab) => {
     if (tab === activeTab) return;
@@ -164,7 +177,7 @@ export function HeroTabs() {
                         'translate-y-1.5 select-none opacity-0'
                 }`}
               >
-                <InlineCode text={tabContent[tab]} />
+                <InlineCode text={tabContent[tab].text} mono={tabContent[tab].mono} />
               </span>
             );
           })}

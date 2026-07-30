@@ -8,26 +8,38 @@ export function stripBackticks(text: string): string {
 /**
  * Renders a string where `backtick`-wrapped spans are set in mono.
  *
- * The homepage is set in Geist Serif, but commands have to stay monospaced, and
- * they are embedded mid-sentence ("... run `npx vgpu docs`"), so this is a span
- * swap rather than a block. Mono runs slightly larger than serif at the same
- * px size, so code is nudged to 0.95em to keep the baseline row even.
+ * For commands quoted mid-sentence ("install with `npx vgpu docs`"), where a
+ * block would break the line but the text still has to read as literal — hence
+ * a span swap. Geist Mono runs slightly wider and taller than Geist Sans at the
+ * same px size, so code is nudged to 0.95em to keep the baseline row even.
+ *
+ * Fence only what is genuinely literal. Mono is a signal that the reader should
+ * type the characters exactly; using it for a command merely *named* inside a
+ * sentence mislabels prose as terminal input (see tabContent in hero-tabs).
  */
-export function InlineCode({ text }: { text: string }) {
+export function InlineCode({ text, mono = true }: { text: string; mono?: boolean }) {
   // Odd indices are the fenced spans: "a `b` c" -> ["a ", "b", " c"].
   return (
     <>
-      {text.split('`').map((part, index) =>
-        index % 2 === 1 ? (
-          // nowrap: a command broken across two lines ("run npx" / "vgpu docs")
-          // reads as prose, not as something you paste. Wrap before it instead.
+      {text.split('`').map((part, index) => {
+        if (index % 2 === 0) return <Fragment key={index}>{part}</Fragment>;
+
+        // Fencing marks an ATOMIC run; `mono` decides whether it is also
+        // *presented* as code. Those are separate concerns, and the Prompt tab
+        // needs the first without the second.
+        //
+        // Unbreakable either way: a command split across lines ("run npx vgpu"
+        // / "docs") reads as prose and strands an orphan word. Wrap before it.
+        return mono ? (
           <code key={index} className="whitespace-nowrap font-mono text-[0.95em]">
             {part}
           </code>
         ) : (
-          <Fragment key={index}>{part}</Fragment>
-        ),
-      )}
+          <span key={index} className="whitespace-nowrap">
+            {part}
+          </span>
+        );
+      })}
     </>
   );
 }
