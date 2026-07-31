@@ -21,7 +21,8 @@
 //   --out <dir>          output directory (default /home/user/reports/hero-debug)
 //   --size <WxH>         render size in pixels (default 1280x720)
 //   --time <seconds>     animation clock handed to the shaders (default 2.5)
-//   --views <list>       comma list of: final,normals,diskuv,flags,raydir,density,skylod,hit2,aa,all
+//   --views <list>       comma list of: final,normals,diskuv,flags,raydir,density,
+//                        skylod,hit2,aa,aageom,all
 //   --aa <0|1>           1 = consume the refine pass's ring coverage/span (default),
 //                        0 = ignore it, i.e. exactly the pre-AA image. The A/B.
 //   --<key> <value>      any geometry setting: cameraY, distance, diskRadius, fov, centerY
@@ -117,12 +118,16 @@ const VIEWS = {
   skylod: 6,
   hit2: 7,
   aa: 8,
+  aageom: 9,
 };
 
 /** hit1, hit2, sky, view. Must match GBUFFER_FORMATS in renderer.ts. */
 const GBUFFER_FORMATS = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
-/** Photon-ring AA target (coverage, span). Must match AA_FORMAT in renderer.ts. */
-const AA_FORMAT = 'rg8unorm';
+/**
+ * Photon-ring AA attachments: (coverage, span) and the synthesized crossing
+ * (plane xz + encoded direction). Must match AA_FORMATS in renderer.ts.
+ */
+const AA_FORMATS = ['rg8unorm', 'rgba16float'];
 
 function parseArgs(argv) {
   const options = { views: ['all'], size: [1280, 720], time: 2.5, out: '/home/user/reports/hero-debug', json: false, yaw: 0, bakeYaw: 0, noiseSize: NOISE_VOLUME_SIZE, ssaa: 1, crop: undefined };
@@ -302,8 +307,14 @@ async function main() {
     label: 'hero-debug-gbuffer',
   });
   // Photon-ring AA data: one-shot, written by the refine pass right after the
-  // bake, read 1:1 by shade. Same size as the G-buffer, 2 B/px.
-  const aaTarget = vgpu.target(gpu, { size: [width, height], colors: [{ format: AA_FORMAT }], label: 'hero-debug-aa' });
+  // bake, read 1:1 by shade. Same size as the G-buffer, 10 B/px: 2 for
+  // (coverage, span) plus 8 for the synthesized crossing of the sub-pixel arcs
+  // that live inside the shadow silhouette.
+  const aaTarget = vgpu.target(gpu, {
+    size: [width, height],
+    colors: AA_FORMATS.map((format) => ({ format })),
+    label: 'hero-debug-aa',
+  });
   // Display-referred, exactly what the swap chain gets in the browser: shade
   // tone maps in place, so this is the only pass target after the G-buffer.
   const output = vgpu.target(gpu, { size: [width, height], format: 'rgba8unorm', label: 'hero-debug-output' });
@@ -321,7 +332,7 @@ async function main() {
   const noiseSampler = noiseVolumeSampler(vgpu, gpu);
 
   const [hit1Texture, hit2Texture, skyTexture, viewTexture] = gbuffer.colors;
-  const [aaTexture] = aaTarget.colors;
+  const [aaTexture, aaGeomTexture] = aaTarget.colors;
   const geometry = {
     resolution: gbuffer.size,
     // Camera yaw. The page always bakes with 0 and rotates the scene in the frame
@@ -343,6 +354,7 @@ async function main() {
     gSky: skyTexture,
     gView: viewTexture,
     gAa: aaTexture,
+    gAaGeom: aaGeomTexture,
     noiseVolume,
     noiseSampler,
     disk: settings.disk,

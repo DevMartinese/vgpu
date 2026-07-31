@@ -73,7 +73,7 @@ export interface HeroSettings {
   centerY: number;
 
   // --- Frame-only settings. No re-bake. ---
-  /** 0 = final image, 1..8 = G-buffer debug views. */
+  /** 0 = final image, 1..9 = G-buffer debug views. */
   debugView: number;
   /**
    * Photon-ring antialiasing: 1 consumes the one-shot refine pass's
@@ -405,8 +405,10 @@ interface Targets {
   /** G-buffer written once by the bake pass (MRT: hit1 / hit2 / sky / view). */
   gbuffer: Target;
   /**
-   * Photon-ring AA data, written once by the refine pass: 2 B/px of
-   * (coverage, span) for the front disk crossing.
+   * Photon-ring AA data, written once by the refine pass: 10 B/px in two
+   * attachments — (coverage, span) for the front disk crossing, plus the
+   * synthesized crossing of the sub-pixel arcs whose centre ray missed the disk
+   * entirely (see AA_FORMATS).
    *
    * A separate target and a separate pass rather than a 5th bake attachment,
    * because `maxColorAttachmentBytesPerSample` is only guaranteed to be 32 and
@@ -450,14 +452,26 @@ const RENDER_DPR = 1;
  */
 const GBUFFER_FORMATS: readonly GPUTextureFormat[] = ['rg32float', 'rg32float', 'rgba16float', 'rgba16float'];
 /**
- * Photon-ring AA target: 2 bytes per pixel, (coverage, span).
+ * Photon-ring AA attachments, in @location order: 10 bytes per pixel total.
  *
- * `rg8unorm`, not a float format: coverage is 16 sub-rays (5 bits would do) and
- * span is a filter width, where 1/255 of the annulus is far below what the disk
- * look can resolve. It is also the smallest format that keeps 1.0 EXACT, which is
- * what makes every non-band pixel bit-for-bit unchanged.
+ * 0 — `rg8unorm` (coverage, span). Not a float format: coverage is 16 sub-rays
+ *     (5 bits would do) and span is a filter width, where 1/255 of the annulus is
+ *     far below what the disk look can resolve. It is also the smallest format
+ *     that keeps 1.0 EXACT, which is what makes every non-band pixel
+ *     bit-for-bit unchanged.
+ * 1 — `rgba16float` (synthesized crossing: plane xz + encoded direction). This
+ *     one cannot be 8-bit: it carries the crossing GEOMETRY of the sub-pixel arcs
+ *     that live inside the shadow silhouette, and an 8-bit azimuth quantizes to
+ *     0.0246 rad — ~5 px of stair-stepping along a 1 px arc whose azimuth only
+ *     moves 0.005 rad per pixel. Stored as an f16 plane position it keeps
+ *     ~0.13 px, and it is the same encoding `gHit1` / `gView.xy` use, so
+ *     `decodeGBuffer` substitutes it with no new decode path. See refine.wgsl.
+ *
+ * The refine pass therefore spends 10 of its own fresh 32 B/sample budget
+ * (`maxColorAttachmentBytesPerSample` is per PASS), which is the whole reason this
+ * data is not a 5th bake attachment.
  */
-const AA_FORMAT: GPUTextureFormat = 'rg8unorm';
+const AA_FORMATS: readonly GPUTextureFormat[] = ['rg8unorm', 'rgba16float'];
 const CLEAR: readonly [number, number, number, number] = [0, 0, 0, 1];
 
 export function createRenderer(options: HeroRendererOptions): HeroRenderer {
@@ -973,7 +987,11 @@ function createTargets(vgpu: VgpuApi, gpu: Gpu, size: readonly [number, number],
       colors: GBUFFER_FORMATS.map((format) => ({ format })),
       label: `${label}-gbuffer`,
     }),
-    aa: vgpu.target(gpu, { size: full, colors: [{ format: AA_FORMAT }], label: `${label}-aa` }),
+    aa: vgpu.target(gpu, {
+      size: full,
+      colors: AA_FORMATS.map((format) => ({ format })),
+      label: `${label}-aa`,
+    }),
   };
 }
 
@@ -988,7 +1006,7 @@ function destroyTarget(target: Target | undefined): void {
 
 function setBindings(effects: Effects, targets: Targets): void {
   const [hit1, hit2, sky, view] = targets.gbuffer.colors;
-  const [aa] = targets.aa.colors;
+  const [aa, aaGeom] = targets.aa.colors;
   effects.bake.set({ bake: { resolution: targets.gbuffer.size } });
   // The refine pass reads the two G-buffer channels it needs (first crossing +
   // flags) and writes the AA target. Same geometry uniform as the bake, uploaded
@@ -1006,6 +1024,10 @@ function setBindings(effects: Effects, targets: Targets): void {
       gSky: sky,
       gView: view,
       gAa: aa,
+      // Second AA attachment: the synthesized crossing for pixels whose centre
+      // ray missed the sub-pixel arcs inside the shadow silhouette. Ignored
+      // entirely when `Shade.aa` is 0.
+      gAaGeom: aaGeom,
       // Resize-invariant, but re-bound with the rest: `setBindings` rebuilds the
       // whole shade bind group when the G-buffer is recreated, and a bind group
       // is all-or-nothing.
@@ -1141,7 +1163,7 @@ function renderChain(
     // guarantee that none of its cost is attributed to the shade pass.
     frame.pass({ target: targets.aa, clear: CLEAR }, (pass) => pass.draw(effects.refine));
   }
-  // Two passes per frame, still: shade reads the G-buffer plus 2 B/px of AA data
+  // Two passes per frame, still: shade reads the G-buffer plus 10 B/px of AA data
   // and writes the swap chain. The two above are one-shot.
   frame.pass({ target: output, clear: CLEAR, timer }, (pass) => pass.draw(effects.shade));
 }

@@ -10,8 +10,9 @@ bake.wgsl ──► G-buffer (MRT, 4 attachments) ──┬─► shade.wgsl ─
  one-shot      │                              │   every frame
                │                              │      ├── disk.wgsl   (disk pixels)
                ▼                              │      ├── stars.wgsl  (escaped rays)
-        refine.wgsl ──► AA target (rg8unorm) ─┘      └── tonemap()   (ACES + vignette, in place)
-         one-shot        (coverage, span)
+        refine.wgsl ──► AA target (2 attachments) ─┘  └── tonemap()   (ACES + vignette, in place)
+         one-shot        rg8unorm    (coverage, span)
+                         rgba16float (synthesized crossing)
 ```
 
 Both `bake.wgsl` and `refine.wgsl` are ONE-SHOT and share the geodesic integrator
@@ -86,7 +87,8 @@ device.
 This budget is exactly why the photon-ring AA data lives in its **own pass and
 own target** rather than as a 5th attachment here — see
 [The AA target](#the-aa-target--photon-ring-coverage-and-span). The limit is
-per-PASS, so a second pass gets a fresh 32 B.
+per-PASS, so a second pass gets a fresh 32 B, of which the refine pass spends 10
+(`rg8unorm` + `rgba16float`).
 
 ## G-buffer layout
 
@@ -174,13 +176,21 @@ struct GBufferLayers {
   front: GBufferSample,  // crossing nearest the camera
   back: GBufferSample,   // the crossing it hides; isHit only if front.isHit
 }
-fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32, aa: vec2f) -> GBufferLayers
+fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32, aa: vec2f, aaGeom: vec4f) -> GBufferLayers
 ```
 
-`aa` is the matching texel of the [AA target](#the-aa-target--photon-ring-coverage-and-span)
-— `(covFront, spanFront)`. It describes the **front** crossing only; the back
-layer is handed `(1, 0)` and therefore decodes exactly as it did before the AA
-target existed. Pass `vec2f(1.0, 0.0)` to opt out entirely.
+`aa` is the matching texel of the [AA target](#the-aa-target--photon-ring-coverage-and-span)'s
+first attachment — `(covFront, spanFront)`. It describes the **front** crossing
+only; the back layer is handed `(1, 0)` and therefore decodes exactly as it did
+before the AA target existed. Pass `vec2f(1.0, 0.0)` to opt out entirely.
+
+`aaGeom` is the second attachment: a **synthesized front crossing**
+(`xy` = plane position, `zw` = encoded direction — the same encoding `hit1` and
+`view.xy` use) for the pixels whose centre ray missed the ring while the refine
+pass's sub-rays hit it. `decodeGBuffer` substitutes it for `hit1`/`view.xy` when
+and only when `hit1` is a miss and `aaGeom.xy` is a hit, and marks the result
+`synthesized`. Pass `vec4f(0.0)` to opt out — that is exactly what `Shade.aa = 0`
+does, which is why the A/B is bit-for-bit.
 
 Each layer is the same `GBufferSample` the single-hit version used — `shadeDisk`
 shades one layer at a time and never has to know which one it got. Values that
@@ -199,6 +209,7 @@ struct GBufferSample {
   coverage: f32,        // fraction of the pixel this crossing covers (1 outside the AA band)
   span: f32,            // disk radius the pixel spans here, in normalized annulus units
   isHit: bool,
+  synthesized: bool,  // this crossing came from the refine pass, not the G-buffer
   isBlackHole: bool,
   escaped: bool,
 }
@@ -206,18 +217,48 @@ struct GBufferSample {
 
 ## The AA target — photon ring coverage and span
 
-A second one-shot pass, `refine.wgsl`, writes a **2 B/px `rg8unorm`** target next
-to the G-buffer:
+A second one-shot pass, `refine.wgsl`, writes a **10 B/px target with two
+attachments** next to the G-buffer:
+
+**Attachment 0 — `rg8unorm`, 2 B/px: coverage and span**
 
 | Channel | Name | Meaning |
 |---|---|---|
 | `x` | `covFront` | fraction of the pixel the FIRST disk crossing covers, from 16 sub-rays (`n/16`) |
-| `y` | `spanFront` | how much DISK RADIUS the pixel spans at that crossing, in normalized annulus units, **centred on the pixel's own radius** |
+| `y` | `spanFront` | how much DISK RADIUS the pixel spans at that crossing, in normalized annulus units, **centred on the radius the frame pass will anchor its taps at** |
 
 Outside the refined band it is exactly `(isHit ? 1 : 0, 0)`. `1.0` is exact in
 `rg8unorm`, so every unrefined pixel multiplies its alpha by a literal one and its
 final colour is **bit-for-bit** what it was before this target existed (verified
-with `cmp` on all eight debug views).
+with `cmp`: `--aa 0` reproduces the pre-AA frame byte for byte, and the sky views
+4 and 6 are byte-identical with the AA on).
+
+**Attachment 1 — `rgba16float`, 8 B/px: the synthesized crossing**
+
+| Channel | Meaning |
+|---|---|
+| `xy` | crossing position in the `y = 0` plane (world x, z) — same encoding as `gHit1`; `(0,0)` = nothing to substitute |
+| `zw` | ray direction at that crossing, `(y, azimuth of xz)` — same encoding as `gView.xy` |
+
+Written **only** for pixels whose CENTRE ray missed the disk while the sub-rays
+hit it: the sub-pixel arcs that live inside the shadow silhouette. Everywhere else
+— including every pixel that has a real centre hit, which already has the exact
+f32 thing in the G-buffer — it is all zeros. `decodeGBuffer` substitutes it for
+`hit1`/`view.xy` and marks the sample `synthesized`; from that point on nothing
+downstream (footprints, rotation, the tap loop, `disk.wgsl`) can tell the
+difference, because it is a real crossing of a real geodesic in the same encoding.
+
+*Why `rgba16float` and not `rgba8unorm` for this.* 8 bits of azimuth quantize to
+`2*pi/255` = 0.0246 rad, and the azimuth along the ring only moves ~0.005 rad per
+pixel: an 8-bit `(radius, azimuth)` pair would freeze the disk's noise and Doppler
+pattern into ~5 px stairs along a 1 px arc — a new artifact inside the very band
+being fixed. Stored as an f16 PLANE POSITION the same crossing keeps 0.0039 world
+units at r ≈ 6 (10-bit mantissa, exponent 2) = 6.5e-4 rad of azimuth (~0.13 px)
+and 0.1% of the annulus in radius, and it needs no new decode path. The direction
+rides in the same 8 bytes because `disk.wgsl` reads it for the slab path length
+(`1/|dir.y|`), the face-on `arcLift` and the Doppler beaming — a synthesized
+sample without it would be shaded as if seen exactly edge-on, pinned at the 34x
+`grazing` ceiling with no lift, which is the one thing these arcs are not.
 
 ### What the artifact actually is (measure before you tune)
 
@@ -278,6 +319,25 @@ to antialias disk-hit coverage *and* disk attribute variation — not a silhouet
    the measured span and bias the radial mean. The price is a span up to 2x wider
    than the raw range: a slightly wider prefilter, never a shifted one.
 
+4. **The synthesized crossing.** If the centre ray missed the disk but sub-rays
+   hit it, the pass also writes attachment 1: the surviving sub-ray CLOSEST TO THE
+   PIXEL CENTRE, kept whole — its own plane position and its own direction, one
+   real geodesic — with only its radial coordinate moved to the midpoint of the
+   measured `[rmin, rmax]`, because in this case the pass also chooses the anchor
+   the frame pass's taps will be centred on. `span` is then the raw range, not the
+   doubled symmetric one, because doubling makes the tap loop average `shadeDisk`
+   over radii no sub-ray ever crossed. Measured against the algorithm-free
+   reference below, the midpoint anchor wins BAND-WIDE and not everywhere: inner
+   band 77.6% -> 79.7% of the reference's energy, ring std 0.93x -> 0.86x, darkest
+   pixel of the scanned ring 22 -> 31/255, while at the single 357 deg column the
+   doubled variant is the closer of the two (51,49,43,47 against the reference's
+   47,43,38,33, versus 32,36,32,50 shipped).
+   Not an average of the sub-rays: averaging positions lies about the geometry, and
+   averaging DIRECTIONS is worse, because sub-rays on either side of a fold cross
+   opposite faces and their `dir.y` cancels — `disk.wgsl` reads `1/|dir.y|` as its
+   slab path length, so a cancelled `y` would shade the arc at the 34x edge-on
+   ceiling.
+
 **Shadow coverage is deliberately not stored.** It was measured at `0 -> 4/255`
 (invisible), and consuming a fractional shadow would composite stars from the
 *truncated* `gSky.xyz` of a swallowed ray — new speckle in a 1 px rim, plus a
@@ -323,19 +383,38 @@ agree (frame mean 0.0238 both), and the AA view is unchanged by scene rotation.
 
 ### Cost and the thermal gate
 
-The AA data costs the frame pass **+2 B/px** of read (~6% of the 32 B/px the shade
-pass already reads, and that pass is ALU-bound, not bandwidth-bound) plus the tap
-loop. Static counts at 1280x720, shipped defaults:
+The AA data costs the frame pass **+10 B/px** of read (two extra `textureLoad`s on
+top of the 32 B/px of G-buffer; the pass is ALU-bound, not bandwidth-bound) plus
+the tap loop and the synthesized samples. Static counts at 1280x720, shipped
+defaults, from `/home/user/reports/aa-dropout/static-count.mjs` (which reads debug
+views 8 and 9, so these are the shader's own numbers):
 
-| Set | Pixels | Share |
-|---|---|---|
-| refined band (partial coverage or non-zero span) | 19 946 | 2.16% |
-| **tap path actually taken** (`isHit && span > 0.15`) | **1 986** | **0.215%** |
-| 8x8 tiles (~one 64-lane wave) containing any tap pixel | 202 / 14 400 | 1.40% |
+| Set | Pixels | Share | Before this pass existed |
+|---|---|---|---|
+| refined band (partial coverage or non-zero span) | 20 490 | 2.22% | 19 946 / 2.16% |
+| **tap path actually taken** (`isHit && span > 0.15`) | **2 512** | **0.273%** | 1 986 / 0.215% |
+| **synthesized crossing shaded** (`aaGeom` substituted) | **4 030** | **0.437%** | 0 |
+| 8x8 tiles (~one 64-lane wave) containing any tap pixel | 220 / 14 400 | 1.53% | 202 / 1.40% |
+| 8x8 tiles containing a tap OR a synthesized pixel | 890 / 14 400 | 6.18% | 202 / 1.40% |
 
-So even in the worst case — a whole wave paying K x the disk cost because one lane
-straddles the ring — the tap loop adds `5 extra shadeDisk x 1.40% of waves` ≈
-**7% of the disk-shading work**, and the disk is only part of the shade pass.
+Read that as ADDED work, not as pixels, and mind the double count: 1 986 of the
+2 512 tap pixels were already taking the tap path before this change, so only 526
+are new. The frame gains 4 030 pixels that call `shadeDisk` once where they
+previously called it not at all (`isHit` goes 195 264 -> 199 294, +2.1% of the
+disk-shaded pixels) plus 526 pixels that newly enter the 6-tap loop:
+`4 030 + 5 x 526 = 6 660` added evaluations against 195 264 already being shaded =
+**+3.4% of the disk-shading work**, and the disk is only part of the shade pass.
+
+The wave bound has to be normalized against DISK work, not against the frame: only
+21% of the frame shades the disk at all, so `195 264 / 64 ≈ 3 051` wave-equivalents
+of disk shading exist. Against that, 890 tiles each paying one extra `shadeDisk`
+for all 64 lanes is **~+29%** (~+25% if only the 688 tiles that were not already
+paying for taps are counted, +3% for the 18 newly-tapping tiles). That bound
+assumes zero coherence inside a wave, which a 1 px arc violates by construction —
+it is a ceiling, not an estimate, and the real number has to come from a GPU
+measurement, not from this sandbox. The near-critical mask criterion itself is one
+`cameraRay` + one cross product per pixel in the ONE-SHOT pass — nothing per
+frame.
 **Hard gate: shade GPU time <= 1.45 ms at DPR 1 (from 1.3 ms), measured with the
 `?debug` panel's `measure` button on real hardware.** Numbers from the Node
 harness in a container are CPU/SwiftShader and say nothing about GPU time.
@@ -352,18 +431,92 @@ If the gate ever fails at K = 4, the documented fallback is a **single**
 whole span, scaled by coverage: smooth and continuous at ~1 tap, at the price of a
 radial-profile bias.
 
-### Known gap (do not rediscover it)
+### Sub-pixel arcs inside the silhouette (the old "known gap", partly closed)
 
-Coverage can only ever *scale* a sample that exists. A pixel whose centre ray
-misses the ring has no radius, azimuth or view direction to rebuild a sample from,
-so it cannot be shaded no matter what `covFront` says. Within the 5x5 mask this
-does not happen (measured: 0 such pixels at the shipped defaults). What *does*
-happen is one step further out: a sub-pixel arc that lives entirely **inside** the
-shadow silhouette, where no centre ray in a 5x5 neighbourhood sees the disk, so
-the mask never fires. Example at 720p, 45°, r = 188: the 3x reference has luma 58,
-the 1x frame and `covFront` are both 0. Closing it needs the crossing geometry
-stored per pixel (promote the target to `rgba8unorm`/`rgba16float` with radius +
-azimuth), not a wider dilation.
+Coverage can only ever *scale* a sample that exists. The failure mode this used to
+document was a pixel whose centre ray missed the ring: with no radius, azimuth or
+view direction there is nothing to shade, no matter what `covFront` says. The
+**synthesized crossing** (attachment 1, step 4 above) is that missing sample, and
+it is what closed the arcs near the disk plane. The near-critical mask criterion is
+NOT what closed them — see its own note above; at 720p defaults every recovered arc
+sat in a neighbourhood the 5x5 test already flagged.
+
+#### Use the algorithm-free reference
+
+```bash
+node debug-render.mjs --views final --ssaa 3 --aa 0 --out /home/user/reports/ref-noaa
+```
+
+`--aa 0` is the point. A `--ssaa 3` reference rendered with the AA **on** is not a
+reference for the AA: it bakes in whatever the refine pass did that day (partial
+coverage dims a sub-pixel arc even at 3x), so it moves whenever the shader moves and
+numbers taken against it cannot be reproduced after a merge. With `--aa 0` the
+reference is 3x supersampled point sampling — byte-identical from any tree that has
+the A/B knob, and the only stable yardstick here. Every number below is against it.
+
+Measured, 1280x720, shipped defaults, t = 2.5 (`/home/user/reports/aa-dropout/`):
+
+| | pre-AA (`--aa 0`) | before (AA, pre-change) | after | reference |
+|---|---|---|---|---|
+| luma at (828, 364..373), the 357 deg arc | 0 x9, 10 | 0 x9, 51 | **22, 24, 25, 25, 25, 32, 36, 32, 50, 51** | 48, 51, 53, 53, 51, 47, 43, 38, 33, 33 |
+| inner-band (r = 176..189) energy, 0..359 deg | 48.6% | 33.1% | **79.7%** | 100% |
+| ring band std (20..70 deg, `ring-scan.mjs`) | 25.6 = 3.0x ref | 9.97 = 1.17x ref | **7.30 = 0.86x ref** | 8.5 |
+| ring band min / neighbour steps > 2x | 10 / 21 of 50 | 14 / 4 of 50 | **31 / 0 of 50** | 26 / 1 of 50 |
+
+Note what the pre-AA column says: the old AA made the inner band WORSE than point
+sampling (48.6% -> 33.1%), because coverage scaling dims a real hit and had nothing
+to add back. That is the asymmetry the synthesized crossing removes.
+
+#### What is still broken (the new known gap): 45 deg
+
+The reference has a SECOND, deeper inner arc — one more half turn around the photon
+sphere, ~1 px wide, running diagonally through (770,224) -> (775,229) at 45 deg,
+where it reads 14, 38, 58, 58, 38, 14. We render **0** along all of it, and debug
+view 8 says why: `covFront` is 0 there, i.e. **none of the 16 sub-rays finds the
+crossing** even though the pixels are inside the near-critical band and are flagged
+shadow. A 4x4 stratified grid samples every 0.25 px; the 3x reference samples every
+0.33 px and does find it, so this is not simply "too thin for 16 rays" — the sub-ray
+and the reference ray disagree about the same geometry and that disagreement is not
+yet explained. Unchanged by this work (pre-AA, pre-change AA and current all render
+0), and it is the reason the strict inner-band sweep still reports 8 failing
+azimuths (see below) rather than 1 or 2.
+
+Reproduce: `node inner-arc.mjs <frame>.png ref-noaa/final.png` and look at the
+`45(0/58@r187.5)` entry; `node probe.mjs final-on/aa.png 769 223 7 7` for the zero
+coverage.
+
+#### The rest of the residual
+
+Against the algorithm-free reference the strict inner-band sweep goes from **9 of
+360 azimuths below half the reference to 8** — the composition changes far more than
+the count: of the six azimuths that rendered a total zero (3, 35, 39, 45, 357, 358)
+only 45 deg still does, the others now render 3..25 against a 42..63 reference, and
+band energy more than doubles. State the reference when quoting this gate: 8 of 360
+against `--ssaa 3 --aa 0`, 2 of 360 against a `--ssaa 3` reference rendered with the
+AA on (which is why that number looked better and meant less), 8 of 360 for plain
+point sampling.
+
+Two classes make up most of what is left:
+
+- **187 deg (28 vs 58), unchanged by this work.** The centre ray there really does
+  hit, the 5x5 block is uniform, and the deficit is *tangential* compression — the
+  radial prefilter does not address it and neither does a synthesized sample.
+- **Occlusion darkening, by construction.** A synthesized front layer composites IN
+  FRONT of light that previously reached the camera unobstructed, so some pixels
+  must lose energy: 547 pixels get darker (483 of them further from the reference),
+  mean loss 4.1/255, worst 22/255, against 1 550 pixels that get brighter (973 of
+  them closer to the reference). Not a bug — it is what a newly opaque front layer
+  does — but it is why the band does not improve monotonically pixel by pixel.
+
+One thing that was tried and **rejected**: rebuilding the synthesized pixel's noise
+footprint from the measured span instead of from `fwidth` (the derivative really is
+meaningless there — the neighbours are misses, so the pixel's `fwidth` footprint
+saturates the `min(..., 4.0)` clamp and the noise is fully prefiltered). Defensible
+in principle, measured worse: inner-band energy overshot the reference (144% against
+the AA-on reference of the day), the worst azimuth got *worse* (18 vs 51) and the
+ring std went from 0.86x to 0.93x. Left as is; if it is revisited, the missing
+ingredient is the AZIMUTHAL extent of the sub-ray crossings, which the refine pass
+could measure and would need a third channel to carry.
 
 ## The two shading entry points
 
@@ -813,6 +966,7 @@ directions right where the prefilter now keeps the sky alive.
 | `@group(0) @binding(7)` | `noiseVolume` | `texture_3d<f32>` (`r8unorm`) | `noise-volume.mjs::createNoiseVolume` |
 | `@group(0) @binding(8)` | `noiseSampler` | `sampler` (linear, `repeat` xyz) | `noise-volume.mjs::noiseVolumeSampler` |
 | `@group(0) @binding(9)` | `gAa` | `texture_2d<f32>` (`rg8unorm`) | `targets.aa.colors[0]`, written by `refine.wgsl` |
+| `@group(0) @binding(10)` | `gAaGeom` | `texture_2d<f32>` (`rgba16float`) | `targets.aa.colors[1]`, written by `refine.wgsl` |
 
 `Shade` carries `resolution`, `time`, `diskOuter`, `debugView`, `diskLayers`, `aa`
 and `sceneYaw` — nothing camera-related, the bake froze it (`sceneYaw` rotates the
@@ -868,7 +1022,7 @@ straight to the swap chain.
 
 ```
 color = compositeDisk(compositeDisk(stars, back), front)   // linear HDR
-  ├── debugView 1..7 ─► return RAW, before the tone map
+  ├── debugView 1..9 ─► return RAW, before the tone map
   └── debugView 0     ─► return tonemap(color, uv)
 ```
 
@@ -1217,9 +1371,20 @@ The lil-gui panel has a **debug** folder with a *g-buffer view* dropdown:
 | 5 | disk density | `DiskSample.density` |
 | 6 | sky footprint / star prefilter | R = star cells crossed per pixel ÷ 16, G = `starPrefilterRatio` (1 = star at least a pixel wide and at full brightness, → 0 = one pixel swallows many cells and every star is dimmed by the square of it), B = 1 where stars are sampled. G → 0 no longer means "no sky here": the flux is still rendered, spread out. |
 | 7 | second disk hit | **B = 1 exactly where a hidden second crossing exists**, R/G = its normalized disk coords (radius, azimuth) |
-| 8 | ring aa (cov/span/taps) | R = `covFront`, G = `spanFront`, B = 1 where the K-tap radial prefilter ran. Yellow + blue = the compressed photon-ring band. A pixel with R > 0, G = 0, no B **and** a black final image is the known gap: the 5×5 dilation found coverage the centre ray missed, and there is no radius to rebuild a sample from (see [The AA target](#the-aa-target--photon-ring-coverage-and-span)). |
+| 8 | ring aa (cov/span/taps) | R = `covFront`, G = `spanFront`, B = 1 where the K-tap radial prefilter ran. Yellow + blue = the compressed photon-ring band. A pixel with R > 0 **and** a black final image is a dropout — coverage measured, nothing shaded with it; cross-check it against view 9 before blaming the tap loop (see [The AA target](#the-aa-target--photon-ring-coverage-and-span)). |
+| 9 | ring aa (synth crossings) | R/G = the SYNTHESIZED crossing's normalized disk coords (radius, azimuth), B = 1 exactly where the frame pass shaded a synthesized sample — the sub-pixel arcs inside the shadow silhouette that no centre ray of the neighbourhood ever hit. Entirely black at `--aa 0`. |
 
-Views 1–5 describe the **front** crossing. Next to the dropdown, **disk layers**
+Views 1–5 describe the **front** crossing, including a synthesized one, so views
+**1, 2, 3 and 5** legitimately gain the arcs inside the silhouette when the AA is
+on (view 1 too: a synthesized sample has a face and therefore a normal). The sky
+views 4 and 6 are byte-identical either way.
+
+> **Gotcha when diffing:** at `--aa 0` the frame and every G-buffer view are
+> byte-identical to the pre-AA renderer, but **view 8 is not** — it renders the
+> refine target raw, and the near-critical criterion refines 544 pixels the old
+> mask did not (span channel only, `R:0 G:544 B:0`). A `cmp` sweep over
+> `--views all --aa 0` will flag exactly that one view, and it is not a
+> regression. Next to the dropdown, **disk layers**
 switches between `front hit only` (what the renderer did before the second hit
 existed) and `front + hidden hit` (the default) — the quickest way to see what
 the second layer contributes. **photon-ring aa** is the other A/B: `off` is
@@ -1246,17 +1411,22 @@ nothing and is instantly reversible.
 > shader you must reload the page (`agent-browser ... reload`) — otherwise you
 > are looking at the previous shader and will chase ghosts.
 
-Browser session that actually has WebGPU in this sandbox:
+Browser session that actually has WebGPU in this sandbox. **`--webgpu` is gone**
+(checked against `agent-browser --help` on 0.27.0); `--headed` is NOT — it is still
+in the help and still needed, since a headless Chrome has no adapter here. Pass the
+WebGPU flags yourself with `--args`:
 
 ```bash
 export PATH="$(npm prefix -g)/bin:$PATH"
-agent-browser --session bh --webgpu --headed open http://localhost:3010/
-agent-browser --session bh --webgpu --headed set viewport 1440 900
-agent-browser --session bh --webgpu --headed screenshot canvas /home/user/reports/hero.png
+FLAGS="--enable-unsafe-webgpu,--use-angle=vulkan,--enable-features=Vulkan,--no-sandbox"
+agent-browser --session bh --headed --args "$FLAGS" open http://localhost:3010/
+agent-browser --session bh --headed --args "$FLAGS" set viewport 1440 900
+agent-browser --session bh --headed --args "$FLAGS" screenshot canvas /home/user/reports/hero.png
 ```
 
-Without `--webgpu --headed` there is no adapter and the page silently shows the
-static PNG fallback.
+Without those Chrome flags there is no adapter and the page silently shows the
+static PNG fallback — so a screenshot that looks like the fallback is a *setup*
+failure, not a shader failure. Check for the canvas, not for pixels you like.
 
 ### Headless, no browser — `debug-render.mjs`
 

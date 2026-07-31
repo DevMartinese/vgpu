@@ -29,7 +29,7 @@ struct Shade {
   time: f32,
   /** Outer disk radius the G-buffer was baked with. */
   diskOuter: f32,
-  /** 0 = final image, 1..8 = G-buffer debug views (see gbuffer.md). */
+  /** 0 = final image, 1..9 = G-buffer debug views (see gbuffer.md). */
   debugView: f32,
   /**
    * Photon-ring antialiasing: 1 consumes the refine pass's coverage/span target,
@@ -119,12 +119,25 @@ const SATURATION: f32 = 0.0;
  * the front crossing, y = the disk radius the pixel spans there (normalized
  * annulus units, centred on the pixel's own radius). See refine.wgsl.
  *
- * 2 B/px on top of the 32 B/px the G-buffer already costs this pass, read with
- * the same 1:1 `textureLoad` as everything else. It is a separate target rather
- * than a 5th bake attachment because the bake's MRT already spends the full
- * 32 B/sample WebGPU guarantees.
+ * 2 B/px on top of the 32 B/px the G-buffer already costs this pass (the other
+ * 8 are `gAaGeom` below), read with the same 1:1 `textureLoad` as everything else.
+ * It is a separate target rather than a 5th bake attachment because the bake's MRT
+ * already spends the full 32 B/sample WebGPU guarantees.
  */
 @group(0) @binding(9) var gAa: texture_2d<f32>;
+/**
+ * Second attachment of the refine pass: a SYNTHESIZED front crossing
+ * (`rgba16float`, xy = plane position, zw = encoded direction) for the pixels
+ * whose centre ray missed the ring while the sub-rays found it — the sub-pixel
+ * arcs inside the shadow silhouette. `(0,0,0,0)` everywhere else.
+ *
+ * Coverage can only SCALE a sample; this is the sample. 8 B/px more read on top
+ * of the 32 B/px G-buffer and the 2 B/px coverage pair, one extra `textureLoad`,
+ * and it is consumed exclusively through `decodeGBuffer` — see refine.wgsl for
+ * why the crossing is stored as an f16 plane position instead of an 8-bit
+ * (radius, azimuth) pair.
+ */
+@group(0) @binding(10) var gAaGeom: texture_2d<f32>;
 
 /**
  * Screen-space footprint of the disk noise for one layer, in noise units per
@@ -403,6 +416,16 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   // (1, 0) — an exact 1 in rg8unorm — so those pixels multiply their alpha by a
   // literal one and stay bit-for-bit what they were.
   let aa = textureLoad(gAa, texel, 0).xy;
+  // The synthesized crossing, and the ONLY place `Shade.aa` gates something
+  // before the decode. It has to be gated here rather than downstream because a
+  // substituted sample changes `isHit`, and `isHit` feeds the derivative prologue
+  // below: at `aa = 0` the frame pass must see the same G-buffer it saw before
+  // this pass existed, footprints included, or the A/B would not be exact.
+  //
+  // The load itself is unconditional (uniform control flow, one texel) and only
+  // the value is selected — a branch here would be a non-uniform texture fetch in
+  // the middle of the derivative prologue.
+  let aaGeom = select(vec4f(0.0), textureLoad(gAaGeom, texel, 0), shade.aa > 0.5);
 
   let baked = decodeGBuffer(
     textureLoad(gHit1, texel, 0).xy,
@@ -411,6 +434,7 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
     textureLoad(gView, texel, 0),
     shade.diskOuter,
     aa,
+    aaGeom,
   );
 
   // Both footprints, in uniform control flow. The second layer sits at a
@@ -562,14 +586,31 @@ fn tonemap(linearColor: vec3f, uv: vec2f) -> vec3f {
   // prefilter ran. So:
   //   dark red rim, B = 0  -> partial coverage, no compression: coverage only.
   //   yellow + blue        -> the compressed band; this is the ring being fixed.
-  //   R > 0 with G = 0 and no B on a pixel that renders black -> the failure mode
-  //     to look for: the 5x5 dilation found coverage the centre ray missed, and
-  //     there is no radius to rebuild the sample from (see refine.wgsl).
+  //   R > 0 on a pixel that renders black -> a dropout: coverage was measured and
+  //     nothing was shaded with it. Inside the silhouette that used to be the
+  //     documented "known gap"; it is now covered by the synthesized crossing, so
+  //     cross-check any such pixel against view 9 before blaming the tap loop.
   if (mode == 8) {
     return vec4f(
       aa.x,
       aa.y,
       select(0.0, 1.0, shade.aa > 0.5 && g.isHit && g.span > AA_SPAN_MIN),
+      1.0,
+    );
+  }
+  // Synthesized-crossing diagnostic — the sub-pixel arcs that live INSIDE the
+  // shadow silhouette, where no centre ray of the neighbourhood ever hit the disk
+  // and coverage alone had nothing to scale. R = that crossing's normalized disk
+  // radius, G = its azimuth (0..1), B = 1 exactly where the frame pass shaded a
+  // synthesized sample. Black everywhere else, and black everywhere at `--aa 0`.
+  //
+  // Read it together with view 8: R > 0 in view 8 with a black final image and no
+  // B here means a dropout the refine pass measured but could not rebuild.
+  if (mode == 9) {
+    return vec4f(
+      select(0.0, g.diskUv.x, g.synthesized),
+      select(0.0, g.diskUv.y, g.synthesized),
+      select(0.0, 1.0, g.synthesized),
       1.0,
     );
   }
