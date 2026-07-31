@@ -315,6 +315,7 @@ export function HeroBlackHole() {
         'sky footprint / prefilter': 6,
         'second disk hit': 7,
         'ring aa (cov/span/taps)': 8,
+        'ring aa (synth crossings)': 9,
       }).name('g-buffer view');
       // A/B for the photon-ring antialiasing. `off` is exactly the pre-AA image:
       // the one-shot refine pass still runs, the frame pass just ignores its

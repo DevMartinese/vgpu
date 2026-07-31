@@ -59,6 +59,19 @@ export struct GBufferSample {
   span: f32,
   /** True when this pixel sees the accretion disk. */
   isHit: bool,
+  /**
+   * True when this crossing did NOT come from the G-buffer: the pixel's centre
+   * ray missed the disk, the refine pass's sub-rays did not, and this sample is
+   * the surviving sub-ray nearest the pixel centre (see refine.wgsl).
+   *
+   * These are the sub-pixel arcs of the lensed disk image that live INSIDE the
+   * shadow silhouette, where no centre ray of the neighbourhood sees the disk at
+   * all. `coverage` is always < 1 on them, by construction. Nothing in the
+   * shading needs to branch on this — it is a real crossing of a real geodesic —
+   * it exists for debug view 9 and for the A/B: at `Shade.aa = 0` the frame pass
+   * passes a zero `aaGeom` and no sample is ever synthesized.
+   */
+  synthesized: bool,
   /** True when the ray ended inside the event horizon (render black). */
   isBlackHole: bool,
   /** True when the ray escaped to infinity (render stars). */
@@ -92,7 +105,7 @@ fn decodeDirection(encoded: vec2f) -> vec3f {
 }
 
 /** Decodes one crossing. `flags` and `sky` are shared by both layers. */
-fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, diskOuter: f32, aa: vec2f) -> GBufferSample {
+fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, diskOuter: f32, aa: vec2f, synthesized: bool) -> GBufferSample {
   var sample: GBufferSample;
   let planeRadius = length(plane);
   // The bake only ever writes crossings inside [ISCO, diskOuter] and leaves a
@@ -124,6 +137,7 @@ fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, di
   sample.coverage = clamp(aa.x, 0.0, 1.0);
   sample.span = clamp(aa.y, 0.0, 1.0);
   sample.isHit = isHit;
+  sample.synthesized = synthesized && isHit;
   sample.isBlackHole = (flags & 1) != 0;
   sample.escaped = (flags & 2) != 0;
   return sample;
@@ -133,17 +147,36 @@ fn decodeLayer(plane: vec2f, encodedDirection: vec2f, sky: vec4f, flags: i32, di
  * Decodes the four raw G-buffer texels written by `bake.wgsl` into both disk
  * layers. `diskOuter` must be the same disk radius the bake ran with.
  *
- * `aa` is the matching texel of the refine pass's target — `(covFront,
+ * `aa` is the matching texel of the refine pass's first attachment — `(covFront,
  * spanFront)`, see refine.wgsl. It describes the FRONT crossing only: the back
  * layer is handed `(1, 0)`, i.e. "fully covered, not compressed", so it decodes
  * exactly as it did before the AA target existed. Pass `vec2f(1.0, 0.0)` to opt
  * out entirely.
+ *
+ * `aaGeom` is the second attachment — a SYNTHESIZED front crossing for pixels
+ * whose centre ray missed the disk while the refine pass's sub-rays hit it:
+ * `xy` = plane position, `zw` = the encoded direction, in exactly the encoding
+ * `hit1` / `view.xy` use. It is `(0,0,0,0)` on every pixel that has a real centre
+ * hit and on every pixel outside the refined band, and `|xy| < ISCO` is the "no
+ * substitution" test — the same one that separates hit from miss above. Pass
+ * `vec4f(0.0)` to opt out entirely (that is what `Shade.aa = 0` does, which is
+ * why the A/B switch is exact).
+ *
+ * Substituting here rather than in `shade.wgsl` is deliberate: the synthesized
+ * sample is a real crossing of a real geodesic in the same encoding, so once it
+ * is in place NOTHING downstream — footprints, rotation, the tap loop, the disk
+ * shader — has to know it came from the refine pass.
  */
-export fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32, aa: vec2f) -> GBufferLayers {
+export fn decodeGBuffer(hit1: vec2f, hit2: vec2f, sky: vec4f, view: vec4f, diskOuter: f32, aa: vec2f, aaGeom: vec4f) -> GBufferLayers {
   let flags = i32(sky.w + 0.5);
+  // The synthesized crossing only ever replaces a MISS: a pixel with a real
+  // centre hit keeps the G-buffer's f32 position and exact direction.
+  let substitute = length(hit1) <= ISCO * 0.5 && length(aaGeom.xy) > ISCO * 0.5;
+  let frontPlane = select(hit1, aaGeom.xy, substitute);
+  let frontDirection = select(view.xy, aaGeom.zw, substitute);
   var layers: GBufferLayers;
-  layers.front = decodeLayer(hit1, view.xy, sky, flags, diskOuter, aa);
-  layers.back = decodeLayer(hit2, view.zw, sky, flags, diskOuter, vec2f(1.0, 0.0));
+  layers.front = decodeLayer(frontPlane, frontDirection, sky, flags, diskOuter, aa, substitute);
+  layers.back = decodeLayer(hit2, view.zw, sky, flags, diskOuter, vec2f(1.0, 0.0), false);
   // The bake already guarantees this ordering; enforcing it here too means a
   // second layer can never be shaded without a first one in front of it.
   if (!layers.front.isHit) {
