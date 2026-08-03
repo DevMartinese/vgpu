@@ -169,6 +169,9 @@ test("routes the dogfood queries to the page that answers them", () => {
     ["without a bundler", "/guides/no-bundler.docs.md"],
     ["node", "/guides/no-bundler.docs.md"],
     [".wgsl file", "/guides/no-bundler.docs.md"],
+    // Issue #243 words it as "shaders in their own file", so that phrasing must land too.
+    ["shader in separate file", "/guides/no-bundler.docs.md"],
+    ["shader in its own file", "/guides/no-bundler.docs.md"],
     ["headless node script", "/guides/no-bundler.docs.md"],
     // The ESM-only friction: the fix was renaming the script to .mts, found only by guessing.
     ["esm only", "/guides/no-bundler.docs.md"],
@@ -222,6 +225,25 @@ test("the no-bundler and two-pass guides are reachable by cat and from getting-s
 
   // The ESM-only gotcha cost the dogfood run ~10 minutes; it belongs on the symbol page too.
   expect(success(["docs", "cat", "resolveShader"])).toContain("ERR_PACKAGE_PATH_NOT_EXPORTED");
+});
+
+// `docs find` stops at the first non-empty step (symbol -> keyword/title -> body), so a guide that
+// claims a broad word can hide the API page that used to answer it. These pin the API routes that
+// must survive the new guides' keywords.
+//
+// Note the limit of what is pinnable here: a bare `docs find "depth"` now returns only the two-pass
+// guide. That is not keyword greed we can tune away -- the guide's *title* contains "depth", and the
+// title is part of the route text, so the only way to hand `depth` back to the body-fallback step
+// would be to rename a guide about depth targets to not say "depth". The symbol route below is the
+// meaningful guarantee: identifier queries still reach their reference page.
+test("the new guides do not steal the symbol routes of the API pages they describe", () => {
+  expect(success(["docs", "find", "Target"])).toContain("/vgpu/target.docs.md");
+  expect(success(["docs", "find", "TargetOptions"])).toContain("/vgpu/target.docs.md");
+  expect(success(["docs", "find", "Effect"])).toContain("/vgpu/effect.docs.md");
+  // The body-fallback step still runs for queries no route text claims.
+  expect(success(["docs", "find", "VGPU-WGSL-PKG-NOTFOUND"])).toContain(
+    "/@vgpu/wgsl/runtime/resolve-shader.docs.md",
+  );
 });
 
 test("keeps existing guide and API docs forms working", () => {

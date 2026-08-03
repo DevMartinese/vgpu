@@ -1,7 +1,7 @@
 ---
 title: Using vgpu without a bundler
 summary: Resolve a `.wgsl` entry file's import graph with `resolveShader()` and render it from Node, a script, or a test — no webpack, Vite, or Turbopack loader required.
-keywords: no bundler, without a bundler, no-bundler, resolveshader, resolve shader, resolve-shader, .wgsl file, wgsl file, wgsl entry file, shader file, load shader from file, node, vgpu/node, node script, plain node script, headless, headless node script, headless rendering, headless shader file, esm only, esm-only, type module, mjs, mts, tsx, err_package_path_not_exported, read pixels, static render
+keywords: no bundler, without a bundler, no-bundler, resolveshader, resolve shader, resolve-shader, .wgsl file, wgsl file, wgsl entry file, shader file, separate file, own file, shader in separate file, shader in its own file, shader in another file, shaders in their own file, load shader from file, node, vgpu/node, node script, plain node script, headless, headless node script, headless rendering, headless shader file, esm only, esm-only, type module, mjs, mts, tsx, err_package_path_not_exported, read pixels, static render
 relatedSymbols:
   - resolveShader
   - ResolveOptions
@@ -22,7 +22,21 @@ If you *are* shipping this inside a bundler-based app, use the loader instead: [
 
 ## Resolve a `.wgsl` entry file
 
-`resolveShader()` reads an entry module from disk, follows its imports (relative, `@/`, and package imports like `@vgpu/wgsl-std/noise`), and emits one finished WGSL string:
+`resolveShader()` reads an entry module from disk, follows its imports (relative, `@/`, and package imports like `@vgpu/wgsl-std/noise`), and emits one finished WGSL string.
+
+Here is the entry file the rest of this page uses — a fullscreen effect with one `params` uniform. `effect()` injects the vertex stage and exposes the interpolated `uv`, so the file only declares a fragment entry point:
+
+```wgsl
+// shader.wgsl
+struct Params { time: f32 }
+@group(0) @binding(0) var<uniform> params: Params;
+
+@fragment fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+  return vec4f(uv, abs(sin(params.time)), 1.0);
+}
+```
+
+Resolve it:
 
 ```ts
 import { fileURLToPath } from "node:url";
