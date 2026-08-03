@@ -1,3 +1,4 @@
+import { wgslError } from "./errors.ts";
 import { printWgslTokens } from "./token-printer.ts";
 import { RenameAllocator } from "./rename-allocator.ts";
 import { analyzeWgslTokens, type ScopeAnalysis, type ScopeDeclaration, type FunctionScopeInfo } from "./scope-walker.ts";
@@ -24,6 +25,7 @@ export function applyIdentifierMinifyWgsl(source: string, options: ApplyIdentifi
   const tokens = scan(source);
   const analysis = analyzeWgslTokens(tokens);
   const replacements = buildIdentifierReplacements(analysis);
+  assertNoDanglingLocalReferences(analysis, replacements);
   return {
     wgsl: options.whitespace === false ? applyReplacementsPreservingTrivia(source, tokens, replacements) : printWgslTokens(tokens, { replacements }),
     replacements,
@@ -92,20 +94,73 @@ function renameFunctionLocals(analysis: ScopeAnalysis, fileScopeNames: ReadonlyS
       .sort((a, b) => a.tokenIndex - b.tokenIndex);
     if (declarations.length === 0) continue;
 
-    const replaceable = new Set<number>();
+    const ownTokens = new Map<number, Set<number>>();
     for (const decl of declarations) {
-      replaceable.add(decl.tokenIndex);
-      for (const ref of analysis.references) if (ref.declarationId === decl.id) replaceable.add(ref.tokenIndex);
+      const own = new Set<number>([decl.tokenIndex]);
+      for (const ref of analysis.references) if (ref.declarationId === decl.id) own.add(ref.tokenIndex);
+      ownTokens.set(decl.id, own);
     }
+
+    const renameable = declarations.filter((decl) => allLocalOccurrencesAccountedFor(analysis.tokens, fn, decl.name, ownTokens.get(decl.id)!));
+
+    const replaceable = new Set<number>();
+    for (const decl of renameable) for (const token of ownTokens.get(decl.id)!) replaceable.add(token);
 
     const reserved = new Set(fileScopeNames);
     for (const name of inFunctionUnrenamedIdentifierTexts(analysis.tokens, fn, replaceable)) reserved.add(name);
     const allocator = new RenameAllocator({ reserved });
 
-    for (const decl of declarations) {
+    for (const decl of renameable) {
       const name = allocator.allocate();
-      replacements.set(decl.tokenIndex, name);
-      for (const ref of analysis.references) if (ref.declarationId === decl.id) replacements.set(ref.tokenIndex, name);
+      for (const token of ownTokens.get(decl.id)!) replacements.set(token, name);
+    }
+  }
+}
+
+// Independent check that the scope analysis fully explains a local declaration before we shorten
+// it: every identifier token inside the declaration's own function that is spelled like the
+// declaration must be one of the occurrences the walker attributed to it. If anything else shares
+// the spelling — a reference the walker lost (vgpu#251), a same-named declaration in a sibling or
+// nested scope — the declaration is left alone, so a scope-analysis bug costs bytes instead of
+// producing dangling or misattributed identifiers.
+function allLocalOccurrencesAccountedFor(tokens: readonly Token[], fn: FunctionScopeInfo, name: string, own: ReadonlySet<number>): boolean {
+  for (let i = fn.nameTokenIndex; i <= fn.bodyEndToken; i++) {
+    const token = tokens[i];
+    if (token?.kind === "ident" && token.text === name && !own.has(i)) return false;
+  }
+  return true;
+}
+
+/**
+ * Post-renaming self-check: for every local this pass decided to rename, no token still spelled
+ * with the local's original name may survive inside that local's function. That condition is
+ * exactly the dangling-identifier failure of vgpu#251, and checking it needs no knowledge of WGSL
+ * builtins or keywords — a re-scan of the printed WGSL would need such a list, because unresolved
+ * builtin calls (`sin`, `select`, `vec4f`) are preserved with the same `"unknown"` reason as a
+ * genuinely orphaned reference and are indistinguishable from one at the text level.
+ *
+ * This is an independently implemented second opinion on the invariant `renameFunctionLocals`
+ * enforces up front, so it keeps working if that guard is ever changed or lost. It runs on every
+ * identifier-safe minification and is not gated behind `ResolveOptions.validate`: it is linear in
+ * token count, needs no GPU adapter, and emitting knowingly broken WGSL should not be opt-out.
+ * It is inert when the walker fell back for the whole module, since nothing is renamed then.
+ */
+export function assertNoDanglingLocalReferences(analysis: ScopeAnalysis, replacements: ReadonlyMap<number, string>): void {
+  for (const fn of analysis.functions) {
+    const renamedLocalNames = new Set(
+      analysis.declarations
+        .filter((decl) => decl.functionId === fn.id && localKinds.has(decl.kind as "param" | "let" | "var" | "const") && replacements.has(decl.tokenIndex))
+        .map((decl) => decl.name),
+    );
+    if (renamedLocalNames.size === 0) continue;
+    for (let i = fn.nameTokenIndex; i <= fn.bodyEndToken; i++) {
+      const token = analysis.tokens[i];
+      if (token?.kind === "ident" && renamedLocalNames.has(token.text) && !replacements.has(i)) {
+        throw wgslError(
+          "VGPU-WGSL-MINIFY-DANGLING-IDENT",
+          `Identifier-safe minification would leave a dangling reference to '${token.text}' in function '${fn.name}'; refusing to emit unsafe WGSL. This indicates a scope-analysis bug in @vgpu/wgsl — please report it at https://github.com/vercel-labs/vgpu/issues.`,
+        );
+      }
     }
   }
 }
