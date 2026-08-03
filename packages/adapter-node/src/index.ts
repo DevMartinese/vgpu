@@ -29,8 +29,7 @@ export function nodeAdapterEnvironmentOverride(): NodeAdapterMode | undefined {
 }
 export function describeNodeAdapter(info: GPUAdapterInfo | null): NodeAdapterInfo {
   const details = info as (GPUAdapterInfo & { adapterType?: string; type?: string }) | null;
-  const name = String(details?.description || details?.device || details?.vendor || "unknown adapter");
-  return { name, type: details?.adapterType === "cpu" || details?.type === "cpu" || /llvmpipe|lavapipe|swiftshader|software|cpu/iu.test(name) ? "cpu" : "gpu" };
+  return { name: String(details?.description || details?.device || details?.vendor || "unknown adapter"), type: isSoftwareAdapter(details) ? "cpu" : "gpu" };
 }
 
 const defaultAdapterRequestRetryCount = 3;
