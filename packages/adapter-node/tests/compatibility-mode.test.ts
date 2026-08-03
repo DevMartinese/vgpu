@@ -163,6 +163,32 @@ test("auto retries with the cached software renderer only after hardware discove
   const device = await createNodeAdapter({ adapter: "auto" }).requestDevice({ adapterRequestRetryBaseDelayMs: 0 } as never);
   expect(state.icdAtRequest).toEqual([undefined, undefined, undefined, "/cache/lvp_icd.json"]);
   expect(error).toHaveBeenCalledWith(expect.stringContaining("using CPU software renderer (lavapipe)"));
+  expect(error).toHaveBeenCalledWith(expect.stringContaining("a vendor Vulkan driver is present but failed to initialize"));
+  expect(error).toHaveBeenCalledWith(expect.stringContaining("XDG_RUNTIME_DIR"));
+  device.destroy();
+  error.mockRestore();
+});
+
+test("auto explains a directly discovered CPU adapter once per process", async () => {
+  state.adapterInfo = { description: "llvmpipe (LLVM 19.1.7, 128 bits)" } as unknown as GPUAdapterInfo;
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const { createNodeDevice } = await import("../src/index.ts");
+  const first = await createNodeDevice({ adapterRequestRetryBaseDelayMs: 0 } as never);
+  const second = await createNodeDevice({ adapterRequestRetryBaseDelayMs: 0 } as never);
+  expect(error).toHaveBeenCalledTimes(1);
+  expect(error).toHaveBeenCalledWith(expect.stringContaining("using CPU software renderer (llvmpipe (LLVM 19.1.7, 128 bits))"));
+  expect(error).toHaveBeenCalledWith(expect.stringContaining("no hardware GPU adapter is available"));
+  first.destroy();
+  second.destroy();
+  error.mockRestore();
+});
+
+test("auto stays quiet when a hardware adapter is discovered", async () => {
+  state.adapterInfo = { description: "NVIDIA GeForce RTX 4090", vendor: "nvidia" } as unknown as GPUAdapterInfo;
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const { createNodeDevice } = await import("../src/index.ts");
+  const device = await createNodeDevice({ adapterRequestRetryBaseDelayMs: 0 } as never);
+  expect(error).not.toHaveBeenCalled();
   device.destroy();
   error.mockRestore();
 });
