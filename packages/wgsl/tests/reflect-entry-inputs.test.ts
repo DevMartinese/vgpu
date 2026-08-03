@@ -72,16 +72,20 @@ test("reflection resolves imported struct vertex inputs", async () => {
   ]);
 });
 
-test("vertex inputs remain snapshot-safe by staying non-enumerable", () => {
+test("vertex inputs are an ordinary enumerable property", () => {
   const entry = reflectSource(`
     @vertex fn vs(@location(0) position: vec2f) -> @builtin(position) vec4f { return vec4f(position, 0.0, 1.0); }
   `).entryPoints[0]!;
 
   expect(entry.inputs?.[0]?.name).toBe("position");
-  expect(Object.keys(entry)).toEqual(["name", "mangledName", "stage", "workgroupSize"]);
-  expect(Object.keys({ ...entry })).not.toContain("inputs");
-  // Non-enumerable is about snapshot/spread ergonomics, not about losing data: `toJSON` keeps
-  // serialization lossless (#252).
+  // Intentionally order-sensitive: this locks the observable `Object.keys()` order to the property
+  // order of the object literal in `publicEntryPoint` (reflect.ts). A failure here means that
+  // literal was reordered, not that reflection is broken.
+  // `workgroupSize` is absent here on purpose: this is a vertex entry, and keys that do not apply
+  // are omitted rather than set to `undefined` so the key set is identical on both sides of a
+  // JSON or structuredClone boundary.
+  expect(Object.keys(entry)).toEqual(["name", "mangledName", "stage", "bindings", "samplingPairs", "inputs"]);
+  expect(Object.keys({ ...entry })).toContain("inputs");
   expect(JSON.stringify(entry)).toContain("inputs");
 });
 
