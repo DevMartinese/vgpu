@@ -12,7 +12,31 @@ import { runExamples } from "../lib/examples/run.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(resolve(here, "../package.json"), "utf8"));
-const VERSION = packageJson.version;
+
+// In-repo, `../package.json` is packages/vgpu/package.json (`@vgpu/cli`): private, never published,
+// versioned independently of the public `vgpu` package and known to drift from it (see
+// CONTRIBUTING.md). Reporting that version made every in-repo `vgpu examples ...` call fail the
+// server handshake with VGPU-EXAMPLES-CLI-TOO-OLD, so resolve the public version from the sibling
+// `vgpu-api` package instead -- same try/catch-degrade pattern as computeStamp() in
+// lib/docs/generate/generate.js.
+//
+// In the published tarball, `../package.json` is the synthetic `{type,version}` stamp written by
+// packages/vgpu-api/scripts/copy-cli.mjs, which has no `name` field, so this branch is dead code
+// there and the published version keeps coming from the stamp (guarded by a unit test).
+export function resolveVersion(dir, pkg) {
+  if (pkg.name === "@vgpu/cli") {
+    try {
+      const apiPackageJson = JSON.parse(readFileSync(resolve(dir, "../../vgpu-api/package.json"), "utf8"));
+      return apiPackageJson.version;
+    } catch {
+      // Incomplete checkout (sparse clone, deleted sibling): degrade to our own version, never crash.
+      return pkg.version;
+    }
+  }
+  return pkg.version;
+}
+
+const VERSION = resolveVersion(here, packageJson);
 
 const help = `vgpu ${VERSION}
 
