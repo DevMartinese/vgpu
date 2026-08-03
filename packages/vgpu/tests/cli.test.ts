@@ -242,6 +242,60 @@ test("find requires every word of the query to match and still reports honest mi
   });
 });
 
+// "gpu" is a substring of "vgpu", so route text (titles like "@vgpu/render/edit", every
+// /vgpu/... path) used to match 134 records and print them alphabetically, burying the exact `Gpu`
+// match around line 100. Ranking by match quality is what makes the cap safe, so both are pinned —
+// but only the first line, the length and the notice: pinning the whole order would turn every docs
+// edit into a test edit.
+test("caps and ranks the gpu route-hits tier", () => {
+  const out = success(["docs", "find", "gpu"]);
+  const lines = out.trimEnd().split("\n");
+  expect(lines[0]).toBe("Gpu\tvgpu\t/vgpu/gpu.docs.md");
+  expect(lines.length).toBeLessThanOrEqual(21);
+  expect(lines.at(-1)).toMatch(/^\.\.\. and \d+ more matches?; showing the 20 best\. Add another word to narrow\.$/);
+});
+
+test("caps the low-signal 'a' query with a notice", () => {
+  const out = success(["docs", "find", "a"]);
+  const lines = out.trimEnd().split("\n");
+  expect(lines.length).toBeLessThanOrEqual(21);
+  expect(lines.at(-1)).toMatch(/showing the 20 best\. Add another word to narrow\.$/);
+  // The notice must never be parseable as a result line, which is why it carries no tab.
+  expect(lines.at(-1)).not.toContain("\t");
+});
+
+test("does not add a notice when the route-hit count is under the cap", () => {
+  const out = success(["docs", "find", "Buffer"]);
+  expect(out).toContain("Buffer\tvgpu/core");
+  expect(out).not.toMatch(/showing the 20 best/);
+});
+
+// ok() has no stderr channel and success() asserts stderr is undefined, so a truncated query must
+// still be a clean exit-0 stdout-only response.
+test("never emits the truncation notice on stderr", () => {
+  const result = runCli(["docs", "find", "gpu"]);
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBeUndefined();
+  expect(result.stdout).toMatch(/showing the 20 best/);
+});
+
+test("caps the content-tier fallback with the same notice format", () => {
+  // "example" matches no symbol, title, keyword or path, so it can only be answered by the
+  // body-search tier — where it hits 72 pages. That tier used to truncate at 20 silently.
+  const out = success(["docs", "find", "example"]);
+  const lines = out.trimEnd().split("\n");
+  expect(lines.length).toBeLessThanOrEqual(21);
+  expect(lines.at(-1)).toMatch(/showing the 20 best\. Add another word to narrow\.$/);
+});
+
+// The load-bearing invariant: ranking orders and slices hits, it never removes them, so the
+// non-empty-route gate still sees the full 134 hits and "gpu" cannot fall through to body search.
+test("ranking never filters route hits into the body-search fallback", () => {
+  const out = success(["docs", "find", "gpu"]);
+  expect(out).toContain("/vgpu/gpu.docs.md");
+  expect(out).toContain("Gpu\tvgpu\t/vgpu/gpu.docs.md");
+});
+
 test("the nextjs guide is reachable by cat and from getting-started", () => {
   for (const form of ["nextjs", "nextjs.md", "/guides/nextjs.docs.md"]) {
     expect(success(["docs", "cat", form])).toContain("# Using vgpu with Next.js and other bundlers");

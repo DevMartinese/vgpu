@@ -94,6 +94,8 @@ finds nothing does it fall back to searching page bodies, which is what makes
 prose (`"typescript wgsl import"`) and error codes
 (`VGPU-WGSL-PKG-NOTFOUND`) resolve to a page. Use `grep` when you want every
 content match with its line, and `find` when you want the page to read next.
+Results are ranked best-match-first and capped at 20; a truncated response ends
+with a line telling you how many matches were hidden so you can add a word.
 
 ### docs grep
 
