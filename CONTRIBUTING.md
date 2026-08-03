@@ -63,7 +63,12 @@ like `chore(release): 0.2.0` and merge it to `main`.
 Private packages (`@vgpu/cli`, the docs app) are versioned so they get changelog entries,
 but they are never published. `@vgpu/cli` ships *inside* the `vgpu` tarball: `copy-cli.mjs`
 writes a synthetic `package.json` stamped with `vgpu`'s version, so its own version field
-is internal bookkeeping only.
+is internal bookkeeping only — nothing at runtime reads it. Running the CLI **from a
+checkout** (`node packages/vgpu/bin/vgpu.js ...`) ignores it too: `bin/vgpu.js` detects it is
+in-repo and resolves its version from `packages/vgpu-api/package.json`, so the in-repo binary
+reports (and negotiates with `https://vgpu.sh`) the same version the published package would.
+Never hand-edit `packages/vgpu/package.json`'s version to work around a version-gate error —
+it has no effect.
 
 ### 2. Tag and publish
 

@@ -38,9 +38,11 @@ export function generateExampleArtifacts(
   origin: string = EXAMPLES_ORIGIN,
   // The oldest CLI that can actually consume these artifacts. 0.2.0-rc.0 and earlier pin a
   // single trusted host, so they reject vgpu.sh URLs outright -- advertising anything lower
-  // would be a lie. NOTE: this gate is currently unreachable for exactly those CLIs, because
-  // assertTrustedUrl runs before the version check during the handshake, so they surface
-  // VGPU-EXAMPLES-INTEGRITY instead of VGPU-EXAMPLES-CLI-TOO-OLD. See examples-api.md.
+  // would be a lie. NOTE: this gate is reachable for CLIs built after the #255 fix, which runs
+  // assertTrustedUrl last during the handshake (schemaSha256 -> status -> minimumCliVersion ->
+  // assertTrustedUrl). It remains unreachable for the already-published 0.2.0-rc.0 binaries, which
+  // embed the old order permanently and keep surfacing VGPU-EXAMPLES-INTEGRITY instead of
+  // VGPU-EXAMPLES-CLI-TOO-OLD. See examples-api.md, "Client compatibility and the version gate".
   minimumCliVersion = '0.2.0-rc.1',
 ): GeneratedArtifactSet {
   verifyGraph(graph);
