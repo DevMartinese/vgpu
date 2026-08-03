@@ -2,7 +2,14 @@
 
 # @vgpu/wgsl-std/noise
 
-Pure WGSL Voronoi noise primitives for resolver-managed shaders. Import these when you need nearest and second-nearest jittered feature-cell distances without adding bindings or policy-specific styling.
+Pure WGSL Voronoi noise primitives for resolver-managed shaders. Import these when you need nearest and second-nearest jittered feature-cell distances without adding bindings or policy-specific styling. For smooth, non-cellular fields and fBM, use @vgpu/wgsl-std/noise/perlin or @vgpu/wgsl-std/noise/simplex instead.
+
+> **Want fBM, clouds, terrain, fog or plasma? You are on the wrong page.** This module is Voronoi
+> (cellular) noise and ships **no fBM helper** — do not hand-roll octaves on top of it. Use
+> `@vgpu/wgsl-std/noise/perlin` (`fbmPerlin2d`/`fbmPerlin3d`) or `@vgpu/wgsl-std/noise/simplex`
+> (`fbmSimplex2d`/`fbmSimplex3d`): separate subpaths, amplitude-normalized, guaranteed `(-1, 1)`.
+> `npx vgpu docs cat /@vgpu/wgsl-std/noise/perlin/index.docs.md`. Stay here only for cells, edges
+> (`f2 - f1`) and per-cell IDs (`cell`).
 
 ## Import
 
@@ -89,10 +96,11 @@ console.log(styledVoronoiWgsl.length > 0);
 const cloudWgsl = `
 import { voronoi3d } from "@vgpu/wgsl-std/noise";
 
-// Cloud/plasma look: stack octaves of inverted nearest-distance. Voronoi has no
-// built-in fBM helper, so build the octaves yourself (for a smooth, non-cellular
-// look, "@vgpu/wgsl-std/noise/perlin" and "@vgpu/wgsl-std/noise/simplex" ship
-// their own amplitude-normalized fbmPerlin*/fbmSimplex* instead).
+// Prefer fbmPerlin3d/fbmSimplex3d for this look; only stack Voronoi octaves when
+// you want the cellular structure to survive. Voronoi has no built-in fBM helper,
+// so build the octaves yourself ("@vgpu/wgsl-std/noise/perlin" and
+// "@vgpu/wgsl-std/noise/simplex" ship their own amplitude-normalized
+// fbmPerlin*/fbmSimplex* instead).
 fn cloudFbm(position: vec3f) -> f32 {
   var value = 0.0;
   var amplitude = 0.5;
