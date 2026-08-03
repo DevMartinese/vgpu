@@ -88,27 +88,48 @@ In the Vercel dashboard, on the docs project → **Firewall**:
 
 Verify from a plain HTTP client, never a browser: `curl -sS -o /dev/null -w '%{http_code}\n' https://vgpu.sh/.well-known/vgpu-examples.json` must print `200`, and the response must not carry `x-vercel-mitigated`.
 
-## Client compatibility and the unreachable version gate
+## Client compatibility and the version gate
 
-Discovery advertises `minimumCliVersion` so a server can tell an old CLI to upgrade. For the
-`vgpu.sh` migration that signal never reaches the CLIs that need it, and the value must not be
-read as "everything older degrades gracefully".
+Discovery advertises `minimumCliVersion` so a server can tell an old CLI to upgrade.
 
-During `handshake()` the client runs `assertTrustedUrl(contract.indexUrl, this.origin)` **before**
-it compares `minimumCliVersion`. A CLI released before the dual-host allowlist therefore rejects
-the `https://vgpu.sh` index URL as untrusted and exits with `VGPU-EXAMPLES-INTEGRITY` -- the
-`VGPU-EXAMPLES-CLI-TOO-OLD` branch is unreachable for exactly the population it was meant to warn.
-Raising `minimumCliVersion` cannot change that; it only keeps the advertised contract honest.
+`handshake()` evaluates its checks in this order: `schemaSha256` → `status` (revoked/deprecated) →
+`minimumCliVersion` → `assertTrustedUrl(contract.indexUrl, this.origin)`. Because the trusted-origin
+assertion now runs **last**, `VGPU-EXAMPLES-CLI-TOO-OLD` is reachable for a CLI whose only problem is
+being out of date -- even when the server has moved to an origin that old CLI does not yet trust.
+Previously `assertTrustedUrl` ran second, so such a client exited with `VGPU-EXAMPLES-INTEGRITY`
+("API URL leaves trusted origin"), conflating benign version skew with tampering (issue #255).
+
+Revocation and deprecation keep their precedence over the version gate: a `revoked` contract still
+reports `VGPU-EXAMPLES-INCOMPATIBLE-API` and a `deprecated` contract still emits its warning, even to
+a CLI that is also too old. A kill switch must never be masked by an advisory field.
 
 Verified against the real published tarball of `vgpu@0.2.0-rc.0`: it fails on its default origin
 and on `--base-url https://vgpu.sh` alike, because its allowlist pins a single host. Only
 `0.2.0-rc.0` is affected -- `0.1.6` shipped no `examples` subcommand -- and the fix for users is to
 upgrade to `0.2.0-rc.1` or newer.
 
-Follow-up (contract change, deliberately not done here): reorder the handshake so the version gate
-is evaluated before origin-dependent URL assertions, so a future origin migration can tell old
-clients to upgrade instead of failing them with an integrity error. That reorder changes observable
-error codes and needs its own contract revision.
+**CLIs published at or before `0.2.0-rc.0` are unaffected by this change; they keep the old check
+order.** Those binaries embed `assertTrustedUrl`-second permanently and will keep emitting
+`VGPU-EXAMPLES-INTEGRITY` forever. This fix is forward-looking only -- it makes the *next* origin
+migration humane, and is not a retroactive fix for the already-published population.
+
+### Origin migration runbook
+
+The reorder alone does nothing until the served contract actually raises the version field:
+
+1. Publish artifacts on the new origin and serve the updated discovery document from it.
+2. **Raise `minimumCliVersion` in the served discovery contract** to the oldest CLI that trusts the
+   new origin. This step is mandatory: without it, an old CLI still fails the trusted-origin
+   assertion and reports `VGPU-EXAMPLES-INTEGRITY` rather than `VGPU-EXAMPLES-CLI-TOO-OLD`, because
+   the version comparison passes and execution reaches the trust check.
+3. Verify with an old CLI that the error is `VGPU-EXAMPLES-CLI-TOO-OLD` (exit 5).
+
+**Do not bump `schemaSha256` for this or any similar client-side change.** No contract or schema
+revision is involved, and none should ever be done for it. `schemaSha256` is compared against a
+hardcoded constant shipped in the CLI (`contracts.js:3`) -- it is not a signature, and servers cannot
+observe a client's internal check order. Bumping it would make the schema comparison, which runs
+first and unconditionally, fail for **every** deployed CLI with `VGPU-EXAMPLES-INCOMPATIBLE-API` --
+strictly worse than the bug being fixed.
 
 ## Versioned artifact retention (dormant)
 

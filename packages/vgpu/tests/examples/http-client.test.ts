@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { runExamples } from "../../lib/examples/run.js";
+import { ExamplesClient } from "../../lib/examples/client.js";
 import { aggregateSha256, sha256 } from "../../lib/examples/hashing.js";
 import { EXAMPLES_SCHEMA_SHA256 } from "../../lib/examples/contracts.js";
 
@@ -36,7 +37,7 @@ async function fixture(change: Record<string, unknown> = {}) {
   pointer = Buffer.from(JSON.stringify({ schemaVersion: 1, contractId: "vgpu-examples/v1", revision, indexUrl: `${origin}/examples/v1/revisions/${revision}/index.json`, indexSha256: sha256(indexBytes) }));
   const contracts:any[]=[
     { id: "vgpu-examples/v2", schemaSha256: "2".repeat(64), status: "active", minimumCliVersion: "0.1.0", indexUrl: `${origin}/api/examples/v2/latest.json` },
-    { id: "vgpu-examples/v1", schemaSha256: change.schema ?? EXAMPLES_SCHEMA_SHA256, status: change.status ?? "active", minimumCliVersion: change.minimum ?? "0.1.0", indexUrl: `${origin}/api/examples/v1/latest.json` },
+    { id: "vgpu-examples/v1", schemaSha256: change.schema ?? EXAMPLES_SCHEMA_SHA256, status: change.status ?? "active", minimumCliVersion: change.minimum ?? "0.1.0", indexUrl: change.foreignIndexUrl ? "https://vgpu.sh/api/examples/v1/latest.json" : `${origin}/api/examples/v1/latest.json` },
   ];if(change.duplicate)contracts.push({...contracts[1],status:"revoked"});discovery = Buffer.from(JSON.stringify({ protocol: "vgpu-examples", discoveryVersion: 1, contracts }));
   cleanup.push(() => new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve())));
   return { origin, requests, poisonPointer(){ pointer=Buffer.from(JSON.stringify({schemaVersion:1,contractId:"vgpu-examples/v1",revision,indexUrl:`${origin}/examples/v1/revisions/${revision}/index.json`,indexSha256:"f".repeat(64)})); } };
@@ -71,6 +72,50 @@ test.each([
 ])("fails discovery before fetching index", async (change, code) => {
   const f = await fixture(change), result = await runExamples(["search", "x", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });
   expect(result.code).toBe(5); expect(JSON.parse(result.stderr!).error.code).toBe(code); expect(f.requests).toEqual(["/.well-known/vgpu-examples.json"]);
+});
+
+// #255: handshake() now evaluates schemaSha256 -> status -> minimumCliVersion -> assertTrustedUrl.
+// These tests pin that NEW order. They intentionally change what used to be true: an old CLI talking
+// to a migrated (off-origin) contract now sees VGPU-EXAMPLES-CLI-TOO-OLD instead of
+// VGPU-EXAMPLES-INTEGRITY (see apps/docs/examples-api.md, "Client compatibility and the version gate").
+// Revocation and deprecation still take precedence over the version gate — see the two tests below
+// that pin that (a′ vs. the issue's literal proposal).
+
+test("#255: old CLI against a migrated (off-origin) contract gets CLI-TOO-OLD, not INTEGRITY", async () => {
+  const f = await fixture({ foreignIndexUrl: true, minimum: "99.0.0" });
+  const result = await runExamples(["search", "x", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });
+  expect(result.code).toBe(5);
+  expect(JSON.parse(result.stderr!).error.code).toBe("VGPU-EXAMPLES-CLI-TOO-OLD");
+  expect(f.requests).toEqual(["/.well-known/vgpu-examples.json"]);
+});
+
+test("#255: current CLI against an off-origin contract still gets INTEGRITY (trust check survives the reorder)", async () => {
+  const f = await fixture({ foreignIndexUrl: true });
+  const result = await runExamples(["search", "x", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });
+  expect(result.code).toBe(5);
+  expect(JSON.parse(result.stderr!).error.code).toBe("VGPU-EXAMPLES-INTEGRITY");
+});
+
+test("#255: revocation still wins over an advisory version gate for an old CLI (a\u2032, not the issue's literal order)", async () => {
+  const f = await fixture({ status: "revoked", minimum: "99.0.0" });
+  const result = await runExamples(["search", "x", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });
+  expect(result.code).toBe(5);
+  expect(JSON.parse(result.stderr!).error.code).toBe("VGPU-EXAMPLES-INCOMPATIBLE-API");
+});
+
+test("#255: deprecated warning still precedes CLI-TOO-OLD, not masked by the reorder", async () => {
+  const f = await fixture({ status: "deprecated", minimum: "99.0.0" });
+  const warnings: string[] = [];
+  const client = new ExamplesClient({ baseUrl: f.origin, cliVersion: "0.1.6", warn: (msg: string) => warnings.push(msg) });
+  await expect(client.handshake()).rejects.toMatchObject({ code: "VGPU-EXAMPLES-CLI-TOO-OLD" });
+  expect(warnings).toEqual(["Warning: vgpu-examples/v1 is deprecated.\n"]);
+});
+
+test("#255: --revision does not bypass the trust check in handshake()", async () => {
+  const f = await fixture({ foreignIndexUrl: true });
+  const result = await runExamples(["search", "x", "--base-url", f.origin, "--revision", revision], { version: "0.1.6", env: await testEnv() });
+  expect(result.code).toBe(5);
+  expect(JSON.parse(result.stderr!).error.code).toBe("VGPU-EXAMPLES-INTEGRITY");
 });
 
 test("keeps cat stdout empty when the source body breaks after headers",async()=>{const f=await fixture({truncateFile:true}),result=await runExamples(["cat","raymarched-fractal","example.ts","--base-url",f.origin],{version:"0.1.6",env:await testEnv()});expect(result.code).toBe(4);expect(result.stdout).toBeUndefined()});
