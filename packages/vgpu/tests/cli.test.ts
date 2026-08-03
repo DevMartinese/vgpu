@@ -1,8 +1,14 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { runCli } from "../bin/vgpu.js";
+import { resolveVersion, runCli } from "../bin/vgpu.js";
 
-const packageVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+// Under vitest the CLI always runs in-repo, where `bin/vgpu.js` resolves its version from the
+// public `vgpu` package (packages/vgpu-api) rather than from `@vgpu/cli`'s own private, drifting
+// version -- mirror that resolution here instead of special-casing the test.
+const packageVersion = JSON.parse(readFileSync(new URL("../../vgpu-api/package.json", import.meta.url), "utf8")).version;
 
 function success(args) {
   const result = runCli(args);
@@ -37,6 +43,40 @@ test("routes the bare command and --help/-h to the docs-first guide, exit 0", ()
   expect(runCli(["--help"])).toMatchObject({ code: 0, stdout: routerHelp });
   expect(runCli(["-h"])).toMatchObject({ code: 0, stdout: routerHelp });
   expect(success(["--version"])).toBe(`${packageVersion}\n`);
+});
+
+// The published tarball's `../package.json` is copy-cli.mjs's synthetic `{type,version}` stamp with
+// no `name` field, so the in-repo sibling lookup must never fire there -- even when a sibling
+// vgpu-api/package.json happens to exist at the exact path the branch would read. This test is the
+// executable guard for that hard constraint: if it ever fails, `npx vgpu --version` is wrong.
+test("resolveVersion ignores the sibling vgpu-api package for the published tarball shape", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "vgpu-cli-version-"));
+  try {
+    const here = join(tmp, "dist", "cli", "bin");
+    mkdirSync(here, { recursive: true });
+    // Exactly what copy-cli.mjs writes: type + version, no name.
+    const stamp = { type: "module", version: "9.9.9" };
+    writeFileSync(join(tmp, "dist", "cli", "package.json"), JSON.stringify(stamp));
+    // Decoys with a *different* version, so a passing assertion cannot be a coincidence of both
+    // files agreeing, nor of the sibling read merely throwing into the fallback. One sits at the
+    // exact path the branch would consult from this `here` (resolve(here, "../../vgpu-api") ==
+    // <tmp>/dist/vgpu-api), the other one level further out, so any near-miss of that lookup still
+    // finds a mismatching version instead of falling back to the stamp.
+    for (const dir of [resolve(here, "../../vgpu-api"), join(tmp, "vgpu-api")]) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "vgpu", version: "1.2.3" }));
+    }
+
+    expect(resolveVersion(here, stamp)).toBe("9.9.9");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveVersion resolves the in-repo @vgpu/cli version from the real vgpu-api sibling", () => {
+  const binDir = dirname(fileURLToPath(new URL("../bin/vgpu.js", import.meta.url)));
+  expect(resolveVersion(binDir, { name: "@vgpu/cli", version: "0.0.0-test" })).toBe(packageVersion);
+  expect(packageVersion).not.toBe("0.0.0-test");
 });
 
 test("does not list snapshot/install-dawn/install-software-renderer in the router (still runnable)", async () => {
