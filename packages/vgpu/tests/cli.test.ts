@@ -244,6 +244,9 @@ test("the new guides do not steal the symbol routes of the API pages they descri
   expect(success(["docs", "find", "VGPU-WGSL-PKG-NOTFOUND"])).toContain(
     "/@vgpu/wgsl/runtime/resolve-shader.docs.md",
   );
+  // Voronoi has no fbm helper and must never be promoted into this route (see #244) —
+  // this is a real anti-theft guarantee (not `toContain`) because today it holds by omission.
+  expect(success(["docs", "find", "fbm"])).not.toContain("/@vgpu/wgsl-std/noise/index.docs.md");
 });
 
 test("keeps existing guide and API docs forms working", () => {
