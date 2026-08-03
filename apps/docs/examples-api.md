@@ -103,6 +103,12 @@ Revocation and deprecation keep their precedence over the version gate: a `revok
 reports `VGPU-EXAMPLES-INCOMPATIBLE-API` and a `deprecated` contract still emits its warning, even to
 a CLI that is also too old. A kill switch must never be masked by an advisory field.
 
+One precision about that deprecation warning: it is emitted by `handshake()` itself, which is what the
+ordering guarantees. The **CLI** only prints accumulated warnings on success paths (`run.js`), so a run
+that also fails the version gate prints just the `VGPU-EXAMPLES-CLI-TOO-OLD` error and no warning text.
+The warning is observable to API consumers of `ExamplesClient`, not to `vgpu examples` users in that
+case. That is pre-existing `run.js` behavior, unrelated to the check order.
+
 Verified against the real published tarball of `vgpu@0.2.0-rc.0`: it fails on its default origin
 and on `--base-url https://vgpu.sh` alike, because its allowlist pins a single host. Only
 `0.2.0-rc.0` is affected -- `0.1.6` shipped no `examples` subcommand -- and the fix for users is to

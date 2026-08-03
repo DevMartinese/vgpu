@@ -103,6 +103,17 @@ test("#255: revocation still wins over an advisory version gate for an old CLI (
   expect(JSON.parse(result.stderr!).error.code).toBe("VGPU-EXAMPLES-INCOMPATIBLE-API");
 });
 
+// #255: triple conflict (revoked + too-old CLI + off-origin indexUrl). This is the one extra
+// observable delta of the reorder besides CLI-TOO-OLD: the old order hit assertTrustedUrl second and
+// reported INTEGRITY, hiding the kill switch behind an origin complaint. The kill switch now wins.
+test("#255: revoked wins over both the version gate and the trust check for an off-origin contract", async () => {
+  const f = await fixture({ status: "revoked", minimum: "99.0.0", foreignIndexUrl: true });
+  const result = await runExamples(["search", "x", "--base-url", f.origin], { version: "0.1.6", env: await testEnv() });
+  expect(result.code).toBe(5);
+  expect(JSON.parse(result.stderr!).error.code).toBe("VGPU-EXAMPLES-INCOMPATIBLE-API");
+  expect(f.requests).toEqual(["/.well-known/vgpu-examples.json"]);
+});
+
 test("#255: deprecated warning still precedes CLI-TOO-OLD, not masked by the reorder", async () => {
   const f = await fixture({ status: "deprecated", minimum: "99.0.0" });
   const warnings: string[] = [];
