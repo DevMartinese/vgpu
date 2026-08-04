@@ -22,11 +22,11 @@ export function CopyButton({ code }: CopyButtonProps) {
   return (
     <button
       aria-label={copied ? "Copied!" : "Copy code"}
-      className="rounded-md p-1.5 text-gray-9 transition-colors hover:bg-gray-4 hover:text-gray-12"
+      className="rounded-md p-1.5 text-gray-900 transition-colors hover:bg-background-100 hover:text-gray-1000"
       onClick={handleCopy}
       type="button"
     >
-      {copied ? <Check className="size-4 text-green-9" /> : <Copy className="size-4" />}
+      {copied ? <Check className="size-4 text-green-900" /> : <Copy className="size-4" />}
     </button>
   );
 }
