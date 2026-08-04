@@ -58,13 +58,13 @@ importers:
     dependencies:
       ai:
         specifier: ^7.0.38
-        version: 7.0.48(zod@4.1.11)
+        version: 7.0.48(zod@4.4.3)
       eve:
         specifier: 0.29.5
-        version: 0.29.5(@opentelemetry/api@1.9.1)(@vercel/blob@2.6.1)(ai@7.0.48(zod@4.1.11))(chokidar@5.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(vite@6.4.3(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1))
+        version: 0.29.5(@opentelemetry/api@1.9.1)(@vercel/blob@2.6.1)(ai@7.0.48(zod@4.4.3))(chokidar@5.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(vite@6.4.3(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1))
       zod:
-        specifier: ^4.1.8
-        version: 4.1.11
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^22.10.7
@@ -5924,12 +5924,12 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/gateway@4.0.37(zod@4.1.11)':
+  '@ai-sdk/gateway@4.0.37(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.4
-      '@ai-sdk/provider-utils': 5.0.18(zod@4.1.11)
+      '@ai-sdk/provider-utils': 5.0.18(zod@4.4.3)
       '@vercel/oidc': 3.2.0
-      zod: 4.1.11
+      zod: 4.4.3
 
   '@ai-sdk/provider-utils@4.0.41(zod@4.4.3)':
     dependencies:
@@ -5939,14 +5939,14 @@ snapshots:
       undici: 5.29.0
       zod: 4.4.3
 
-  '@ai-sdk/provider-utils@5.0.18(zod@4.1.11)':
+  '@ai-sdk/provider-utils@5.0.18(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.4
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
       undici: 7.29.0
-      zod: 4.1.11
+      zod: 4.4.3
 
   '@ai-sdk/provider@3.0.14':
     dependencies:
@@ -8310,12 +8310,12 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       zod: 4.4.3
 
-  ai@7.0.48(zod@4.1.11):
+  ai@7.0.48(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 4.0.37(zod@4.1.11)
+      '@ai-sdk/gateway': 4.0.37(zod@4.4.3)
       '@ai-sdk/provider': 4.0.4
-      '@ai-sdk/provider-utils': 5.0.18(zod@4.1.11)
-      zod: 4.1.11
+      '@ai-sdk/provider-utils': 5.0.18(zod@4.4.3)
+      zod: 4.4.3
 
   ajv-formats@2.1.1(ajv@8.20.0):
     optionalDependencies:
@@ -8979,9 +8979,9 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.8
 
-  eve@0.29.5(@opentelemetry/api@1.9.1)(@vercel/blob@2.6.1)(ai@7.0.48(zod@4.1.11))(chokidar@5.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(vite@6.4.3(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1)):
+  eve@0.29.5(@opentelemetry/api@1.9.1)(@vercel/blob@2.6.1)(ai@7.0.48(zod@4.4.3))(chokidar@5.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(vite@6.4.3(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1)):
     dependencies:
-      ai: 7.0.48(zod@4.1.11)
+      ai: 7.0.48(zod@4.4.3)
       nitro: 3.0.260610-beta(@vercel/blob@2.6.1)(chokidar@5.0.0)(jiti@2.7.0)(lru-cache@11.5.2)(vite@6.4.3(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1))
       undici: 8.9.0
     optionalDependencies:
