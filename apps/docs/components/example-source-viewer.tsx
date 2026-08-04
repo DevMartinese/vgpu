@@ -51,7 +51,7 @@ function languageFor(file: SourceFile) {
 export async function ExampleSourceViewer({ files }: ExampleSourceViewerProps) {
   if (files.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gray-4 p-4 text-copy-14 text-gray-900">
+      <p className="rounded-lg border border-dashed border-gray-200 p-4 text-copy-14 text-gray-900">
         No source files available.
       </p>
     );

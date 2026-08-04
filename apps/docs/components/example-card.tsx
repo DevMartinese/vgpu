@@ -29,7 +29,7 @@ export function ExampleCard({ example }: ExampleCardProps) {
               src={example.thumbnail}
             />
           ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-700/40 via-purple-700/20 to-black" />
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-700/40 via-purple-700/20 to-gray-1000" />
           )}
         </div>
         <CardHeader className="px-4 pt-4">
