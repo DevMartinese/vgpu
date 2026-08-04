@@ -224,6 +224,31 @@ jobs:
       - name: Check the examples API artifact tree is bundled into its routes
         run: pnpm --filter docs check:examples-api-tracing
 
+  # New job for the vgpu docs -> geistdocs migration (TGEIST-01). Builds the
+  # new app scaffold at apps/docs-next, which lives alongside the untouched
+  # apps/docs (job `docs-app-build` above) during the dual-run migration
+  # window. Deliberately minimal for now (just `next build`): later tickets
+  # extend this job with `check:examples-api-tracing` (TGEIST-06) and
+  # `check:example-bundles` (TGEIST-08) once those exist in apps/docs-next.
+  # Removed at cutover (TGEIST-15), when apps/docs-next is renamed to
+  # apps/docs and `docs-app-build` covers the same app.
+  docs-next-app-build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build docs-next app
+        run: pnpm --filter docs-next build
+
   docs-generated:
     # Guards that the committed docs manifest + generated skill (skills/vgpu, the payload
     # `npx skills add vercel-labs/vgpu` ships) are in sync with their sources (co-located
