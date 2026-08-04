@@ -9,7 +9,10 @@
     "dev": "next dev",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
-    "translate": "npx @vercel/geistdocs translate"
+    "translate": "npx @vercel/geistdocs translate",
+    "$comment:tgeist-05": "TGEIST-05: `test:remark` unit-tests the M1-M9 remark plugins (node:test, no runner dependency: the root vitest config does not include apps/docs-next during the dual-run window). `check:mdast-parity` is gate (c) of Decision 4 — it also asserts every surviving fence language is one Shiki can load (M4) and that no *.docs.md / bare logical link survives (M7/M8).",
+    "test:remark": "node --test lib/remark-geist/remark-geist.test.mjs",
+    "check:mdast-parity": "node scripts/check-mdast-parity.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.134",
