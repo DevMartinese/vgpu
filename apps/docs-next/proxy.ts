@@ -49,9 +49,30 @@ const proxy = createProxy({
 // (not anchored to specific sub-paths) because every sub-path under either directory is a static
 // asset with no localized counterpart, so there is nothing under those prefixes for the proxy to
 // legitimately handle.
+// ANCHOR TGEIST-EXAMPLES-STATIC (5th instance of this exact class -- TGEIST-06, TGEIST-08 and
+// TGEIST-ML-ASSETS above are the first three): every image file committed under
+// `public/examples/**` -- the gallery/sidebar thumbnails (`public/examples/<slug>.card.png`,
+// `<slug>.hero.png`) and `public/examples/depth-estimation/source.jpg` (the default input image
+// `example-canvas` fetches for that demo) -- is excluded from the proxy. None of them has a route
+// under `app/[lang]/`, so while the proxy is active on them the i18n rewrite sends e.g.
+// `/examples/depth-estimation/source.jpg` to `/en/examples/depth-estimation/source.jpg`, which no
+// route matches. Verified empirically against `next start` on this build: 404 with
+// `x-middleware-rewrite: /en/examples/depth-estimation/source.jpg` before this entry, 200 with the
+// old app's exact bytes after it -- and the same for every `*.card.png` / `*.hero.png`.
+// The pattern is an extension match, NOT an `examples/` prefix like the `models/`/`ort/` entry
+// above, on purpose: unlike those two, `examples/` is also a live, localized page route --
+// `app/[lang]/examples/[slug]/page.tsx` -- and a bare prefix would swallow `/examples/<slug>`
+// itself (no dot in any slug) into this exclusion, taking the example detail pages out of i18n
+// entirely. Anchoring the extension list to the end of the path keeps it from matching a page path
+// that merely starts with `examples/`. Verified on this build: `/examples/depth-estimation` (the
+// page) still 200 via `x-middleware-rewrite: /en/examples/depth-estimation`, while every asset
+// above is now unproxied. `check:example-static-asset-smoke` (sibling of `check:ml-asset-smoke`)
+// pins this for every file actually committed under `public/examples/**`, the same way
+// `check:ml-asset-smoke` pins `models/`/`ort/`, so this class of bug fails CI instead of shipping
+// silently a fifth time.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 
