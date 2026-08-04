@@ -263,6 +263,17 @@ jobs:
       # than grade a stale tree).
       - name: Check example bundle isolation and budgets (docs-next)
         run: pnpm --filter docs-next check:example-bundles
+      # ANCHOR TGEIST-ML-ASSETS. Closes the gate hole TGEIST-14 found: `next build` (the step above)
+      # passes even when a same-origin ML asset 404s under the i18n proxy, because nothing it
+      # rendered is missing — the asset is fetched at runtime, not rendered as a page — and
+      # `thumbs:check` (gate G6) can't catch it either, since it renders in Node with no proxy in
+      # the loop. This starts `next start` on THIS build and asserts every committed ONNX model,
+      # `/ort/manifest.json` and the staged depth models come back 200, byte-identical and with no
+      # `x-middleware-rewrite` header (the literal signature of the proxy rewriting the asset to
+      # `/en/...` before it reaches the static file). Must stay in this job, right after the build,
+      # for the same reason as the two checks above: it grades this exact `.next`.
+      - name: Check ML asset smoke (no i18n-proxied 404s) (docs-next)
+        run: pnpm --filter docs-next check:ml-asset-smoke
       # TGEIST-05 anchor — remark plugins M1-M9 + gate (c) of Decision 4.
       # `test:remark` unit-tests the mappings (including the adversarial case the
       # design names: a `*.docs.md` path inside a code-span that must NOT be
