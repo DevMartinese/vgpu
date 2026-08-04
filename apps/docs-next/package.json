@@ -25,7 +25,11 @@
     "check:examples-api-tracing": "node scripts/check-examples-api-tracing.mjs",
     "check:examples-api-transplant": "node scripts/check-examples-api-transplant.mjs",
     "$comment:tgeist-08": "TGEIST-08: `check:example-bundles` measures the production chunks of the /preview/[slug] routes and grades them against scripts/example-chunk-budgets.json, whose numbers were re-measured against THIS app (Grupo D re-baseline; the script's algorithm is the old app's, unchanged apart from accepting the apps/docs-next directory name in its WGSL source markers). It reads .next/static/chunks and never builds, so it must run right after `build` in the same job -- it refuses to grade chunks older than the sources anyway.",
-    "check:example-bundles": "node scripts/check-example-bundles.mjs"
+    "check:example-bundles": "node scripts/check-example-bundles.mjs",
+    "$comment:tgeist-14": "TGEIST-14 (gate G6): same three commands as the old app, same script (scripts/render-example-thumbs.mjs is byte-identical to apps/docs'), pointed at THIS app's public/examples baselines -- which are the byte-identical PNGs transplanted from apps/docs, i.e. the pixel contract is shared, not re-baselined. They only produce meaningful pixels on a GPU-capable runtime (the docker-gpu job / infra/test-docker), never on a plain CI runner. `thumbs` rewrites the baselines (--update, never run in CI), `thumbs:check` compares against them, `render:proof` dumps 160x90 proofs to artifacts/example-renders for the CI artifact upload.",
+    "thumbs": "node scripts/render-example-thumbs.mjs --update",
+    "thumbs:check": "node scripts/render-example-thumbs.mjs --check",
+    "render:proof": "node scripts/render-example-thumbs.mjs --proof-dir ../../artifacts/example-renders"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.134",
