@@ -45,7 +45,7 @@
  * cached by browsers forever and this whole URL space is still moving.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -138,6 +138,59 @@ export function manifestPackageRedirects(records) {
 }
 
 /**
+ * Rewrites the `#anchor` of every destination that the new tree renamed.
+ *
+ * The manifest's `record.anchor` was slugged by the OLD app, so a destination like
+ * `/docs/reference/vgpu-scene/light#ambientlight-2` carries a duplicate-heading
+ * counter that came from a slugger shared across a whole package. github-slugger
+ * restarts its counters per page, so that heading is now `#ambientlight` and the
+ * redirect would land the reader on the right page at the wrong place — a
+ * half-broken URL that no source-side check can see, because `/packages/**` was
+ * never in the F1 freeze.
+ *
+ * The rename table is `scripts/url-anchor-drift-allowlist.json`, and using it here
+ * is the whole point: those entries are **already machine-verified** by
+ * `check-url-anchor-parity.mjs` (the heading must still exist and still produce
+ * the recorded id, or the gate fails), and they are the same (path, old anchor)
+ * pairs these destinations are made of. A second, hand-written mapping would be a
+ * second thing to keep in sync. The gate then re-checks the destinations, so this
+ * remap cannot silently rot either.
+ *
+ * Anchors with no recorded rename are left alone: they either exist (150 of them)
+ * or were already dead in production before this migration (117 — reported by the
+ * gate, fixable only in the generator that mints `record.anchor`).
+ */
+function remapDestinationAnchors(rules) {
+  const renames = loadDriftRenames();
+  if (renames.size === 0) return rules;
+  return rules.map((rule) => {
+    const hash = rule.destination.indexOf("#");
+    if (hash === -1) return rule;
+    const path = rule.destination.slice(0, hash);
+    const renamed = renames.get(`${path}#${rule.destination.slice(hash + 1)}`);
+    return renamed ? { ...rule, destination: `${path}#${renamed}` } : rule;
+  });
+}
+
+/** `${path}#${prodAnchor}` → the id the new tree renders. */
+function loadDriftRenames() {
+  const candidates = [
+    fileURLToPath(new URL("../scripts/url-anchor-drift-allowlist.json", import.meta.url)),
+    resolve(process.cwd(), "scripts/url-anchor-drift-allowlist.json"),
+    resolve(process.cwd(), "apps/docs-next/scripts/url-anchor-drift-allowlist.json"),
+  ];
+  const path = candidates.find((candidate) => existsSync(candidate));
+  // Absent file = no remap. The gate is what makes its absence loud (every
+  // destination it breaks is reported as a regression), so failing the build here
+  // would only make `next build` depend on a file it does not otherwise need.
+  if (!path) return new Map();
+  const allowlist = JSON.parse(readFileSync(path, "utf8"));
+  return new Map(
+    (allowlist.entries ?? []).map((entry) => [`${entry.path}#${entry.prodAnchor}`, entry.newAnchor]),
+  );
+}
+
+/**
  * The complete list, in the order Next.js evaluates it (first match wins, so
  * the specific `/docs/**` entries come before the legacy prefix families).
  *
@@ -158,13 +211,13 @@ export function buildDocsRedirects(records) {
 
   const { packageRedirects, symbolRedirects } = manifestPackageRedirects(records);
 
-  return [
+  return remapDestinationAnchors([
     ...conceptGuides,
     ...sectionRoots,
     ...legacyTopLevelRedirects(),
     ...packageRedirects,
     ...symbolRedirects,
-  ];
+  ]);
 }
 
 /**

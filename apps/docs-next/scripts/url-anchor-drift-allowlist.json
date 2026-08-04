@@ -129,6 +129,12 @@
     },
     {
       "path": "/docs/reference/render/canvas-mouse-tracker",
+      "prodAnchor": "canvasmousetracker-2",
+      "newAnchor": "canvasmousetracker",
+      "heading": "CanvasMouseTracker"
+    },
+    {
+      "path": "/docs/reference/render/canvas-mouse-tracker",
       "prodAnchor": "fields-2",
       "newAnchor": "fields",
       "heading": "Fields"
@@ -363,6 +369,12 @@
     },
     {
       "path": "/docs/reference/vgpu-scene/light",
+      "prodAnchor": "directionallight-2",
+      "newAnchor": "directionallight",
+      "heading": "DirectionalLight"
+    },
+    {
+      "path": "/docs/reference/vgpu-scene/light",
       "prodAnchor": "examples-8",
       "newAnchor": "examples",
       "heading": "Examples"
@@ -434,6 +446,12 @@
       "heading": "Signature"
     },
     {
+      "path": "/docs/reference/vgpu-scene/material",
+      "prodAnchor": "unlitmaterial-2",
+      "newAnchor": "unlitmaterial",
+      "heading": "UnlitMaterial"
+    },
+    {
       "path": "/docs/reference/vgpu-scene/orbit-controls",
       "prodAnchor": "examples-5",
       "newAnchor": "examples",
@@ -450,6 +468,12 @@
       "prodAnchor": "notes-5",
       "newAnchor": "notes",
       "heading": "Notes"
+    },
+    {
+      "path": "/docs/reference/vgpu-scene/orbit-controls",
+      "prodAnchor": "orbitcontrols-2",
+      "newAnchor": "orbitcontrols",
+      "heading": "OrbitControls"
     },
     {
       "path": "/docs/reference/vgpu-scene/orbit-controls",
@@ -474,6 +498,12 @@
       "prodAnchor": "notes-3",
       "newAnchor": "notes",
       "heading": "Notes"
+    },
+    {
+      "path": "/docs/reference/vgpu-scene/orthographic-camera",
+      "prodAnchor": "orthographiccamera-2",
+      "newAnchor": "orthographiccamera",
+      "heading": "OrthographicCamera"
     },
     {
       "path": "/docs/reference/vgpu-scene/orthographic-camera",

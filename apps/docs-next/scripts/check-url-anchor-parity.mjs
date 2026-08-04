@@ -47,17 +47,29 @@
  * without code spans, modulo the dedup counter):
  *
  *   - matches the page's own `<h1>` (the frontmatter title, rendered without an
- *     `id` by the Geist layout)  →  `title`, accepted by rule. The fragment
- *     still lands the reader on the page with that heading at the top of the
- *     viewport, which is where `#cli` scrolled to anyway.
+ *     `id` by the Geist layout)  →  **fail**. Decision 2.3 requires the title to
+ *     carry `id={slugifyHeading(page.data.title)}`, which the adapter renders
+ *     from `lib/title-anchor.mjs`, so these anchors are supposed to exist for
+ *     real. An earlier revision of this gate accepted them by rule instead ("the
+ *     reader still lands on the page"); that was a design deviation, and it also
+ *     left the 276 `#anchor` destinations of the redirect table pointing at
+ *     nothing. The class is kept only to name the cause when it regresses.
  *   - matches a body heading → `drift`: the section is still there, its id
  *     changed. Accepted **only if recorded** in
- *     `scripts/url-anchor-drift-allowlist.json`, with the new id. A drift that
- *     is not in the file fails; a recorded drift whose new id changed fails; a
- *     recorded drift that no longer happens fails as stale. So the 94 known
- *     renames cannot grow silently, and no entry can hide a lost heading — the
- *     heading has to still exist for the entry to match.
+ *     `scripts/url-anchor-drift-allowlist.json`, with the new id *and* the
+ *     heading text. A drift that is not in the file fails; a recorded drift whose
+ *     new id or heading text changed fails; a recorded drift that no longer
+ *     happens fails as stale. So the known renames cannot grow silently, and no
+ *     entry can hide a lost heading — the heading has to still exist, and still
+ *     be the heading the entry claims, for the entry to match.
  *   - matches nothing → **fail**: content is gone (or a plugin ate it).
+ *
+ * Two more assertions ride along, both of them things a set-diff cannot see:
+ * **no id is rendered twice** on a page (an ambiguous anchor, and the specific
+ * way the title anchor could collide with a body heading), and every
+ * **destination** of the redirect table lands on an id that exists — graded
+ * against the frozen inventory, so a deep link that was already dead in prod is
+ * reported while a real regression fails.
  *
  * ## Usage
  *
@@ -77,7 +89,10 @@ import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { SECTION_ROOTS } from "../lib/docs-redirects.mjs";
+import { loadDocsRedirects, SECTION_ROOTS } from "../lib/docs-redirects.mjs";
+// The app renders the page-title anchor from this same module (Decision 2.3), so
+// the gate cannot grade a slug the app does not emit, or vice versa.
+import { slugifyHeading } from "../lib/title-anchor.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = resolve(SCRIPT_DIR, "..");
@@ -87,16 +102,6 @@ const CONTENT_ROOT = join(APP_ROOT, "content/docs");
 const ALLOWLIST_PATH = join(SCRIPT_DIR, "url-anchor-drift-allowlist.json");
 const MAX_REDIRECT_HOPS = 5;
 const READY_TIMEOUT_MS = 120_000;
-
-/** `apps/docs/lib/concepts.ts:185` (`slugifyHeading`), ported verbatim. */
-function slugifyHeading(text) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/gu, "")
-    .replace(/\s+/gu, "-")
-    .replace(/-+/gu, "-");
-}
 
 /** Drops the trailing duplicate-heading counter (`import-29` → `import`, `-2` → ``). */
 function withoutDedupCounter(anchor) {
@@ -250,6 +255,93 @@ function extractTitle(html) {
   return null;
 }
 
+/**
+ * Ids that appear more than once in the document, restricted to ids that are
+ * anchor targets (heading ids and the page-title anchor). An ambiguous anchor is
+ * a real bug and this gate would otherwise be blind to it: ids are collected into
+ * a Set, so a duplicate looks exactly like a match. It is also the specific way
+ * the Decision 2.3 title anchor could go wrong — the reference pages open every
+ * symbol with a level-1 heading, so on `/docs/reference/vgpu/gpu` the title and a
+ * body heading slug to the same string, and `titleAnchorId` has to suppress the
+ * title id there. This is the assertion that proves it does.
+ *
+ * Framework ids (`nd-*`, `radix-*`, `_R*`) are excluded: they are not anchor
+ * targets and React/radix mint them per render.
+ */
+function duplicateAnchorIds(html, headingIds, title) {
+  const targets = new Set(headingIds);
+  if (title) for (const slug of title.legacySlugs) targets.add(slug);
+  const counts = new Map();
+  for (const match of html.matchAll(/\sid="([^"]*)"/gu)) {
+    const id = match[1];
+    if (!targets.has(id) || /^(?:nd-|radix-|_R)/u.test(id)) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([id, count]) => `${id} ×${count}`);
+}
+
+/**
+ * Gate on the **destinations** of the redirect table, not just its sources.
+ *
+ * `lib/docs-redirects.mjs` ships 302 rules and 276 of them end in an `#anchor`:
+ * the API reference deep links (`/packages/vgpu/Pass` →
+ * `/docs/reference/vgpu/effect#effect`) are all derived from the manifest's
+ * `record.anchor`, which was slugged by the *old* app. A redirect whose path
+ * resolves but whose anchor does not exist is a half-broken URL — the reader
+ * lands on the right page at the wrong place — and the source-side check cannot
+ * see it, because these sources are not in `docs/url-inventory.json` at all (the
+ * F1 freeze only walked `/docs/**`, never `/packages/**`).
+ *
+ * Same judgement as everywhere else in this gate: the frozen inventory decides.
+ * If prod served that anchor on that page, a missing one here is a **regression**
+ * and fails. If prod did not, the deep link was already dead before this
+ * migration (the old redirect pointed at an anchor the old page never rendered)
+ * and it is reported as preexisting — fixing those means changing
+ * `record.anchor`, which is the generator's business, not this gate's.
+ *
+ * @param {{ baseUrl: string, idsByPath: Map<string, Set<string>>, frozenByPath: Map<string, Set<string>> }} context
+ */
+async function checkRedirectDestinations({ baseUrl, idsByPath, frozenByPath }) {
+  const redirects = await loadDocsRedirects();
+  const withAnchor = redirects
+    .map(({ source, destination }) => {
+      const hash = destination.indexOf("#");
+      if (hash === -1) return null;
+      return { source, path: destination.slice(0, hash), anchor: destination.slice(hash + 1) };
+    })
+    .filter((entry) => entry !== null && entry.anchor !== "" && !entry.path.includes(":"));
+
+  // Fetch the destinations the inventory pass did not already cover. Distinct
+  // paths only: 276 anchors live on far fewer pages.
+  for (const path of new Set(withAnchor.map((entry) => entry.path))) {
+    if (idsByPath.has(path)) continue;
+    const resolved = await resolvePage(baseUrl, path);
+    idsByPath.set(path, resolved.status === 200 && resolved.html ? extractIds(resolved.html) : null);
+  }
+
+  const regressions = [];
+  const preexisting = [];
+  let resolvedCount = 0;
+  for (const entry of withAnchor) {
+    const ids = idsByPath.get(entry.path);
+    if (!ids) {
+      regressions.push({ ...entry, reason: "destination page does not resolve" });
+      continue;
+    }
+    if (ids.has(decodeURIComponent(entry.anchor))) {
+      resolvedCount += 1;
+      continue;
+    }
+    const frozen = frozenByPath.get(entry.path);
+    if (frozen?.has(entry.anchor)) {
+      regressions.push({ ...entry, reason: "production served this anchor on that page" });
+    } else {
+      preexisting.push(entry);
+    }
+  }
+  return { total: withAnchor.length, resolved: resolvedCount, regressions, preexisting };
+}
+
 function matchesLegacySlug(candidate, anchor) {
   if (candidate.legacySlugs.has(anchor)) return true;
   // Duplicate-heading counters are not comparable across the two sluggers (the
@@ -369,6 +461,10 @@ async function main() {
   }
 
   const results = [];
+  /** final path → every id its HTML carries. Feeds the redirect-destination gate. */
+  const idsByPath = new Map();
+  /** @type {{ total: number, resolved: number, regressions: Array<object>, preexisting: Array<object> } | null} */
+  let destinationProblems = null;
   try {
     for (const page of pages) {
       const resolved = await resolvePage(baseUrl, page.path);
@@ -379,19 +475,34 @@ async function main() {
         via: resolved.chain.length > 0 ? resolved.chain.map((hop) => `${hop.status} → ${hop.to}`).join(" ") : null,
         finalPath: resolved.finalPath,
         frozenAnchors: frozenAnchors.length,
-        /** anchors resolved as the page's own title */
-        titleAnchors: [],
+        /**
+         * Anchors that are the page's own title and have no `id` behind them.
+         * Decision 2.3 requires the title to carry
+         * `id={slugifyHeading(page.data.title)}` (rendered by
+         * `app/[lang]/docs/[[...slug]]/page.tsx` via `lib/title-anchor.mjs`), so
+         * this list existing at all means that anchor regressed: it is a
+         * **failure**, not an accepted class. It is kept as its own bucket only
+         * to name the cause precisely instead of reporting "content lost".
+         */
+        missingTitleAnchors: [],
+        /** ids that appear more than once in the page — an ambiguous anchor */
+        duplicateIds: [],
         /** anchors whose heading is still there under a new id */
         drifts: [],
         /** anchors with no heading behind them at all — the real failures */
         lostAnchors: [],
         /**
-         * Ids of the headings the page really renders. Written to the `--json`
-         * report so `check-doc-links.mjs` can validate every `#fragment` in the
-         * corpus against ids observed in HTML instead of reimplementing
-         * github-slugger and hoping the reimplementation agrees.
+         * Every id the page really renders that can be an anchor target: heading
+         * ids **and** the Decision 2.3 page-title anchor, which lives on a
+         * zero-height element rather than on the `<h1>` (see
+         * `lib/title-anchor.mjs`). Framework ids (`nd-*`, `radix-*`, `_R*`) are
+         * dropped: they are per-render and no link points at them.
+         *
+         * Written to the `--json` report so `check-doc-links.mjs` can validate
+         * every `#fragment` in the corpus against ids observed in HTML instead of
+         * reimplementing github-slugger and hoping the two agree.
          */
-        headingIds: [],
+        anchorIds: [],
         error: resolved.error ?? null,
       };
 
@@ -399,11 +510,21 @@ async function main() {
         const ids = extractIds(resolved.html);
         const title = extractTitle(resolved.html);
         const headings = extractHeadings(resolved.html);
-        entry.headingIds = headings.map((heading) => heading.id);
+        const headingIds = headings.map((heading) => heading.id);
+        entry.anchorIds = [...ids].filter((id) => !/^(?:nd-|radix-|_R)/u.test(id)).sort();
+        entry.duplicateIds = duplicateAnchorIds(resolved.html, headingIds, title);
+        idsByPath.set(resolved.finalPath, ids);
         for (const anchor of frozenAnchors) {
           if (ids.has(anchor)) continue;
-          if (title && matchesLegacySlug(title, anchor)) {
-            entry.titleAnchors.push(anchor);
+          // The title branch matches **exactly**, never modulo the dedup counter.
+          // `withoutDedupCounter` exists for body headings, where prod's counters
+          // came from a slugger shared across a whole package; applying it here
+          // would let `#cli-7` — which in prod was a *different* heading that
+          // happened to slug to the title's base — be waved through as "the page
+          // title". Numbered anchors go down the drift path, where the heading
+          // they belong to has to be produced and recorded.
+          if (title && title.legacySlugs.has(anchor)) {
+            entry.missingTitleAnchors.push(anchor);
             continue;
           }
           const heading = headings.find((candidate) => matchesLegacySlug(candidate, anchor));
@@ -416,6 +537,13 @@ async function main() {
       }
       results.push(entry);
     }
+    // Same server, same build: the destinations of the redirect table are graded
+    // here, while it is still up.
+    destinationProblems = await checkRedirectDestinations({
+      baseUrl,
+      idsByPath,
+      frozenByPath: new Map(pages.map((page) => [page.path, new Set(page.anchors ?? [])])),
+    });
   } finally {
     server?.stop();
   }
@@ -426,10 +554,13 @@ async function main() {
   const allDrifts = results.flatMap((entry) => entry.drifts);
   const lost = results.filter((entry) => entry.lostAnchors.length > 0);
   const frozenAnchorCount = results.reduce((sum, entry) => sum + entry.frozenAnchors, 0);
-  const titleAnchorCount = results.reduce((sum, entry) => sum + entry.titleAnchors.length, 0);
+  const missingTitleAnchorCount = results.reduce((sum, entry) => sum + entry.missingTitleAnchors.length, 0);
   const lostAnchorCount = results.reduce((sum, entry) => sum + entry.lostAnchors.length, 0);
-  const presentAnchorCount = frozenAnchorCount - titleAnchorCount - allDrifts.length - lostAnchorCount;
+  const presentAnchorCount = frozenAnchorCount - missingTitleAnchorCount - allDrifts.length - lostAnchorCount;
+  const missingTitles = results.filter((entry) => entry.missingTitleAnchors.length > 0);
+  const duplicates = results.filter((entry) => entry.duplicateIds.length > 0);
   const sectionRootProblems = checkSectionRootTargets();
+  const destinations = destinationProblems;
 
   if (options.writeAllowlist) {
     writeAllowlist(allDrifts);
@@ -448,6 +579,15 @@ async function main() {
     const recorded = allowByKey.get(key);
     if (!recorded) unrecordedDrifts.push(drift);
     else if (recorded.newAnchor !== drift.newAnchor) changedDrifts.push({ ...drift, recorded: recorded.newAnchor });
+    // The `heading` field is load-bearing, not a comment: it is the human-readable
+    // claim "this anchor belongs to *that* section", and it is what a reviewer
+    // actually reads when approving an entry. If the heading text behind an
+    // accepted rename changes, the recorded claim no longer describes reality —
+    // the section may have been rewritten into something else — so it has to be
+    // re-approved rather than silently inherited.
+    else if ((recorded.heading ?? "") !== drift.heading) {
+      changedDrifts.push({ ...drift, recorded: `${recorded.newAnchor} (heading was ${JSON.stringify(recorded.heading ?? "")})` });
+    }
   }
   const staleAllowlistEntries = allowlist.entries.filter((item) => !seenKeys.has(`${item.path}#${item.prodAnchor}`));
 
@@ -458,7 +598,11 @@ async function main() {
     `  URLs    ${results.length - unresolved.length}/${results.length} resolve  (${direct} direct · ${viaRedirect.length} via redirect)`,
   );
   console.log(
-    `  anchors ${presentAnchorCount}/${frozenAnchorCount} identical · ${titleAnchorCount} page-title (accepted by rule) · ${allDrifts.length} slugger drift (${allDrifts.length - unrecordedDrifts.length - changedDrifts.length} recorded) · ${lostAnchorCount} lost`,
+    `  anchors ${presentAnchorCount}/${frozenAnchorCount} identical · ${allDrifts.length} slugger drift (${allDrifts.length - unrecordedDrifts.length - changedDrifts.length} recorded) · ${missingTitleAnchorCount} missing page-title · ${lostAnchorCount} lost`,
+  );
+  console.log(
+    `  targets ${destinations.resolved}/${destinations.total} redirect destinations land on an existing id` +
+      ` (${destinations.preexisting.length} already dead in production · ${destinations.regressions.length} regressions)`,
   );
 
   if (viaRedirect.length > 0) {
@@ -479,10 +623,17 @@ async function main() {
             viaRedirect: viaRedirect.length,
             anchors: frozenAnchorCount,
             identical: presentAnchorCount,
-            titleAnchors: titleAnchorCount,
             drifts: allDrifts.length,
+            missingTitleAnchors: missingTitleAnchorCount,
             lost: lostAnchorCount,
+            redirectDestinations: {
+              total: destinations.total,
+              resolved: destinations.resolved,
+              deadInProduction: destinations.preexisting.length,
+              regressions: destinations.regressions.length,
+            },
           },
+          redirectDestinations: destinations,
           results,
         },
         null,
@@ -492,9 +643,24 @@ async function main() {
     console.log(`\n  report written to ${options.json}`);
   }
 
+  if (destinations.preexisting.length > 0) {
+    console.log(
+      `\n  ${destinations.preexisting.length} redirect destination(s) point at an anchor production did not serve either —\n  dead deep links inherited from the old app's table (the manifest's \`record.anchor\` never\n  matched a heading on the destination page). Reported, not failed; the fix is the generator's:`,
+    );
+    for (const entry of destinations.preexisting.slice(0, 12)) {
+      console.log(`    ${entry.source} → ${entry.path}#${entry.anchor}`);
+    }
+    if (destinations.preexisting.length > 12) {
+      console.log(`    … ${destinations.preexisting.length - 12} more (full list in the --json report)`);
+    }
+  }
+
   const failed =
     unresolved.length > 0 ||
     lost.length > 0 ||
+    missingTitles.length > 0 ||
+    duplicates.length > 0 ||
+    destinations.regressions.length > 0 ||
     unrecordedDrifts.length > 0 ||
     changedDrifts.length > 0 ||
     staleAllowlistEntries.length > 0 ||
@@ -502,12 +668,34 @@ async function main() {
 
   if (!failed) {
     console.log(
-      `\n✓ gate (d): every URL production serves resolves here, and every anchor it serves is either\n  identical, the page's own title, or a recorded slugger rename whose heading is still present.`,
+      `\n✓ gate (d): every URL production serves resolves here, every anchor it serves is either identical\n  or a recorded slugger rename whose heading is still present, no anchor id is ambiguous, and every\n  redirect destination lands on an id that exists (bar the ${destinations.preexisting.length} already dead in production).`,
     );
     return;
   }
 
   console.error("\n✗ gate (d) FAILED");
+  if (missingTitles.length > 0) {
+    console.error(
+      `\n  ${missingTitleAnchorCount} page-title anchor(s) production serves have no id here. Decision 2.3 requires the\n  title to carry \`id={slugifyHeading(page.data.title)}\` — check that renderTop in\n  app/[lang]/docs/[[...slug]]/page.tsx still emits it (lib/title-anchor.mjs):`,
+    );
+    for (const entry of missingTitles) {
+      console.error(`    ${entry.path}: ${entry.missingTitleAnchors.map((anchor) => `#${anchor}`).join(" ")}`);
+    }
+  }
+  if (duplicates.length > 0) {
+    console.error(
+      `\n  ${duplicates.length} page(s) render the same anchor id more than once, so the anchor is ambiguous — most\n  likely the page-title id collided with a body heading and titleAnchorId failed to suppress it:`,
+    );
+    for (const entry of duplicates) console.error(`    ${entry.path}: ${entry.duplicateIds.join(" ")}`);
+  }
+  if (destinations.regressions.length > 0) {
+    console.error(
+      `\n  ${destinations.regressions.length} redirect destination(s) point at an anchor that production DID serve and this tree does\n  not. The reader lands on the right page at the wrong place — fix the destination in\n  lib/docs-redirects.mjs (or the heading it should point at):`,
+    );
+    for (const entry of destinations.regressions) {
+      console.error(`    ${entry.source} → ${entry.path}#${entry.anchor}  [${entry.reason}]`);
+    }
+  }
   if (unresolved.length > 0) {
     console.error(`\n  ${unresolved.length} URL(s) production serves do NOT resolve here:`);
     for (const entry of unresolved) {
