@@ -337,6 +337,14 @@ function createFetcher(baseUrl, options) {
         });
       } catch (error) {
         lastError = error;
+        // `redirect: 'error'` rejects with a bare TypeError, indistinguishable from a DNS or TLS
+        // failure — and the difference is the difference between the two verdicts this script is
+        // careful to keep apart. A redirect is a real, deployment-side defect: the CLI fetches with
+        // `redirect: 'error'` too, so an apex→www rewrite takes the API down for every client
+        // (apps/docs/examples-api.md § Production setup). An unreachable host is inconclusive.
+        // Re-probe once without following redirects to tell them apart.
+        const redirected = await probeRedirect(url, method, { ...baseHeaders, ...headers }, options.timeoutMs);
+        if (redirected) return redirected;
         continue;
       }
       const block = detectBlock(response.status, response.headers);
@@ -360,6 +368,31 @@ function createFetcher(baseUrl, options) {
       `Unreachable after ${options.retries + 1} attempts: ${url} (${lastError?.message ?? 'unknown error'})`,
       { reason: 'network', url },
     );
+  };
+}
+
+/**
+ * Second opinion after a rejected fetch: was it a redirect this script refused to follow? Returns a
+ * synthetic response (so the artifact is graded, and fails, like any other wrong answer) or
+ * `undefined` when the host is simply unreachable — in which case the caller keeps retrying and
+ * ends at BLOCKED. A mitigation challenge that redirects stays BLOCKED too, on purpose.
+ */
+async function probeRedirect(url, method, headers, timeoutMs) {
+  let response;
+  try {
+    response = await fetch(url, { method, headers, redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) });
+  } catch {
+    return undefined;
+  }
+  await response.arrayBuffer().catch(() => undefined);
+  const isRedirect = response.status >= 300 && response.status < 400;
+  if (!isRedirect || response.headers.get('x-vercel-mitigated')) return undefined;
+  return {
+    url,
+    status: response.status,
+    headers: response.headers,
+    body: new Uint8Array(),
+    redirectedTo: response.headers.get('location') ?? '(no Location header)',
   };
 }
 
@@ -400,6 +433,12 @@ async function probeArtifact(request, key, expected) {
   const digest = sha256(response.body);
 
   if (response.status !== 200) problems.push(`expected HTTP 200, got ${response.status}`);
+  if (response.redirectedTo !== undefined) {
+    problems.push(
+      `unexpected redirect to ${response.redirectedTo} — the CLI fetches with redirect: 'error', ` +
+        'so any redirect on this host (an apex→www rewrite, a trailing-slash rule) fails every client',
+    );
+  }
   const wantedContentType = expected?.contentType ? expectedContentType(expected.contentType) : JSON_CONTENT_TYPE;
   if (contentType !== wantedContentType) {
     problems.push(`content-type ${JSON.stringify(contentType ?? null)} != ${JSON.stringify(wantedContentType)}`);
@@ -627,10 +666,14 @@ export async function verifyDeployment(baseUrl, options = {}) {
   //    declarations are cross-checked against the revision manifest before the files are pulled.
   const referenced = new Set([indexKey]);
   const manifestKeys = [];
+  // The index carries its own hash and file count for every manifest, independently of
+  // revision.json — a third anchor, so keep it.
+  const indexAnchors = new Map();
   for (const entry of Array.isArray(indexDocument?.examples) ? indexDocument.examples : []) {
     const key = keyFromReferencedUrl(entry?.manifestUrl, problems, `index.examples[${entry?.id}].manifestUrl`);
     if (!key) continue;
     if (!declared.has(key)) problems.push(`index references an undeclared manifest: ${key}`);
+    indexAnchors.set(key, { manifestSha256: entry?.manifestSha256, fileCount: entry?.fileCount });
     manifestKeys.push(key);
     referenced.add(key);
   }
@@ -643,6 +686,16 @@ export async function verifyDeployment(baseUrl, options = {}) {
   for (const manifest of manifests) {
     record(manifest);
     const document = parseJsonBody(manifest);
+    const anchor = indexAnchors.get(manifest.key);
+    if (typeof anchor?.manifestSha256 === 'string' && anchor.manifestSha256 !== manifest.sha256) {
+      manifest.ok = false;
+      manifest.problems.push(`sha256 ${manifest.sha256} != index.manifestSha256 ${anchor.manifestSha256}`);
+    }
+    const fileCount = Array.isArray(document?.files) ? document.files.length : undefined;
+    if (Number.isSafeInteger(anchor?.fileCount) && anchor.fileCount !== fileCount) {
+      problems.push(`${manifest.key}: index says fileCount ${anchor.fileCount}, the manifest lists ${fileCount}`);
+    }
+    if (document && document.revision !== revision) problems.push(`${manifest.key}: revision != ${revision}`);
     for (const file of Array.isArray(document?.files) ? document.files : []) {
       const key = keyFromReferencedUrl(file?.url, problems, `${manifest.key}.files[].url`);
       if (!key) continue;
