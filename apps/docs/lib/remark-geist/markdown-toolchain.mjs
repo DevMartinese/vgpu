@@ -2,9 +2,9 @@
  * Loads a bare `remark-parse` + `remark-gfm` markdown parser for the unit tests
  * and for `scripts/check-mdast-parity.mjs`.
  *
- * Why the indirection: `apps/docs-next` must not grow dependencies during the
- * dual-run window (its `package.json` is the pinned geistdocs 1.15.2 template
- * plus what the app itself imports), and the parity gate is *tooling*, not app
+ * Why the indirection: `apps/docs` must not grow dependencies just for this
+ * (its `package.json` is the pinned geistdocs 1.15.2 template plus what the
+ * app itself imports), and the parity gate is *tooling*, not app
  * code. `remark-parse`, `remark-gfm`, `unified` and friends are already in the
  * store as transitive dependencies of the MDX pipeline the app compiles with —
  * `fumadocs-mdx` → `@mdx-js/mdx` → `remark-parse`. Resolving them *through*
@@ -42,7 +42,7 @@ export async function loadMarkdownParser() {
       throw new Error(
         `remark-geist tooling needs \`${specifier}\`, normally present as a transitive dependency ` +
           `of fumadocs-mdx/@mdx-js/mdx. It did not resolve (${String(error)}). Add it as a ` +
-          "devDependency of apps/docs-next if the MDX pipeline stopped shipping it.",
+          "devDependency of apps/docs if the MDX pipeline stopped shipping it.",
       );
     }
     return import(pathToFileURL(resolved).href);

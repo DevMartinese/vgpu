@@ -25,7 +25,7 @@
  * either the generator changed or a file was hand-edited, and both deserve a
  * loud stop instead of a lenient parse. A real YAML dependency is not available
  * here — `js-yaml` only exists as a transitive dep of fumadocs-mdx and
- * `apps/docs-next` must not grow a direct dependency just for a check.
+ * `apps/docs` must not grow a direct dependency just for a check.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

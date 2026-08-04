@@ -65,7 +65,7 @@ export const docs = defineDocs({
 //
 // The slug -> URL table is the committed docs manifest, loaded lazily on the
 // first compiled file (`loadIndex`), so this config needs no top-level await and
-// `apps/docs-next` needs no dependency on `@vgpu/cli` during the dual-run window.
+// `apps/docs` needs no dependency on `@vgpu/cli`.
 // The chain itself is built by `geistRemarkPlugins()` and is NOT spelled out
 // again here. That is deliberate and load-bearing: the parity gate
 // (`scripts/check-mdast-parity.mjs`) derives the transformers it checks from the

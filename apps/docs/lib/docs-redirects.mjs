@@ -262,8 +262,8 @@ function resolveManifestPath(options = {}) {
 /**
  * `buildDocsRedirects` with the committed docs manifest loaded lazily — the
  * shape `next.config.ts`'s `async redirects()` wants. Loading it from disk
- * (instead of importing `@vgpu/cli`) keeps `apps/docs-next` free of that
- * dependency during the dual-run window, exactly like `source.config.ts` does.
+ * (instead of importing `@vgpu/cli`) keeps `apps/docs` free of that
+ * dependency, exactly like `source.config.ts` does.
  *
  * @param {{ manifestPath?: string, cwd?: string }} [options]
  */
