@@ -1,125 +1,31 @@
-import {
-  CommandPromptContent,
-  CommandPromptCopy,
-  CommandPromptList,
-  CommandPromptPrefix,
-  CommandPromptRoot,
-  CommandPromptSurface,
-  CommandPromptTrigger,
-  CommandPromptTriggerDivider,
-  CommandPromptViewport,
-} from "@vercel/geistdocs/components/command-prompt";
 import type { Metadata } from "next";
-import { CenteredSection } from "./components/centered-section";
-import { CTA } from "./components/cta";
+import { DocsLinksSection } from "./components/docs-links-section";
+import { ExamplesSection } from "./components/examples-section";
 import { Hero } from "./components/hero";
-import { OneTwoSection } from "./components/one-two-section";
-import { Templates } from "./components/templates";
-import { TextGridSection } from "./components/text-grid-section";
+import { PillarsSection } from "./components/pillars-section";
+import "./hero-solo.css";
 
-const title = "Geistdocs";
-const description =
-  "A Vercel documentation template built with Next.js and Fumadocs. Designed for spinning up documentation sites quickly and consistently.";
+// Landing metadata + body copy carried over unchanged from the old
+// `apps/docs/app/page.tsx` (this ticket rebuilds the chrome, not the text —
+// see TGEIST-10).
+const title = "vgpu";
+const description = "The WebGPU library, designed for agents.";
 
 export const metadata: Metadata = {
   title,
   description,
 };
 
-const templates = [
-  {
-    title: "Template 1",
-    description: "Description of template 1",
-    link: "https://example.com/template-1",
-    image: "https://placehold.co/600x400.png",
-  },
-  {
-    title: "Template 2",
-    description: "Description of template 2",
-    link: "https://example.com/template-2",
-    image: "https://placehold.co/600x400.png",
-  },
-  {
-    title: "Template 3",
-    description: "Description of template 3",
-    link: "https://example.com/template-3",
-    image: "https://placehold.co/600x400.png",
-  },
-];
-
-const textGridSection = [
-  {
-    id: "1",
-    title: "Text Grid Section",
-    description: "Description of text grid section",
-  },
-  {
-    id: "2",
-    title: "Text Grid Section",
-    description: "Description of text grid section",
-  },
-  {
-    id: "3",
-    title: "Text Grid Section",
-    description: "Description of text grid section",
-  },
-];
-
-const COMMAND_FOR_HUMANS = "npx @vercel/geistdocs init";
-const COMMAND_FOR_AGENTS = "npx @vercel/geistdocs init --agent";
-
 const HomePage = () => (
-  <div className="container mx-auto max-w-5xl">
-    <Hero
-      badge="Geistdocs is now in beta"
-      description={description}
-      title={title}
-    >
-      <CommandPromptRoot defaultValue="humans">
-        <CommandPromptList>
-          <CommandPromptTrigger className="min-w-[90px]" value="humans">
-            For humans
-          </CommandPromptTrigger>
-          <CommandPromptTriggerDivider />
-          <CommandPromptTrigger className="min-w-[84px]" value="agents">
-            For agents
-          </CommandPromptTrigger>
-        </CommandPromptList>
-        <CommandPromptSurface>
-          <CommandPromptPrefix>$</CommandPromptPrefix>
-          <CommandPromptViewport>
-            <CommandPromptContent copyValue={COMMAND_FOR_HUMANS} value="humans">
-              {COMMAND_FOR_HUMANS}
-            </CommandPromptContent>
-            <CommandPromptContent copyValue={COMMAND_FOR_AGENTS} value="agents">
-              {COMMAND_FOR_AGENTS}
-            </CommandPromptContent>
-          </CommandPromptViewport>
-          <CommandPromptCopy />
-        </CommandPromptSurface>
-      </CommandPromptRoot>
-    </Hero>
-    <div className="flex flex-col">
-      <TextGridSection data={textGridSection} />
-      <CenteredSection
-        description="Description of centered section"
-        title="Centered Section"
-      >
-        <div className="aspect-video rounded-lg border bg-background-100" />
-      </CenteredSection>
-      <OneTwoSection
-        description="Description of one/two section"
-        title="One/Two Section"
-      >
-        <div className="aspect-video rounded-lg border bg-background-100" />
-      </OneTwoSection>
-      <Templates
-        data={templates}
-        description="See Geistdocs in action with one of our templates."
-        title="Get started quickly"
-      />
-      <CTA cta="Get started" href="/docs" title="Start your docs today" />
-    </div>
+  // Sans, like the rest of the site — matches the old landing's choice not to
+  // opt any body copy into Geist Serif.
+  <div>
+    <Hero />
+    <main className="mx-auto max-w-6xl px-6 pb-16 lg:px-12 lg:pb-20">
+      <ExamplesSection />
+      <PillarsSection />
+      <DocsLinksSection />
+    </main>
   </div>
 );
 
