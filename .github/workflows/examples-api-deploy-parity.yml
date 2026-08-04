@@ -2,15 +2,16 @@
 # the examples API.
 #
 # Why a workflow of its own instead of a job in ci.yml: this gate is not a per-PR check. It needs a
-# LIVE deployment URL (the old production site, a preview of apps/docs-next, or both), which no
+# LIVE deployment URL (production, a preview deployment, or both), which no
 # pull_request event can supply, so it is `workflow_dispatch` only — the same shape and the same
 # reason as publish-examples-api.yml. Keeping it out of ci.yml also keeps ci.yml free of a
 # workflow_dispatch trigger with inputs that would be meaningless for its 11 other jobs (and out of
 # the way of the other migration tickets that all edit that file).
 #
 # It is a de-facto prerequisite of the cutover PR (TGEIST-15), not a blocking status check:
-#   G4 — before the cutover: run it against the old production deployment AND against the
-#        apps/docs-next preview, and require both to pass with an empty A/B diff.
+#   G4 — before the cutover: run against the pre-migration production deployment AND against the
+#        preview of the new app, and require both to pass with an empty A/B diff. Last run before
+#        the cutover: run 30935778630 (prod vs preview, byte-identical).
 #   G5 — minutes after the cutover deploy: run it once against production again.
 #
 # The script is dependency-free (pure Node, no imports outside node:*), so this workflow needs no
@@ -25,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: "Deployment A (e.g. https://vgpu.sh, or a docs-next preview URL)"
+        description: "Deployment A (e.g. https://vgpu.sh, or a preview URL)"
         required: true
         type: string
       compare_url:
@@ -39,7 +40,6 @@ on:
         type: choice
         options:
           - "apps/docs/generated/examples-api"
-          - "apps/docs-next/generated/examples-api"
           - "none"
       require_local:
         description: "Fail (not just warn) if the checkout's tree revision differs from the deployment's"

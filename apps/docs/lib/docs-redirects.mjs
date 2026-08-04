@@ -177,7 +177,7 @@ function loadDriftRenames() {
   const candidates = [
     fileURLToPath(new URL("../scripts/url-anchor-drift-allowlist.json", import.meta.url)),
     resolve(process.cwd(), "scripts/url-anchor-drift-allowlist.json"),
-    resolve(process.cwd(), "apps/docs-next/scripts/url-anchor-drift-allowlist.json"),
+    resolve(process.cwd(), "apps/docs/scripts/url-anchor-drift-allowlist.json"),
   ];
   const path = candidates.find((candidate) => existsSync(candidate));
   // Absent file = no remap. The gate is what makes its absence loud (every

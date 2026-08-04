@@ -33,7 +33,7 @@ export const docs = defineDocs({
 // is produced HERE, on the mdast, at build time. Nothing rewrites a source file.
 //
 // The plugins live in `lib/remark-geist/` (unit-tested with `node --test`, see
-// `pnpm --filter docs-next test:remark`) and implement the mechanical mappings
+// `pnpm --filter docs test:remark`) and implement the mechanical mappings
 // M1-M9 of the inventory in Decision 2.4:
 //
 //   remarkNormalizeCodeLang   M4 ` ```terminal ` -> bash  (19 fences; leaving

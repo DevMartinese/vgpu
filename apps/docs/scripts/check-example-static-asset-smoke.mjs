@@ -35,7 +35,7 @@
  * accidentally swallows the page routes themselves fails loudly here instead of shipping.
  *
  * Needs a production build with `ingest-examples.mjs` already run -- same precondition as
- * `check-ml-asset-smoke.mjs`. `pnpm --filter docs-next build` runs it via `prebuild`, so in CI this
+ * `check-ml-asset-smoke.mjs`. `pnpm --filter docs build` runs it via `prebuild`, so in CI this
  * only ever needs to run right after `build`, in the same job.
  *
  * Usage:
@@ -149,7 +149,7 @@ async function startServer() {
   if (!existsSync(bin)) throw new Error(`cannot find the next binary at ${bin} -- run pnpm install`);
   if (!existsSync(join(APP_ROOT, ".next"))) {
     throw new Error(
-      `no production build at ${join(APP_ROOT, ".next")} -- this gate smokes a real server, run \`pnpm --filter docs-next build\` first`,
+      `no production build at ${join(APP_ROOT, ".next")} -- this gate smokes a real server, run \`pnpm --filter docs build\` first`,
     );
   }
   const port = await freePort();

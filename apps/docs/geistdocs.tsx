@@ -17,9 +17,9 @@ export const Logo = () => (
 export const github = {
   branch: "main",
   // The real path from the repo root, not from this app: vgpu is a monorepo,
-  // content/docs lives under apps/docs-next, and the vanilla template's path
+  // content/docs lives under apps/docs, and the vanilla template's path
   // (content/docs/{path}) pointed "edit this page" at a 404.
-  editPath: "apps/docs-next/content/docs/{path}",
+  editPath: "apps/docs/content/docs/{path}",
   owner: "vercel-labs",
   repo: "vgpu",
 };

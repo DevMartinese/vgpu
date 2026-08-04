@@ -30,7 +30,7 @@
  *     `prepare-depth-models.mjs`)
  *
  * Needs a production build with both prepare scripts already run — same precondition as
- * `check-url-anchor-parity.mjs`, checked the same way. `pnpm --filter docs-next build` runs both
+ * `check-url-anchor-parity.mjs`, checked the same way. `pnpm --filter docs build` runs both
  * via `prebuild`, so in CI this only ever needs to run right after `build`, in the same job.
  *
  * Usage:
@@ -89,7 +89,7 @@ function ortManifestAsset() {
   const manifestPath = join(PUBLIC_DIR, "ort", "manifest.json");
   if (!existsSync(manifestPath)) {
     throw new Error(
-      `${relative(APP_ROOT, manifestPath)} is missing — run \`pnpm --filter docs-next ort:assets\` ` +
+      `${relative(APP_ROOT, manifestPath)} is missing — run \`pnpm --filter docs ort:assets\` ` +
         "(this is a build precondition; `prebuild` runs it automatically).",
     );
   }
@@ -102,7 +102,7 @@ function depthModelAssets() {
   const manifestPath = join(depthDir, "manifest.json");
   if (!existsSync(manifestPath)) {
     throw new Error(
-      `${relative(APP_ROOT, manifestPath)} is missing — run \`pnpm --filter docs-next depth:models\` ` +
+      `${relative(APP_ROOT, manifestPath)} is missing — run \`pnpm --filter docs depth:models\` ` +
         "(this is a build precondition; `prebuild` runs it automatically).",
     );
   }
@@ -156,7 +156,7 @@ async function startServer() {
   if (!existsSync(bin)) throw new Error(`cannot find the next binary at ${bin} — run pnpm install`);
   if (!existsSync(join(APP_ROOT, ".next"))) {
     throw new Error(
-      `no production build at ${join(APP_ROOT, ".next")} — this gate smokes a real server, run \`pnpm --filter docs-next build\` first`,
+      `no production build at ${join(APP_ROOT, ".next")} — this gate smokes a real server, run \`pnpm --filter docs build\` first`,
     );
   }
   const port = await freePort();

@@ -1,7 +1,7 @@
 /**
  * Unit tests for the M1–M9 remark plugins (TGEIST-05).
  *
- * Run with `pnpm --filter docs-next test:remark` (plain `node --test`, no test
+ * Run with `pnpm --filter docs test:remark` (plain `node --test`, no test
  * runner dependency: `apps/docs-next` must not grow devDependencies during the
  * dual-run window, and the root vitest config does not include `apps/docs-next`
  * yet — TGEIST-06 is the ticket that extends it).

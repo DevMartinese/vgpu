@@ -158,7 +158,7 @@ async function startServer() {
   if (!existsSync(bin)) throw new Error(`cannot find the next binary at ${bin} — run pnpm install`);
   if (!existsSync(join(APP_ROOT, ".next"))) {
     throw new Error(
-      `no production build at ${join(APP_ROOT, ".next")} — this gate grades a real server, run \`pnpm --filter docs-next build\` first`,
+      `no production build at ${join(APP_ROOT, ".next")} — this gate grades a real server, run \`pnpm --filter docs build\` first`,
     );
   }
   const port = await freePort();
@@ -770,7 +770,7 @@ async function main() {
       );
     }
     console.error(
-      "\n  Fix by emitting the page into content/docs/**, or — when the URL was deliberately\n  consolidated elsewhere — by adding a redirect to apps/docs-next/lib/docs-redirects.mjs.",
+      "\n  Fix by emitting the page into content/docs/**, or — when the URL was deliberately\n  consolidated elsewhere — by adding a redirect to apps/docs/lib/docs-redirects.mjs.",
     );
   }
   if (lost.length > 0) {
