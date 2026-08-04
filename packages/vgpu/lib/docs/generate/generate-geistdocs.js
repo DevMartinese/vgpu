@@ -363,7 +363,16 @@ export function buildMetaFiles(nav, pages) {
     const segments = href.slice(1).split("/");
     rootPages.push(segments.length === 1 ? segments[0] : `[${section.title}](/docs${href})`);
   }
-  files.set("meta.json", serializeJson({ root: true, pages: rootPages }));
+  // Root branding (TGEIST-11 gap 2, flagged in the #278 review): nav.json's optional
+  // `root.{title,description}` becomes content/docs/meta.json's own `title`/`description`, the
+  // same keys `geistdocsMetaSchema` already accepts on every other directory's meta.json. nav.json
+  // (TGEIST-03) stays the single source; this emitter stays a mechanical translation, same as every
+  // section above — no new concept, just two more optional fields carried through.
+  const rootMeta = { root: true };
+  if (typeof nav.root?.title === "string") rootMeta.title = nav.root.title;
+  if (typeof nav.root?.description === "string") rootMeta.description = nav.root.description;
+  rootMeta.pages = rootPages;
+  files.set("meta.json", serializeJson(rootMeta));
 
   // -- concepts: literal order from the Concepts section ---------------------
   const conceptsSection = findSection(nav, "Concepts");

@@ -1,4 +1,8 @@
 {
+  "root": {
+    "title": "Documentation",
+    "description": "Documentation for vgpu, the WebGPU library designed for agents."
+  },
   "packageOrder": [
     "vgpu",
     "vgpu/scene",
