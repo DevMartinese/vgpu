@@ -324,6 +324,17 @@ jobs:
       # for the same reason as the two checks above: it grades this exact `.next`.
       - name: Check ML asset smoke (no i18n-proxied 404s) (docs-next)
         run: pnpm --filter docs-next check:ml-asset-smoke
+      # ANCHOR TGEIST-EXAMPLES-STATIC. Sibling of the ML asset smoke step above, same failure mode,
+      # different asset class: `next build` (two steps up) passes even when a static file under
+      # public/examples/** (the <slug>.card.png / <slug>.hero.png thumbnails,
+      # depth-estimation/source.jpg) 404s under the i18n proxy, and `thumbs:check` (gate G6) can't
+      # catch it either, for the same reason it can't catch the ML assets. This starts `next start`
+      # on THIS build and asserts every file committed under public/examples/** comes back 200,
+      # byte-identical and with no `x-middleware-rewrite` header, while re-checking a few
+      # /examples/[slug] page routes are still proxied. Must stay in this job, right after the
+      # build, for the same reason as the checks above: it grades this exact `.next`.
+      - name: Check example static asset smoke (no i18n-proxied 404s) (docs-next)
+        run: pnpm --filter docs-next check:example-static-asset-smoke
       # TGEIST-05 anchor — remark plugins M1-M9 + gate (c) of Decision 4.
       # `test:remark` unit-tests the mappings (including the adversarial case the
       # design names: a `*.docs.md` path inside a code-span that must NOT be
