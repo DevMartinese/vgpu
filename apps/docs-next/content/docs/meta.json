@@ -1,0 +1,12 @@
+{
+  "root": true,
+  "pages": [
+    "get-started",
+    "concepts",
+    "guides",
+    "[Examples](/examples)",
+    "cli",
+    "ml",
+    "reference"
+  ]
+}
