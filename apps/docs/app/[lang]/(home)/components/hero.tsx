@@ -1,5 +1,6 @@
 import { HeroBlackHole } from '@/components/hero/hero-black-hole';
 import { HeroTabs } from './hero-tabs';
+import '../hero-light-invert.css';
 
 /**
  * Landing hero.
@@ -12,7 +13,10 @@ import { HeroTabs } from './hero-tabs';
  */
 export function Hero() {
   return (
-    <section className="relative min-h-svh overflow-hidden bg-black">
+    <section
+      data-hero-invert
+      className="relative min-h-svh overflow-hidden bg-black"
+    >
       <HeroBlackHole />
 
       {/* Legibility scrim. Matches the Figma ellipse: a band centred on the
