@@ -32,6 +32,8 @@
   "files": [
     "bin",
     "lib",
+    "!lib/docs/generate/generate-geistdocs.js",
+    "!lib/docs/generate/check-docs-content.mjs",
     "README.md",
     "LICENSE"
   ],
