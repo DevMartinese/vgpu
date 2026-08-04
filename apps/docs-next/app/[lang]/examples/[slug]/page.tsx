@@ -38,7 +38,7 @@ const ExampleDetailPage = async ({ params }: ExampleDetailPageProps) => {
   if (!example) notFound();
 
   return (
-    <main className="mx-auto max-w-[880px] px-4 pt-12 pb-32 sm:px-6">
+    <main className="mx-auto w-full max-w-[880px] px-4 pt-12 pb-32 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-medium! text-heading-32 text-gray-1000 tracking-tighter sm:text-heading-40">
