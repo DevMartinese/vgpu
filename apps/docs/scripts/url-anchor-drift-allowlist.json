@@ -15,12 +15,6 @@
     },
     {
       "path": "/docs/guides/no-bundler",
-      "prodAnchor": "gotcha-is-esm-only",
-      "newAnchor": "gotcha-vgpuwgslruntime-is-esm-only",
-      "heading": "Gotcha: @vgpu/wgsl/runtime is ESM-only"
-    },
-    {
-      "path": "/docs/guides/no-bundler",
       "prodAnchor": "render-it-headless-with",
       "newAnchor": "render-it-headless-with-vgpunode",
       "heading": "Render it headless with vgpu/node"

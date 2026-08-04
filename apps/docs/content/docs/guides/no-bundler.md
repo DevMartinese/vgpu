@@ -84,20 +84,26 @@ Nothing about this changes when the shader grows: `resolveShader()` inlines the 
 
 Rendering an actual 3D scene rather than a fullscreen effect? See [Two-pass rendering](two-pass-rendering.docs.md) for the offscreen-depth-target recipe — it composes with this same no-bundler setup.
 
-## Gotcha: `@vgpu/wgsl/runtime` is ESM-only
+## `@vgpu/wgsl/runtime` works from ESM and CommonJS
 
-The `./runtime` subpath declares only an `import` condition — there is no CommonJS build, unlike `loader-webpack` and `loader-vite`. Call `resolveShader()` from an ES module:
+The `./runtime` subpath's `exports` map declares both an `import` and a `require` condition, both pointing at the same ESM file — Node resolves the `require` condition and loads it through its native `require(esm)` support. `resolveShader()` is reachable the same way from either module system, no rename or `"type": "module"` needed:
 
-- Name the script `.mjs` or `.mts` — this works even when the rest of the project is CommonJS, and it is the smallest fix, or
-- Set `"type": "module"` in the nearest `package.json`.
+```ts
+// CommonJS entry point — no "type": "module" required
+const { resolveShader } = require("@vgpu/wgsl/runtime");
+```
 
-Running it from a CommonJS entry point — `npx tsx scripts/render.ts` in a project without `"type": "module"`, for example — fails with Node's `ERR_PACKAGE_PATH_NOT_EXPORTED`, not a `VGPU-*` error code. Renaming the script to `scripts/render.mts` is the fix; nothing is wrong with your shader.
+```ts
+// ES module entry point
+import { resolveShader } from "@vgpu/wgsl/runtime";
+```
+
+Pick whichever matches how the rest of the script/project is written; both resolve to the same file and behave identically.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ERR_PACKAGE_PATH_NOT_EXPORTED` for `@vgpu/wgsl/runtime` | The script is being loaded as CommonJS | Rename it `.mjs`/`.mts`, or set `"type": "module"` |
 | `VGPU-WGSL-RES-NOTFOUND` | The entry path or an imported module does not exist | Fix the path; `entry` is resolved relative to the process, so build it from `import.meta.url` |
 | `VGPU-WGSL-PKG-NOTFOUND` | A WGSL package import is not installed | `npm install <pkg>`, or fix the specifier |
 | `VGPU-RESOLVE-MODULE-BINDING` | An imported `.wgsl` module declares `@group`/`@binding` | Keep resources in the entry shader; modules export only structs and functions |
