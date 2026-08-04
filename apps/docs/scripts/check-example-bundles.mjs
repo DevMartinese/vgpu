@@ -130,7 +130,19 @@ for (const slug of slugs) {
   for (const chunk of chunks) {
     const source = chunkSources.get(chunk);
     if (!source) throw new Error(`/preview/${slug} references missing chunk ${chunk}.`);
-    const markerSlugs = new Set([...source.toString('utf8').matchAll(/apps\/docs\/examples\/([a-z0-9-]+)\//g)].map((match) => match[1]));
+    // ANCHOR TGEIST-08: `docs(?:-next)?` is the ONLY edit this transplant makes to this script, and
+    // it is what keeps the isolation assertion from silently becoming a no-op during the dual-run
+    // window. Turbopack bakes the app-relative source path of inlined WGSL into the chunk, so in
+    // `apps/docs-next` the markers read `apps/docs-next/examples/<slug>/`. Measured on this build:
+    // 8 example slugs still carry markers (fluid, radiance-cascades, transmission, fft-ocean,
+    // fft-ocean-surface, earth, environment-map, triangle-led-front) and the hardcoded
+    // `apps/docs/examples/` pattern matched exactly ZERO of them -- both the foreign-renderer check
+    // and the `chunkOwners` shared-chunk check below are gated on `markerSlugs`, so they would have
+    // passed vacuously on every build until cutover. The check itself is unchanged (same markers,
+    // same comparisons, same failures); only the directory the app happens to live in is now
+    // allowed to be either name, so this keeps working verbatim when TGEIST-15 renames
+    // `apps/docs-next` back to `apps/docs`.
+    const markerSlugs = new Set([...source.toString('utf8').matchAll(/apps\/docs(?:-next)?\/examples\/([a-z0-9-]+)\//g)].map((match) => match[1]));
     // Turbopack may factor shared library code into a dependency chunk referenced by several lazy
     // routes. Only chunks containing example source must have exactly one example owner.
     if (markerSlugs.size > 0) {

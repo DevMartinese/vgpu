@@ -19,7 +19,14 @@ const slugs = [
   'raymarched-fractal',
 ];
 
-function writeFixture(options: { foreign?: boolean; oversized?: boolean; staleChunks?: boolean } = {}) {
+// ANCHOR TGEIST-08: `markerRoot` is the only addition to this transplanted suite. It exists to pin
+// the one edit the script needed in this tree (`apps/docs(?:-next)?/examples/<slug>/` instead of a
+// hardcoded `apps/docs/`): the default keeps every original assertion running against the old
+// app's marker shape, and the extra test at the bottom proves the same failure is raised for the
+// shape Turbopack actually emits while the app lives in `apps/docs-next`. Without it, the
+// isolation assertion would pass vacuously here and nothing would notice.
+function writeFixture(options: { foreign?: boolean; oversized?: boolean; staleChunks?: boolean; markerRoot?: string } = {}) {
+  const markerRoot = options.markerRoot ?? 'apps/docs';
   const root = mkdtempSync(path.join(tmpdir(), 'example-bundles-'));
   const chunks = path.join(root, 'chunks');
   mkdirSync(chunks);
@@ -40,8 +47,8 @@ function writeFixture(options: { foreign?: boolean; oversized?: boolean; staleCh
 
   for (const slug of slugs) {
     const foreignMarker = options.foreign && slug === 'gradient'
-      ? 'apps/docs/examples/fluid/renderer.ts'
-      : `apps/docs/examples/${slug}/renderer.ts`;
+      ? `${markerRoot}/examples/fluid/renderer.ts`
+      : `${markerRoot}/examples/${slug}/renderer.ts`;
     const padding = options.oversized && slug === 'gradient'
       ? Array.from({ length: 5_000 }, (_, index) => `${index.toString(36).padStart(6, '0')}-${(index * 7919).toString(36)}`).join('|')
       : '';
@@ -83,6 +90,17 @@ function runFixture(fixture: ReturnType<typeof writeFixture>) {
 
 test('fails when one preview chunk contains another example', () => {
   const result = runFixture(writeFixture({ foreign: true }));
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("contains another example's renderer/WGSL: fluid");
+});
+
+// ANCHOR TGEIST-08: same assertion as above, with the marker shape Turbopack emits while this app
+// lives in `apps/docs-next`. This is the test that fails if someone reverts the script's
+// `docs(?:-next)?` back to a hardcoded `apps/docs`, which would turn the isolation check into a
+// no-op in this tree. It keeps passing unchanged after the TGEIST-15 rename.
+test('fails when one preview chunk contains another example in the docs-next tree', () => {
+  const result = runFixture(writeFixture({ foreign: true, markerRoot: 'apps/docs-next' }));
 
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("contains another example's renderer/WGSL: fluid");
