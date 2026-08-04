@@ -39,7 +39,7 @@
  *     headings whose text was entirely code slugged to the empty string and came
  *     out as prod's `#-2`, `#-3`, …
  *
- * A gate that only diffed sets would report all of that as "89 anchors lost" and
+ * A gate that only diffed sets would report all of that as "94 anchors lost" and
  * be permanently red, which in practice means switched off. A gate that ignored
  * missing anchors would miss the thing that actually matters: a **heading that
  * disappeared**. So every missing anchor is matched back to a heading of the

@@ -2,7 +2,7 @@
  * The page-title anchor — Decision 2.3. TGEIST-12.
  *
  * The old site's `<h1>` came from the markdown body, so it got an `id` like every
- * other heading and `/docs/cli#cli` had a real target. 97 anchors frozen from
+ * other heading and `/docs/cli#cli` had a real target. 92 anchors frozen from
  * prod in `docs/url-inventory.json` are exactly that, and so are 276 of the
  * `#anchor` destinations of the redirect table: the API reference deep links
  * (`/packages/vgpu/Pass` → `/docs/reference/vgpu/effect#effect`) point at a
