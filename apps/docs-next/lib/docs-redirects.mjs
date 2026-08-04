@@ -15,18 +15,21 @@
  *     page). Without these 7 redirects the cutover breaks 7 live URLs — the
  *     single biggest handoff out of F1-F3.
  *
- *  2. `SECTION_ROOTS` — `/docs/get-started`, `/docs/concepts`, `/docs/guides`
- *     and `/docs/reference`. Prod serves all four (200, no anchors); the
- *     generated tree has no `index.md` in those directories, so fumadocs has no
- *     page at the folder URL and answers 404. The content fix (emit a real
- *     section index from the generator) belongs to whoever owns
- *     `content/docs/**` — this ticket may not hand-write files there — so the
- *     URL is kept alive by redirecting to the first page of the section, which
- *     is exactly what the sidebar highlights when you land there. Each target is
- *     the first entry of that directory's `meta.json`, and
- *     `check-url-anchor-parity.mjs` re-derives it from `meta.json` so a
- *     reordering that leaves this list stale fails CI instead of redirecting
- *     into the middle of a section.
+ *  2. `SECTION_ROOTS` — was `/docs/get-started`, `/docs/concepts`, `/docs/guides`
+ *     and `/docs/reference` redirecting to the first page of the section,
+ *     because the generated tree had no `index.md` in those directories and
+ *     fumadocs had no page at the folder URL to answer with. That stopgap is
+ *     gone: `content/docs/{get-started,concepts,guides,reference}/index.mdx`
+ *     (hand-authored, TGEIST-11 follow-up) are real section-index pages now,
+ *     ported verbatim from `apps/docs/app/docs/{get-started,concepts,guides,
+ *     reference}/page.tsx`, so the four URLs answer 200 directly and a redirect
+ *     here would only get in the way — Next.js resolves `redirects()` before
+ *     it resolves a page, so a live entry would mask the very index it used to
+ *     stand in for. Left as an empty array (not deleted) since the shape —
+ *     "redirect a section root to its first page until it has a real
+ *     `index.md`" — is still the correct stopgap for the next section that
+ *     ships without one; `checkSectionRootTargets()` below stays wired to it
+ *     for free.
  *
  *  3. `legacyTopLevelRedirects()` + the manifest-derived package/symbol
  *     redirects — ported from `apps/docs/next.config.mjs` (the app being
@@ -61,15 +64,12 @@ export const CONSOLIDATED_CONCEPT_GUIDES = [
 
 /**
  * Section directories with no `index.md` in `content/docs/**`, and the page
- * each one redirects to. The target must be the first real page of the
- * section's `meta.json` — asserted by `check-url-anchor-parity.mjs`.
+ * each one would redirect to (the first real page of the section's
+ * `meta.json` — asserted by `check-url-anchor-parity.mjs`). Empty: all four
+ * sections that ever needed this (get-started, concepts, guides, reference)
+ * have a real `index.mdx` now. See the module comment above.
  */
-export const SECTION_ROOTS = [
-  { source: "/docs/get-started", destination: "/docs/get-started/agents", dir: "get-started" },
-  { source: "/docs/concepts", destination: "/docs/concepts/context", dir: "concepts" },
-  { source: "/docs/guides", destination: "/docs/guides/getting-started", dir: "guides" },
-  { source: "/docs/reference", destination: "/docs/reference/vgpu/init", dir: "reference" },
-];
+export const SECTION_ROOTS = [];
 
 /**
  * `apps/docs/next.config.mjs`'s hand-written redirect list, ported verbatim
