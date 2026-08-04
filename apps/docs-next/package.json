@@ -16,6 +16,8 @@
     "depth:models": "node scripts/prepare-depth-models.mjs",
     "depth:models:check": "node scripts/prepare-depth-models.mjs --check",
     "check:example-imports": "node scripts/check-example-imports.mjs",
+    "$comment:tgeist-ml-assets": "TGEIST-ML-ASSETS: `check:ml-asset-smoke` starts `next start` on the production build and GETs every committed ONNX model + /ort/manifest.json + the staged depth models, asserting 200, no x-middleware-rewrite (the i18n proxy rewriting the asset to /en/... before it reaches the static file) and byte-identical content. Closes the gate hole TGEIST-14 found: `next build` and `thumbs:check` both pass with these assets 404ing under the proxy.",
+    "check:ml-asset-smoke": "node scripts/check-ml-asset-smoke.mjs",
     "build:workspace": "pnpm --dir ../.. run build",
     "translate": "npx @vercel/geistdocs translate",
     "$comment:tgeist-05": "TGEIST-05: `test:remark` unit-tests the M1-M9 remark plugins (node:test, no runner dependency: the root vitest config only picks up *.test.ts under apps/docs-next, added by TGEIST-06 for the transplanted examples API suite, so this .mjs suite still needs its own runner). `check:mdast-parity` is gate (c) of Decision 4 \u2014 it also asserts every surviving fence language is one Shiki can load (M4) and that no *.docs.md / bare logical link survives (M7/M8).",
