@@ -242,6 +242,18 @@ jobs:
         run: node packages/vgpu/lib/docs/generate/check-drift.js
       - name: Check docs/nav.json coverage against the docs manifest
         run: node scripts/check-nav-coverage.mjs
+      # TGEIST-04 anchor — geistdocs content target. Kept in this job (not a new one) because it has
+      # the same inputs and the same zero-dependency pure-Node requirement as check-drift.js above.
+      # Gate (b) of Decision 4: every page is its source minus frontmatter/H1/first paragraph, and
+      # nothing else. The regenerate + `git diff --exit-code` pair is the drift half: the committed
+      # apps/docs-next/content/docs tree cannot go stale. TGEIST-12 folds these steps into the
+      # `docs-parity` job together with gates (a), (c) and (d).
+      - name: Regenerate the geistdocs content tree
+        run: node packages/vgpu/lib/docs/generate/generate-geistdocs.js
+      - name: Check geistdocs content emission parity
+        run: node packages/vgpu/lib/docs/generate/check-docs-content.mjs
+      - name: Check the committed geistdocs content tree for drift
+        run: git diff --exit-code -- apps/docs-next/content/docs
 
   examples-api-generated:
     # Frozen schemas, controlled vocabulary, and deterministic revision artifacts.
