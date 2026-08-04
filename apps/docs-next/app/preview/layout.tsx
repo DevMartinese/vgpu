@@ -30,11 +30,21 @@ import { cn } from "@/lib/utils";
  * are sibling branches with no shared root layout. At cutover (TGEIST-15) this file stays; it is
  * what keeps `/preview/**` out of the docs shell for good.
  *
- * Two knowing deltas from the old app's root layout, neither reaching the canvas: fonts come from
- * `next/font/google` Geist (this app's `lib/geistdocs/fonts`) instead of the `geist` package's
- * self-hosted Geist -- same typeface, and no new dependency for a route that renders a canvas --
- * and `components/dev-instrumentation` is not mounted (it is a dev-only overlay of the old app
- * that was never transplanted).
+ * The complete list of knowing deltas from the old app's root layout, none of which reaches the
+ * canvas (i.e. none can move a thumb pixel):
+ *
+ * 1. Fonts come from `next/font/google` Geist (this app's `lib/geistdocs/fonts`) instead of the
+ *    `geist` package's self-hosted Geist -- same typeface, and no new dependency for a route whose
+ *    only job is to paint a canvas.
+ * 2. `components/dev-instrumentation` is not mounted (a dev-only overlay of the old app that was
+ *    never transplanted).
+ * 3. `title` is "vgpu example preview" instead of the old root layout's site-wide title, and its
+ *    `description` / OpenGraph metadata are dropped: this document is never a share target, it is
+ *    loaded by a headless renderer and by the gallery's iframes.
+ * 4. `robots: noindex, nofollow` is added, which the old app did not set. The previews are chromeless
+ *    canvases with no content of their own, so keeping 19 of them out of the index is strictly
+ *    better than inheriting the site default; it also cannot affect `/preview/**` rendering, only
+ *    what crawlers do with it.
  */
 
 export const metadata: Metadata = {

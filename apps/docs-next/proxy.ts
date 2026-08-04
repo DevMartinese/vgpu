@@ -27,9 +27,15 @@ const proxy = createProxy({
 // (`thumbs:check` / `render:proof`, gate G6) and of the gallery iframes, so they must keep
 // resolving at exactly the path the old app serves -- a localized variant would change the URL
 // contract those PNG baselines were captured against.
+// The pattern is `preview/` and NOT `preview(?:/|$)` on purpose: there is no page at bare
+// `/preview`, so excluding it from the proxy left it to the global not-found, which resolves inside
+// `app/[lang]/` without a `lang` param and threw (500 instead of the old app's 404). Requiring the
+// slash keeps the bare path on the proxy, where geistdocs answers its normal localized 404, and
+// still cannot over-match a sibling like `/previewfoo`. Verified on this build: `/preview` 404,
+// `/preview/gradient` 200, `/previewfoo` proxied.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 
