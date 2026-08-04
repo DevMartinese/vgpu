@@ -31,7 +31,11 @@
     "$comment:tgeist-12": "TGEIST-12: gate (d) of Decision 4 plus the schema check its siblings rely on. `check:url-anchor-parity` starts `next start` on the production build itself (so next.config redirects and the geistdocs i18n proxy are in the loop) and asserts every URL + anchor frozen from prod in docs/url-inventory.json still resolves; pass `--json=<file>` to keep the report and `--write-allowlist` to re-record known slugger renames. `check:doc-links` resolves every link of the corpus on the post-M1-M9 mdast and reports M10; give it the `--json` report to verify `#fragment` targets against ids observed in HTML. `check:content-schemas` validates the corpus against the real @vercel/geistdocs Zod schemas in about a second, so a bad frontmatter does not cost a whole build. All three run in the `docs-parity` CI job.",
     "check:url-anchor-parity": "node scripts/check-url-anchor-parity.mjs",
     "check:doc-links": "node scripts/check-doc-links.mjs",
-    "check:content-schemas": "node scripts/check-content-schemas.mjs"
+    "check:content-schemas": "node scripts/check-content-schemas.mjs",
+    "$comment:tgeist-14": "TGEIST-14 (gate G6): same three commands as the old app, same script (scripts/render-example-thumbs.mjs is byte-identical to apps/docs'), pointed at THIS app's public/examples baselines -- which are the byte-identical PNGs transplanted from apps/docs, i.e. the pixel contract is shared, not re-baselined. They only produce meaningful pixels on a GPU-capable runtime (the docker-gpu job / infra/test-docker), never on a plain CI runner. `thumbs` rewrites the baselines (--update, never run in CI), `thumbs:check` compares against them, `render:proof` dumps 160x90 proofs to artifacts/example-renders for the CI artifact upload.",
+    "thumbs": "node scripts/render-example-thumbs.mjs --update",
+    "thumbs:check": "node scripts/render-example-thumbs.mjs --check",
+    "render:proof": "node scripts/render-example-thumbs.mjs --proof-dir ../../artifacts/example-renders"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.134",

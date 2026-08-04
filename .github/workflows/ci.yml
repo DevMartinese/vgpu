@@ -122,6 +122,56 @@ jobs:
           path: artifacts/thumb-diffs
           if-no-files-found: error
           retention-days: 7
+      # --- TGEIST-14 anchor (gate G6): same two GPU steps, pointed at apps/docs-next ---
+      # Form (b) of the ticket: the docs steps above are left untouched (no regression for the
+      # old app) and the new app gets its own pair of steps in the SAME job, so the expensive
+      # parts (docker build, pnpm install, typecheck) are paid once, not twice (risk #7).
+      # Both apps run scripts/render-example-thumbs.mjs (byte-identical file) against
+      # byte-identical public/examples baselines, so any pixel delta between the two blocks is a
+      # real finding about the new tree (React 19 / Tailwind 4 / new deps), not about the harness.
+      # Output dirs are suffixed -docs-next so the docs artifacts uploaded above are never clobbered.
+      # This whole block collapses back into the docs steps at cutover (TGEIST-15), when
+      # apps/docs-next becomes apps/docs and the docs-next filter disappears.
+      - name: Render docs-next example proofs in Docker (TGEIST-14)
+        run: |
+          rm -rf artifacts/example-renders-docs-next
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e VGPU_DOCKER_TEST=1 \
+            -e CI=true \
+            vgpu-test-dev:ci \
+            sh -lc 'Xvfb :99 -screen 0 1024x768x24 >/tmp/xvfb.log 2>&1 & xp=$!; \
+              pnpm --filter docs-next render:proof -- --proof-dir ../../artifacts/example-renders-docs-next; \
+              s=$?; kill $xp; exit $s'
+      - name: Upload docs-next example render proofs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-next-example-renders
+          path: artifacts/example-renders-docs-next/*.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Compare docs-next example thumbnails in Docker (TGEIST-14)
+        run: |
+          rm -rf artifacts/thumb-diffs-docs-next
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e VGPU_DOCKER_TEST=1 \
+            -e CI=true \
+            vgpu-test-dev:ci \
+            sh -lc 'Xvfb :99 -screen 0 1024x768x24 >/tmp/xvfb.log 2>&1 & xp=$!; \
+              pnpm --filter docs-next thumbs:check -- --artifact-dir ../../artifacts/thumb-diffs-docs-next; \
+              s=$?; kill $xp; exit $s'
+      - name: Upload docs-next thumbnail comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-next-thumb-comparison
+          path: artifacts/thumb-diffs-docs-next
+          if-no-files-found: error
+          retention-days: 7
 
   wgsl-cachekey-determinism:
     name: wgsl-cachekey-determinism (${{ matrix.os }})
