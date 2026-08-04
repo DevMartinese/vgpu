@@ -61,7 +61,12 @@ export function scan(source: string): Token[] {
       const text = source.slice(start, i);
       push(WGSL_KEYWORDS.has(text) ? "keyword" : "ident", start, i, atLine, atColumn); continue;
     }
-    if (/[0-9]/.test(ch)) {
+    // WGSL's `decimal_float_literal` may start with a dot (`.5`, `.5e2`, `.5f`), so a `.` directly
+    // followed by a digit opens a number token rather than a member access: neither member names nor
+    // swizzles can start with a digit, so `v.x` / `a.xyz` stay punct + ident. Trailing-dot forms
+    // (`1.`, `1.e3`) enter through the leading-digit case and are unchanged.
+    if (/[0-9]/.test(ch) || (ch === "." && /[0-9]/.test(source[i + 1] ?? ""))) {
+      if (ch === ".") step();
       while (i < source.length) {
         const current = source[i]!;
         if (/[A-Za-z0-9_.]/.test(current)) { step(); continue; }
