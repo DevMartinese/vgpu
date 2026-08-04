@@ -67,10 +67,16 @@ const EXTERNAL_HREF = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/iu;
  */
 
 /**
+ * Whether a root-relative href is a docs page that still needs the `/docs`
+ * prefix (M8). Exported because the parity gate asserts the *post-condition*
+ * with it: after the chain, no href may still satisfy this predicate. Sharing
+ * the predicate is the point — a gate with its own second opinion about what
+ * "needs a prefix" means can pass while the build ships 404s.
+ *
  * @param {string} href
- * @param {ReadonlyArray<string>} nonDocsPrefixes
+ * @param {ReadonlyArray<string>} [nonDocsPrefixes]
  */
-function needsDocsPrefix(href, nonDocsPrefixes) {
+export function needsDocsPrefix(href, nonDocsPrefixes = DEFAULT_NON_DOCS_PREFIXES) {
   if (!href.startsWith("/")) return false;
   if (href.startsWith("//")) return false;
   for (const prefix of nonDocsPrefixes) {
@@ -133,6 +139,17 @@ export function remarkResolveDocLinks(options) {
         return;
       }
 
+      // M9 (anchor-only), protocol-relative, and anything with a scheme:
+      // untouched. This is evaluated **before** the M7 branch because the
+      // original `resolveMarkdownHref` opens with the same test
+      // (`/^(https?:|mailto:|#)/`) and returns such hrefs unchanged: a link to
+      // someone else's repo that happens to end in `.docs.md`
+      // (`https://github.com/o/r/blob/main/x.docs.md`) is a perfectly good
+      // external link, not a broken internal one. Testing M7 first made it fail
+      // the build as an "unresolved *.docs.md link", which is both a divergence
+      // from the ported logic and a thoroughly misleading message.
+      if (EXTERNAL_HREF.test(href)) return;
+
       // M7 — `*.docs.md`.
       if (isMarkdownDocHref(href)) {
         const logical = resolveMarkdownHref(href, index);
@@ -144,9 +161,6 @@ export function remarkResolveDocLinks(options) {
         report?.({ href, reason: "unresolved-docs-md", file: filePath });
         return;
       }
-
-      // M9 (anchor-only) and anything with a scheme: untouched.
-      if (EXTERNAL_HREF.test(href)) return;
 
       // M8 — absolute logical path. `needsDocsPrefix` already applied the
       // `/examples`-subtree exception that `docsHref` encodes (see the comment

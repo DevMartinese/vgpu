@@ -64,6 +64,25 @@ export const SHIKI_SPECIAL_LANGUAGES = Object.freeze(["text", "txt", "plaintext"
 const LANGUAGE_IDENTIFIER = /^[a-zA-Z][a-zA-Z0-9+#-]*$/u;
 
 /**
+ * Records what happened to a fence label, invisibly (`data` is not text, so the
+ * parity gate is unaffected). The `action` is what lets the gate tell three very
+ * different events apart in its summary instead of lumping them together:
+ *
+ *  - `alias`    — a deliberate entry of the alias table (`terminal` → `bash`).
+ *  - `case`     — same language, canonical spelling (` ```JSON ` → `json`).
+ *  - `degraded` — the label is **not** a language Shiki knows, so the block
+ *                 renders unhighlighted. Always worth a human look: it is
+ *                 either a typo in the corpus or a language that needs adding.
+ *
+ * @param {import("./mdast-utils.mjs").MdastNode} node
+ * @param {string} original
+ * @param {"alias"|"case"|"degraded"} action
+ */
+function annotate(node, original, action) {
+  node.data = { ...(node.data ?? {}), geistOriginalLang: original, geistLangAction: action };
+}
+
+/**
  * @typedef {Object} NormalizeCodeLangOptions
  * @property {Record<string, string>} [aliases] Overrides `DEFAULT_LANGUAGE_ALIASES`.
  * @property {Iterable<string>} [knownLanguages] Languages Shiki can highlight.
@@ -98,19 +117,35 @@ export function remarkNormalizeCodeLang(options = {}) {
       const alias = Object.hasOwn(aliases, lower) ? aliases[lower] : undefined;
       if (alias && alias !== original) {
         node.lang = alias;
-        node.data = { ...(node.data ?? {}), geistOriginalLang: original };
+        annotate(node, original, "alias");
         return;
       }
 
       const isIdentifier = LANGUAGE_IDENTIFIER.test(original);
       const isKnown = known ? known.has(lower) : true;
-      if (isIdentifier && isKnown) return;
+      if (isIdentifier && isKnown) {
+        // Shiki's language lookup is **case-sensitive**: `json` highlights,
+        // ` ```JSON ` throws `Language \`JSON\` is not included in this bundle`
+        // and takes the build down exactly like `terminal` does (verified
+        // against the installed shiki 3.19: `codeToHtml` with `JSON`, `Ts` and
+        // `WGSL` all throw). The alias table and the `known` set are keyed on
+        // lowercase, so a label that only differs in case has to be rewritten to
+        // the canonical spelling here — otherwise it silently reaches
+        // `rehypeCode` with the label the author typed, and the promise that any
+        // unknown-to-Shiki label degrades instead of failing the build would be
+        // false for the whole `JSON`/`Ts`/`WGSL` family.
+        if (original !== lower) {
+          node.lang = lower;
+          annotate(node, original, "case");
+        }
+        return;
+      }
 
       // Unknown to Shiki (or not even identifier-shaped): degrade to plain text
       // and keep the label visible as fence meta, exactly like eve does.
       node.meta = node.meta ? `${original} ${node.meta}` : original;
       node.lang = fallback;
-      node.data = { ...(node.data ?? {}), geistOriginalLang: original };
+      annotate(node, original, "degraded");
     });
   };
 }

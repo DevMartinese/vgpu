@@ -8,10 +8,8 @@ import { bundledLanguages } from "shiki";
 
 import {
   buildDocLinkIndex,
+  geistRemarkPlugins,
   loadDocsManifestRecords,
-  remarkCalloutBlockquotes,
-  remarkNormalizeCodeLang,
-  remarkResolveDocLinks,
 } from "./lib/remark-geist/index.mjs";
 
 // You can customise Zod schemas for frontmatter and `meta.json` here
@@ -68,37 +66,34 @@ export const docs = defineDocs({
 // The slug -> URL table is the committed docs manifest, loaded lazily on the
 // first compiled file (`loadIndex`), so this config needs no top-level await and
 // `apps/docs-next` needs no dependency on `@vgpu/cli` during the dual-run window.
-// NOTE the `[attacher, options]` tuple shape: unified calls each entry of the
-// plugins array as an attacher and registers what it RETURNS. Passing
-// `remarkNormalizeCodeLang({ … })` here instead compiles fine, type-checks fine,
-// and silently registers nothing — the first build of this ticket failed with
+// The chain itself is built by `geistRemarkPlugins()` and is NOT spelled out
+// again here. That is deliberate and load-bearing: the parity gate
+// (`scripts/check-mdast-parity.mjs`) derives the transformers it checks from the
+// same function, so "the gate cannot test a chain different from the one the
+// build runs" is true *structurally* rather than by two lists agreeing. With the
+// list duplicated here, dropping a plugin from this file left the gate green, the
+// build green, and the HTML quietly wrong (no Callouts, 85 unresolved links) —
+// the exact class of failure this gate exists to prevent.
+//
+// `geistRemarkPlugins()` returns unified `[attacher, options]` tuples. The tuple
+// shape matters: unified calls each entry as an attacher and registers what it
+// RETURNS, so handing it an already-called factory type-checks, compiles, and
+// silently registers nothing (this ticket's first build failed with
 // `ShikiError: Language 'terminal' is not included in this bundle` for exactly
-// that reason. `geistRemarkPlugins()` in lib/remark-geist/index.mjs builds the
-// same list; it is kept inline here so the chain and its order are readable in
-// the config the way eve's is.
-const remarkGeistPlugins: NonNullable<DefaultMDXOptions["remarkPlugins"]> = [
-  [
-    remarkNormalizeCodeLang,
-    {
-      // Shiki's own language list, so any future unknown-but-identifier-shaped
-      // fence label degrades to `text` instead of failing the build.
-      knownLanguages: Object.keys(bundledLanguages),
-    },
-  ],
-  [remarkCalloutBlockquotes, {}],
-  [
-    remarkResolveDocLinks,
-    {
-      loadIndex: async () => {
-        const { records } = await loadDocsManifestRecords();
-        return buildDocLinkIndex(records);
-      },
-      // An unresolved `*.docs.md` link is a silent 404 in production (risk #6 of
-      // the design), so it fails the build instead of shipping.
-      onUnresolvedMarkdownLink: "error",
-    },
-  ],
-] as const;
+// that reason). The order of the chain, and why it is that order, is documented
+// on `geistRemarkPlugins` in lib/remark-geist/index.mjs.
+const remarkGeistPlugins = geistRemarkPlugins({
+  // Shiki's own language list, so any future unknown-but-identifier-shaped fence
+  // label degrades to `text` instead of failing the build.
+  knownLanguages: Object.keys(bundledLanguages),
+  loadIndex: async () => {
+    const { records } = await loadDocsManifestRecords();
+    return buildDocLinkIndex(records);
+  },
+  // An unresolved `*.docs.md` link is a silent 404 in production (risk #6 of the
+  // design), so it fails the build instead of shipping.
+  onUnresolvedMarkdownLink: "error",
+}) as NonNullable<DefaultMDXOptions["remarkPlugins"]>;
 
 export default defineGeistdocsSourceConfig({
   mdxOptions: {

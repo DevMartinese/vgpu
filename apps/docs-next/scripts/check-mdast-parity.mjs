@@ -45,6 +45,7 @@ import { applyTransformers, loadMarkdownParser } from "../lib/remark-geist/markd
 import { mdastToText, normalizeWhitespace, visit } from "../lib/remark-geist/mdast-utils.mjs";
 import { SHIKI_SPECIAL_LANGUAGES } from "../lib/remark-geist/normalize-code-lang.mjs";
 import { isMarkdownDocHref } from "../lib/remark-geist/doc-link-index.mjs";
+import { needsDocsPrefix } from "../lib/remark-geist/resolve-doc-links.mjs";
 
 const APP_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/u, "");
 const DEFAULT_TARGETS = ["content/docs", "lib/remark-geist/fixtures"];
@@ -124,6 +125,15 @@ async function main() {
 
   /** @type {string[]} */
   const failures = [];
+  /**
+   * Fences whose label was **not** a language Shiki knows, so they render
+   * unhighlighted. Not a failure (that is the designed degradation), but it must
+   * not hide inside the same counter as the deliberate alias mappings: a new
+   * unhighlighted block is either a corpus typo or a language worth adding, and
+   * either way somebody has to see it.
+   * @type {string[]}
+   */
+  const degradations = [];
   let calloutCount = 0;
   let normalizedFences = 0;
   let rewrittenLinks = 0;
@@ -155,12 +165,27 @@ async function main() {
     visit(tree, (node) => {
       if (node.type === "mdxJsxFlowElement" && node.name === "Callout") calloutCount += 1;
       if (node.type === "code") {
-        if (node.data?.geistOriginalLang) normalizedFences += 1;
-        const lang = typeof node.lang === "string" ? node.lang.toLowerCase() : "";
+        const action = node.data?.geistLangAction;
+        if (action) {
+          normalizedFences += 1;
+          if (action === "degraded") {
+            degradations.push(
+              `${label}:${node.position?.start?.line ?? "?"} "${node.data?.geistOriginalLang}" → text`,
+            );
+          }
+        }
+        // Checked **case-sensitively and against the language the node actually
+        // carries**, because that is how Shiki looks it up: `json` highlights,
+        // `JSON` throws `Language \`JSON\` is not included in this bundle` and
+        // takes the build with it. Lowercasing here (as this gate first did) made
+        // the oracle strictly weaker than the thing it models, so ` ```JSON `
+        // passed the gate and broke `next build` — a gate that green-lights the
+        // failure it exists to catch.
+        const lang = typeof node.lang === "string" ? node.lang : "";
         if (lang && !shikiLanguages.has(lang)) {
           failures.push(
-            `${label}: fence language "${node.lang}" is unknown to Shiki after normalization — ` +
-              "this is exactly what fails `next build` (M4).",
+            `${label}:${node.position?.start?.line ?? "?"}: fence language "${lang}" is not one ` +
+              "Shiki can load (it is case-sensitive) — this is exactly what fails `next build` (M4).",
           );
         }
       }
@@ -170,6 +195,17 @@ async function main() {
         if (isMarkdownDocHref(href)) {
           failures.push(
             `${label}: link "${href}" still points at a *.docs.md file — it would 404 (M7).`,
+          );
+        }
+        // M8, using the plugin's own predicate: after the chain, no href may
+        // still be a bare logical docs path. Asserting only M7 (as this gate
+        // originally did) meant M8 could be removed wholesale and the gate would
+        // still pass — the 33 links it fixes would 404 in production with the
+        // gate, the CI step and this file's own docstring all claiming coverage.
+        if (needsDocsPrefix(href)) {
+          failures.push(
+            `${label}: link "${href}" is still a bare logical path — it needs the /docs ` +
+              "prefix and would 404 as authored (M8).",
           );
         }
       }
@@ -197,10 +233,18 @@ async function main() {
   console.log("");
   console.log(`pages checked        ${files.length}`);
   console.log(`Callouts produced    ${calloutCount} (M1/M2)`);
-  console.log(`fences normalized    ${normalizedFences} (M4/M5)`);
+  console.log(
+    `fences normalized    ${normalizedFences} (M4/M5) — of which ${degradations.length} degraded to text`,
+  );
   console.log(`links rewritten      ${rewrittenLinks} (M7/M8)`);
   console.log(`empty links (M10)    ${emptyLinks.length} — reported, never rewritten`);
   console.log("");
+
+  if (degradations.length > 0) {
+    console.log("  fences whose label is not a language Shiki knows (rendered unhighlighted):");
+    for (const degradation of degradations) console.log(`    ${degradation}`);
+    console.log("");
+  }
 
   if (emptyLinks.length > 0) {
     for (const report of emptyLinks) {

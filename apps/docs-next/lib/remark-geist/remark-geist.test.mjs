@@ -16,11 +16,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { remarkCalloutBlockquotes } from "./callout-blockquotes.mjs";
-import { buildDocLinkIndex, docsHref, resolveMarkdownHref } from "./doc-link-index.mjs";
+import {
+  buildDocLinkIndex,
+  docsHref,
+  isMarkdownDocHref,
+  resolveMarkdownHref,
+} from "./doc-link-index.mjs";
 import { applyTransformers, loadMarkdownParser } from "./markdown-toolchain.mjs";
 import { mdastToText, normalizeWhitespace, visit } from "./mdast-utils.mjs";
-import { remarkNormalizeCodeLang } from "./normalize-code-lang.mjs";
-import { remarkResolveDocLinks } from "./resolve-doc-links.mjs";
+import { SHIKI_SPECIAL_LANGUAGES, remarkNormalizeCodeLang } from "./normalize-code-lang.mjs";
+import { needsDocsPrefix, remarkResolveDocLinks } from "./resolve-doc-links.mjs";
 
 const { parse } = await loadMarkdownParser();
 
@@ -222,6 +227,44 @@ describe("M4/M5/M6 — fenced code languages", () => {
     );
   });
 
+  it("canonicalizes a label that differs from Shiki's only in case", async () => {
+    // Shiki's lookup is case-sensitive: `codeToHtml` with `JSON`, `Ts` or `WGSL`
+    // throws `Language ... is not included in this bundle` and fails `next build`
+    // exactly like `terminal` does. Since the alias table and the known-language
+    // set are both keyed on lowercase, an uppercase label used to slip through
+    // untouched — passing the gate and breaking the build.
+    const tree = await transform(
+      "```JSON\n{}\n```\n\n```Ts\nconst a = 1;\n```\n\n```WGSL\nfn main() {}\n```\n",
+      [codeLangPlugin],
+    );
+    const codes = collect(tree, "code");
+    assert.deepEqual(
+      codes.map((node) => node.lang),
+      ["json", "ts", "wgsl"],
+    );
+    // A canonical-spelling rewrite is not a degradation: no fence meta is added,
+    // and the block still gets highlighted.
+    assert.deepEqual(
+      codes.map((node) => node.meta ?? null),
+      [null, null, null],
+    );
+    assert.deepEqual(
+      codes.map((node) => node.data?.geistLangAction),
+      ["case", "case", "case"],
+    );
+  });
+
+  it("classifies each normalization so the gate can list degradations apart", async () => {
+    const tree = await transform(
+      "```terminal\nnpx vgpu doctor\n```\n\n```JSON\n{}\n```\n\n```somethingnew\nx\n```\n",
+      [codeLangPlugin],
+    );
+    assert.deepEqual(
+      collect(tree, "code").map((node) => node.data?.geistLangAction),
+      ["alias", "case", "degraded"],
+    );
+  });
+
   it("leaves a fence with no info string unhighlighted (744 in the corpus)", async () => {
     const tree = await transform("```\nVGPU-WGSL-ENTRY-NOT-FOUND\n```\n", [codeLangPlugin]);
     const [code] = collect(tree, "code");
@@ -385,6 +428,23 @@ describe("M8 — absolute logical links", () => {
     );
   });
 
+  it("leaves an external link that happens to end in .docs.md alone", async () => {
+    // The ported `resolveMarkdownHref` opens with `/^(https?:|mailto:|#)/` and
+    // returns such hrefs untouched, so a link to someone else's repo file is a
+    // fine external link. Testing the `*.docs.md` branch first made this fail the
+    // build as an "unresolved *.docs.md link" — a divergence from the original
+    // with a message that sends the reader looking for a missing manifest record.
+    const tree = await transform(
+      "- [upstream](https://github.com/vercel-labs/vgpu/blob/main/docs/topics/cli.docs.md)\n" +
+        "- [anchor](#framepass)\n",
+      [linkPlugin],
+    );
+    assert.deepEqual(
+      collect(tree, "link").map((node) => node.url),
+      ["https://github.com/vercel-labs/vgpu/blob/main/docs/topics/cli.docs.md", "#framepass"],
+    );
+  });
+
   it("docsHref matches the ported original exactly", () => {
     assert.equal(docsHref("/reference/vgpu/frame#framepass"), "/docs/reference/vgpu/frame#framepass");
     assert.equal(docsHref("/examples/air-painting"), "/examples/air-painting");
@@ -437,5 +497,63 @@ describe("Decision 4c invariant — the chain never changes text", () => {
     const tree = await transform(source, [codeLangPlugin, remarkCalloutBlockquotes(), linkPlugin]);
     const after = normalizeWhitespace(mdastToText(tree));
     assert.equal(after, before);
+  });
+});
+
+describe("gate post-conditions — the predicates the parity gate asserts with", () => {
+  // The gate's job is not only "text unchanged": it also has to notice when a
+  // mapping stops happening at all. It asserts that with these two predicates, so
+  // they are pinned here. The M8 half was missing originally, which meant M8 could
+  // be deleted wholesale with the gate still green.
+  it("needsDocsPrefix flags exactly the hrefs M8 must rewrite", () => {
+    for (const href of ["/reference/vgpu/frame#framepass", "/ml/browser", "/concepts/passes"]) {
+      assert.equal(needsDocsPrefix(href), true, `${href} should need the /docs prefix`);
+    }
+    for (const href of [
+      "/docs/reference/vgpu/frame", // already prefixed
+      "/examples", // top-level route
+      "/examples/air-painting",
+      "/api/examples/v1/latest.json",
+      "//example.com/x", // protocol-relative
+      "#framepass", // M9
+      "concepts-frames.docs.md", // relative, M7's job
+    ]) {
+      assert.equal(needsDocsPrefix(href), false, `${href} should NOT be prefixed`);
+    }
+  });
+
+  it("after the chain, no link satisfies either failure predicate", async () => {
+    const source = [
+      "- [frames](concepts-frames.docs.md)",
+      "- [`FramePass`](/reference/vgpu/frame#framepass)",
+      "- [ml](/ml/browser)",
+      "- [gallery](/examples/air-painting)",
+      "- [anchor](#framepass)",
+    ].join("\n");
+    const tree = await transform(source, [linkPlugin]);
+    for (const node of collect(tree, "link")) {
+      assert.equal(isMarkdownDocHref(node.url), false, `${node.url} still points at a .docs.md`);
+      assert.equal(needsDocsPrefix(node.url), false, `${node.url} still lacks the /docs prefix`);
+    }
+  });
+
+  it("both predicates catch a survivor when the mapping is skipped", async () => {
+    // Simulates the mutation the reviewer used: chain without the link plugin.
+    const tree = await transform(
+      "- [frames](concepts-frames.docs.md)\n- [`FramePass`](/reference/vgpu/frame#framepass)\n",
+      [],
+    );
+    const urls = collect(tree, "link").map((node) => node.url);
+    assert.equal(urls.filter((url) => isMarkdownDocHref(url)).length, 1);
+    assert.equal(urls.filter((url) => needsDocsPrefix(url)).length, 1);
+  });
+
+  it("the Shiki oracle is case-sensitive, like Shiki itself", () => {
+    // `bundledLanguages` keys are all lowercase, so an oracle that lowercases the
+    // node's language before looking it up is strictly weaker than Shiki and lets
+    // ` ```JSON ` through. The gate must query the label as the node carries it.
+    const shikiLanguages = new Set(["json", "ts", "wgsl", ...SHIKI_SPECIAL_LANGUAGES]);
+    assert.equal(shikiLanguages.has("JSON"), false);
+    assert.equal(shikiLanguages.has("json"), true);
   });
 });
