@@ -32,14 +32,14 @@
 //    is sorted), so a re-run produces a zero diff. That is what makes the emitted tree committable
 //    and drift-checkable (check-docs-content.mjs + `git status` in CI).
 //
-// Output root defaults to `apps/docs-next/content/docs` and can be redirected with
+// Output root defaults to `apps/docs/content/docs` and can be redirected with
 // VGPU_GEISTDOCS_CONTENT_DIR (used by the drift check to write into a scratch dir).
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadManifest } from "./generate.js";
 
-export const DEFAULT_CONTENT_DIR = "apps/docs-next/content/docs";
+export const DEFAULT_CONTENT_DIR = "apps/docs/content/docs";
 
 // meta.json entries that intentionally point at content this target does NOT own: `get-started` is
 // hand-authored MDX (TGEIST-11) and the section index pages (`index.mdx`) are hand-authored too.
