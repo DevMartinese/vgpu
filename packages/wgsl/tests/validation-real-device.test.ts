@@ -19,8 +19,8 @@ test.skipIf(!hasDevice)("require mode throws the naga diagnostic for an invalid 
 
 /**
  * Fixture for the "the returned artifact is the validated artifact" guarantee, using a leading-dot
- * float literal: `.5` is valid WGSL (the device accepts this source verbatim), but the whitespace
- * minifier currently splits it into `. 5`, which the device rejects.
+ * float literal: `.5` is valid WGSL (the device accepts this source verbatim), and the whitespace
+ * minifier used to split it into `. 5`, which the device rejects.
  */
 const DOT_FIVE_WGSL = "@group(0) @binding(0) var<storage, read_write> out_buf: array<f32>;\n@compute @workgroup_size(1) fn main() {\n  out_buf[0] = .5;\n}\n";
 
@@ -45,12 +45,12 @@ test.skipIf(!hasDevice)("whitespace-only minification never returns WGSL the dev
   expect(roundTrip.validation).toMatchObject({ attempted: true, ok: true });
 });
 
-test.skipIf(!hasDevice)("a `.5` literal split by whitespace minification is caught instead of shipped", async () => {
-  // Pinned to today's minifier behaviour: `.5` -> `. 5` is a live printer bug, so the *correct*
-  // outcome for this input right now is a loud naga diagnostic. Fixing the printer flips this test
-  // — replace the body with `await expect(resolveDotFiveWhitespaceMinified()).resolves.toMatchObject(
-  // { validation: { ok: true } })` and keep the test above unchanged; it already covers both worlds.
-  await expect(resolveDotFiveWhitespaceMinified()).rejects.toMatchObject({ code: "VGPU-WGSL-NAGA-UNKNOWN" });
+test.skipIf(!hasDevice)("a `.5` literal survives whitespace minification and validates", async () => {
+  // Pins the fix for the split-literal bug: the scanner now reads `.5` as one number token, so this
+  // input minifies to WGSL the device accepts instead of `. 5` (which used to raise a loud naga
+  // diagnostic here). A regression in the scanner or in the printer's separator rules fails this.
+  await expect(resolveDotFiveWhitespaceMinified()).resolves.toMatchObject({ validation: { mode: "require", attempted: true, ok: true } });
+  expect((await resolveDotFiveWhitespaceMinified()).wgsl).toContain("=.5;");
 });
 
 test.skipIf(!hasDevice)("whitespace-only minification reports attempted/ok for output the device accepts", async () => {
