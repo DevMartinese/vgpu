@@ -45,6 +45,11 @@ Releases are cut by hand and published by CI. There is no bot and no automatic
 version-packages PR: `.github/workflows/release.yml` runs on a **published GitHub
 Release** whose tag starts with `v`, and that is the only thing that publishes to npm.
 
+All published packages (`vgpu`, `@vgpu/core`, `@vgpu/wgsl`, `@vgpu/wgsl-std`,
+`@vgpu/adapter-node`, `@vgpu/adapter-mock`, `@vgpu/render`) version together via the
+`fixed` group in `.changeset/config.json`; private packages (`@vgpu/cli`, the docs app)
+keep independent lineages outside that group.
+
 ### 1. Version the packages (a PR of its own)
 
 From an up-to-date `main`, on a release branch:
