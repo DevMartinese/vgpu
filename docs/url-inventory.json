@@ -1,7 +1,7 @@
 {
-  "frozenAt": "2026-08-04T02:01:23.321Z",
+  "frozenAt": "2026-08-04T02:13:27.595Z",
   "sourceUrl": "https://vgpu.sh",
-  "gitSha": "1255833b36397126605942d647d0f8762f30a3b0",
+  "gitSha": "9812605057f6e235ce66c0289c1b329d5613bcc8",
   "pages": [
     {
       "path": "/docs",
@@ -147,6 +147,11 @@
         "load-wgsl-files-in-vite",
         "type-wgsl-imports"
       ]
+    },
+    {
+      "path": "/docs/guides",
+      "status": 200,
+      "anchors": []
     },
     {
       "path": "/docs/guides/agent-browser-webgpu",
@@ -441,6 +446,48 @@
         "do-you-actually-need-two-passes",
         "see-also"
       ]
+    },
+    {
+      "path": "/docs/ml",
+      "status": 200,
+      "anchors": [
+        "overview"
+      ]
+    },
+    {
+      "path": "/docs/ml/browser",
+      "status": 200,
+      "anchors": [
+        "quickstart-browser",
+        "browser-snapshot",
+        "browser-reference"
+      ]
+    },
+    {
+      "path": "/docs/ml/buffers",
+      "status": 200,
+      "anchors": [
+        "buffers-ownership",
+        "sdk-signatures",
+        "platform-and-ownership-matrix",
+        "reference-mode",
+        "snapshot-mode",
+        "scope"
+      ]
+    },
+    {
+      "path": "/docs/ml/node",
+      "status": 200,
+      "anchors": [
+        "quickstart-node",
+        "node-snapshot",
+        "node-reference"
+      ]
+    },
+    {
+      "path": "/docs/reference",
+      "status": 200,
+      "anchors": []
     },
     {
       "path": "/docs/reference/render/canvas-mouse-tracker",

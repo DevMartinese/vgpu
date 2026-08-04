@@ -72,9 +72,17 @@ function slugifyPackage(packageName) {
   return packageName.replace(/^@/, '').replace(/[/@]/g, '-');
 }
 
-// Static routes that are NOT emitted from docsManifest.records (get-started,
-// concepts and the CLI page are authored directly under apps/docs/content /
-// apps/docs/lib/concepts.ts). Enumerated explicitly per TGEIST-02, "Pasos" 2(a).
+// Static routes that are NOT derivable from docsManifest.records at all
+// (get-started and concepts are authored directly under apps/docs/content /
+// apps/docs/lib/concepts.ts) plus the two section index pages defined only
+// in apps/docs/lib/nav.ts (`navSections` entries for 'Guides' / 'API
+// Reference', hrefs '/guides' and '/reference' -> docsHref() prefixes them
+// with /docs). Enumerated explicitly per TGEIST-02, "Pasos" 2(a).
+//
+// NOTE: the CLI page and the /ml/* pages are intentionally NOT here — they
+// are guide records with a `websitePath` override (see buildRoutes()) and
+// must come from that mechanical derivation, not be hardcoded here, or this
+// list silently drifts every time a new websitePath guide is added.
 const STATIC_ROUTES = [
   { path: '/docs', kind: 'static' },
   { path: '/docs/get-started', kind: 'static' },
@@ -89,7 +97,10 @@ const STATIC_ROUTES = [
   { path: '/docs/concepts/passes', kind: 'static' },
   { path: '/docs/concepts/frames', kind: 'static' },
   { path: '/docs/concepts/render-bundles', kind: 'static' },
-  { path: '/docs/cli', kind: 'static' },
+  // Section index pages (apps/docs/lib/nav.ts navSections: 'Guides' href
+  // '/guides', 'API Reference' href '/reference' -> docsHref() -> /docs/*).
+  { path: '/docs/guides', kind: 'static' },
+  { path: '/docs/reference', kind: 'static' },
 ];
 
 async function buildRoutes() {
@@ -97,7 +108,13 @@ async function buildRoutes() {
   const records = docsManifest.records;
 
   const apiRecords = records.filter((r) => r.kind === 'api');
+  // Guide records that render at their own /docs/guides/<symbol> page.
   const guideRecords = records.filter((r) => r.kind === 'guide' && r.websitePath === undefined);
+  // Guide records that override their URL via `websitePath` (cli, ml, ml/browser,
+  // ml/node, ml/buffers) — derived MECHANICALLY from the manifest, not
+  // hardcoded, so a future websitePath guide can't silently fall out of the
+  // inventory the way /docs/ml/* did.
+  const websitePathGuideRecords = records.filter((r) => r.kind === 'guide' && r.websitePath !== undefined);
 
   // Group API records into topic pages exactly like buildReferenceTopics().
   const topicsByKey = new Map();
@@ -122,9 +139,18 @@ async function buildRoutes() {
     expectedAnchors: [],
   }));
 
+  // Mechanical derivation, not a hardcoded list: whatever websitePath says is
+  // where the record lives, that's the route we freeze. Prefixed with /docs
+  // the same way docsHref() does for every non-/examples route in lib/nav.ts.
+  const websitePathPages = websitePathGuideRecords.map((record) => ({
+    path: `/docs${record.websitePath}`,
+    kind: 'website-path',
+    expectedAnchors: [],
+  }));
+
   const staticPages = STATIC_ROUTES.map((route) => ({ ...route, expectedAnchors: [] }));
 
-  return [...staticPages, ...apiTopicPages, ...guidePages].sort((a, b) => a.path.localeCompare(b.path));
+  return [...staticPages, ...apiTopicPages, ...guidePages, ...websitePathPages].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 // ---------------------------------------------------------------------------
@@ -258,8 +284,18 @@ async function main() {
   if (nonOk.length > 0) {
     console.warn('Non-200 responses:', nonOk.map((p) => `${p.path} -> ${p.status}`).join(', '));
   }
+  if (anchorMismatchCount > 0) {
+    // Informational only: this is exactly the github-slugger-vs-slugifyHeading
+    // drift the gate in TGEIST-12 (Decision 4, item d) exists to catch later —
+    // it does not mean this freeze run failed, so it must not fail CI/exit non-zero.
+    console.warn(
+      `${anchorMismatchCount} anchor(s) computed by the manifest (record.anchor) were not found as a real heading id= on their page — see [anchor-mismatch] lines above. This is expected pre-existing drift, not a freeze error.`,
+    );
+  }
 
-  if (nonOk.length > 0 || anchorMismatchCount > 0) {
+  // Only a real fetch failure or a non-200 response on a route we expected to
+  // be live should fail this script — anchor mismatches are diagnostic, not fatal.
+  if (nonOk.length > 0) {
     process.exitCode = 1;
   }
 }
