@@ -30,16 +30,16 @@ export function ExampleSourceViewerTabs({ files }: ExampleSourceViewerTabsProps)
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-4 bg-gray-1">
-      <div className="flex items-center justify-between border-b border-gray-4 bg-gray-2">
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-200">
         <div className="flex min-w-0 overflow-x-auto">
           {files.map((file) => {
             const isActive = file.name === active.name;
             return (
               <button
                 className={cn(
-                  "shrink-0 whitespace-nowrap border-r border-gray-4 px-4 py-2.5 font-mono text-xs transition-colors hover:text-gray-12",
-                  isActive ? "bg-gray-1 text-gray-12" : "text-gray-9",
+                  "shrink-0 whitespace-nowrap border-r border-gray-200 px-4 py-2.5 font-mono text-xs transition-colors hover:text-gray-1000",
+                  isActive ? "bg-gray-100 text-gray-1000" : "text-gray-900",
                 )}
                 key={file.name}
                 onClick={() => setActiveName(file.name)}
