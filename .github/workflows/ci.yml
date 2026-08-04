@@ -248,6 +248,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build docs-next app
         run: pnpm --filter docs-next build
+      # ANCHOR TGEIST-06 (examples API transplant). Completes G1 for the new app: the tracing check
+      # asserts against .next/server/app of THIS build, so it has to run in the same job, right
+      # after it. It is the only thing that can catch one of the three picomatch keys in
+      # apps/docs-next/next.config.ts silently stopping to match its route.
+      - name: Check the examples API artifact tree is bundled into its routes (docs-next)
+        run: pnpm --filter docs-next check:examples-api-tracing
       # TGEIST-05 anchor — remark plugins M1-M9 + gate (c) of Decision 4.
       # `test:remark` unit-tests the mappings (including the adversarial case the
       # design names: a `*.docs.md` path inside a code-span that must NOT be
@@ -264,6 +270,23 @@ jobs:
         run: pnpm --filter docs-next test:remark
       - name: Check mdast render parity (Decision 4c)
         run: pnpm --filter docs-next check:mdast-parity
+
+  # ANCHOR TGEIST-06: G2 of Decision 1'. The examples API is transplanted into apps/docs-next
+  # byte-for-byte, never rewritten, and this is what turns that promise into a machine invariant for
+  # the whole dual-run window: it is the only defence against the two copies drifting apart while
+  # separate tickets edit the tree over weeks. No allowlist, by design. Deleted at TGEIST-15/16,
+  # when apps/docs stops existing and there is nothing left to compare against.
+  check-examples-api-transplant:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # No install and no build: the check only reads bytes off the checkout.
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the examples API transplant is byte-identical to apps/docs
+        run: node apps/docs-next/scripts/check-examples-api-transplant.mjs
 
   docs-generated:
     # Guards that the committed docs manifest + generated skill (skills/vgpu, the payload
@@ -319,14 +342,28 @@ jobs:
         run: node apps/docs/scripts/sync-examples-api-contracts.mjs
       - name: Regenerate deterministic examples API artifacts
         run: node apps/docs/scripts/generate-examples-api.mjs
+      # ANCHOR TGEIST-06: G3 of Decision 1'. Regenerating into the NEW tree as well is what actually
+      # proves the claim the whole migration rests on -- that the artifact revision is a digest of
+      # the source snapshot and of nothing else (not the app directory, not git history), so the
+      # transplanted app serves the exact same URLs and bytes as the old one. Note the generator is
+      # NOT edited: apps/docs-next/scripts/generate-examples-api.mjs is a byte-identical copy whose
+      # hardcoded `apps/docs/...` source path is redirected purely by VGPU_EXAMPLES_OUTPUT_DIR, which
+      # is why the old app can stay untouched for the whole window (G2 depends on that).
+      # Removed at TGEIST-15, when there is only one tree again.
+      - name: Regenerate deterministic examples API artifacts (docs-next tree)
+        run: VGPU_EXAMPLES_OUTPUT_DIR=apps/docs-next/generated/examples-api node apps/docs-next/scripts/generate-examples-api.mjs
+      - name: Fail if the two generated trees are not byte-identical
+        run: diff -r apps/docs/generated/examples-api apps/docs-next/generated/examples-api
       - name: Test foundation contracts and publisher
         run: pnpm exec vitest run apps/docs/lib/examples-api apps/docs/scripts/validate-example-vocabulary.test.ts
+      - name: Test foundation contracts and publisher (docs-next copy)
+        run: pnpm exec vitest run apps/docs-next/lib/examples-api apps/docs-next/scripts/validate-example-vocabulary.test.ts
       - name: Fail on schema or artifact drift
         run: |
-          changed=$(git status --porcelain -- apps/docs/generated/examples-api apps/docs/lib/examples-api/schemas packages/vgpu/lib/examples/schemas packages/vgpu/lib/examples/contracts.js apps/docs/lib/examples-api/contracts.generated.ts)
+          changed=$(git status --porcelain -- apps/docs/generated/examples-api apps/docs/lib/examples-api/schemas packages/vgpu/lib/examples/schemas packages/vgpu/lib/examples/contracts.js apps/docs/lib/examples-api/contracts.generated.ts apps/docs-next/generated/examples-api)
           if [ -n "$changed" ]; then
             echo "::error::Examples API schemas or generated artifacts are out of date."
             echo "$changed"
-            git diff -- apps/docs/generated/examples-api apps/docs/lib/examples-api/schemas packages/vgpu/lib/examples/schemas packages/vgpu/lib/examples/contracts.js apps/docs/lib/examples-api/contracts.generated.ts
+            git diff -- apps/docs/generated/examples-api apps/docs/lib/examples-api/schemas packages/vgpu/lib/examples/schemas packages/vgpu/lib/examples/contracts.js apps/docs/lib/examples-api/contracts.generated.ts apps/docs-next/generated/examples-api
             exit 1
           fi

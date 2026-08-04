@@ -18,9 +18,12 @@
     "check:example-imports": "node scripts/check-example-imports.mjs",
     "build:workspace": "pnpm --dir ../.. run build",
     "translate": "npx @vercel/geistdocs translate",
-    "$comment:tgeist-05": "TGEIST-05: `test:remark` unit-tests the M1-M9 remark plugins (node:test, no runner dependency: the root vitest config does not include apps/docs-next during the dual-run window). `check:mdast-parity` is gate (c) of Decision 4 — it also asserts every surviving fence language is one Shiki can load (M4) and that no *.docs.md / bare logical link survives (M7/M8).",
+    "$comment:tgeist-05": "TGEIST-05: `test:remark` unit-tests the M1-M9 remark plugins (node:test, no runner dependency: the root vitest config only picks up *.test.ts under apps/docs-next, added by TGEIST-06 for the transplanted examples API suite, so this .mjs suite still needs its own runner). `check:mdast-parity` is gate (c) of Decision 4 \u2014 it also asserts every surviving fence language is one Shiki can load (M4) and that no *.docs.md / bare logical link survives (M7/M8).",
     "test:remark": "node --test lib/remark-geist/remark-geist.test.mjs",
-    "check:mdast-parity": "node scripts/check-mdast-parity.mjs"
+    "check:mdast-parity": "node scripts/check-mdast-parity.mjs",
+    "$comment:tgeist-06": "TGEIST-06: both checks guard the examples API transplanted byte-for-byte from apps/docs. `check:examples-api-tracing` runs after next build and asserts the generated artifact tree really is bundled into each of the 3 routes (they read it with fs at request time, so only outputFileTracingIncludes puts it in the lambda). `check:examples-api-transplant` is the byte-identity gate against apps/docs; both are removed at cutover (TGEIST-15).",
+    "check:examples-api-tracing": "node scripts/check-examples-api-tracing.mjs",
+    "check:examples-api-transplant": "node scripts/check-examples-api-transplant.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.134",
@@ -30,6 +33,7 @@
     "@streamdown/code": "^1.0.1",
     "@vercel/agent-readability": "^0.2.1",
     "@vercel/analytics": "^1.6.1",
+    "@vercel/blob": "^2.0.0",
     "@vercel/geistdocs": "1.15.2",
     "@vercel/speed-insights": "^1.3.1",
     "@vgpu/adapter-mock": "workspace:*",
