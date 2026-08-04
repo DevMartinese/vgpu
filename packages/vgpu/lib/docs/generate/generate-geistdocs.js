@@ -374,6 +374,26 @@ export function buildMetaFiles(nav, pages) {
   rootMeta.pages = rootPages;
   files.set("meta.json", serializeJson(rootMeta));
 
+  // -- get-started: literal order from the Get started section (TGEIST-11) --
+  // The 3 pages here are hand-authored .mdx (EXTERNALLY_OWNED_META_ENTRIES), but their *order* has
+  // no reason to be hand-authored too: docs/nav.json's "Get started" section already declares it
+  // (Agents, Web, Node.js), the same source every other section's meta.json is derived from below.
+  // Emitting this file — instead of leaving it for a human to create by hand next to hand-authored
+  // pages — is what makes `prune()`'s "I own every meta.json" invariant actually true: an
+  // unemitted-but-present get-started/meta.json is exactly the file `prune()` deletes as an orphan
+  // on the next run, sidebar order silently reverting to alphabetical. Deriving it here removes the
+  // hand-authored copy instead of trying to make prune() smarter about what it should spare.
+  const getStartedSection = findSection(nav, "Get started");
+  if (getStartedSection) {
+    files.set(
+      "get-started/meta.json",
+      serializeJson({
+        title: getStartedSection.title,
+        pages: [...sectionItemSlugs(getStartedSection, "/get-started"), "..."],
+      }),
+    );
+  }
+
   // -- concepts: literal order from the Concepts section ---------------------
   const conceptsSection = findSection(nav, "Concepts");
   if (conceptsSection) {
@@ -434,6 +454,11 @@ export function buildMetaFiles(nav, pages) {
   // either way it silently hides a page, so refuse to emit.
   for (const [metaPath, contents] of files) {
     const dir = metaPath === "meta.json" ? "" : `${dirname(metaPath)}/`;
+    // The whole subtree is hand-authored (get-started/**.mdx today) when `dir` itself is one of
+    // EXTERNALLY_OWNED_META_ENTRIES: every entry in *this* meta.json points at a page this target
+    // does not emit, by construction, so none of them can resolve against `emittedPaths` below.
+    const dirIsExternallyOwned = EXTERNALLY_OWNED_META_ENTRIES.includes(dir.replace(/\/$/u, ""));
+    if (dirIsExternallyOwned) continue;
     for (const entry of JSON.parse(contents).pages ?? []) {
       if (entry === "..." || /^---.*---$/u.test(entry) || /^(?:external:)?\[.*\]\(.*\)$/u.test(entry)) continue;
       if (EXTERNALLY_OWNED_META_ENTRIES.includes(entry)) continue;
