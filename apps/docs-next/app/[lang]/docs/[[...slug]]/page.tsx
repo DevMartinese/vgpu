@@ -32,11 +32,26 @@ const docsPage = createDocsPage({
   // `titleAnchorId` returns null when a body heading already owns that id (the
   // reference pages open every symbol with an `<h1>`), because two identical ids
   // in one document would shadow the real heading.
+  //
+  // Two things the classes are load-bearing for, both found by measuring the
+  // rendered page rather than by reading it:
+  //   - `absolute` keeps the element out of flow. `article#nd-page` is a flex
+  //     column with `gap-4`, and a `block h-0` span is still a **flex item**, so
+  //     the gap above the title was applied to it and every page's title moved
+  //     down 16px (measured: `h1` top 136 instead of 120). An out-of-flow element
+  //     contributes no flex item and no gap, and its static position — which is
+  //     what `top: auto` resolves to — is still the top of the content box, so it
+  //     is the same scroll target. `-mb-4` would also cancel it, by hardcoding
+  //     the exact gap the package happens to use today.
+  //   - `scroll-m-28` matches what the layout puts on every body heading
+  //     (`h2.scroll-m-28`), so `/docs/cli#cli` lands the title in the same place
+  //     under the sticky header that `#installation-and-usage` lands its heading.
+  //     Without it the fragment scrolled the title *behind* the header.
   renderTop: ({ data }) => {
     const anchor = titleAnchorId({ title: data.title, toc: data.toc });
     return (
       <>
-        {anchor ? <span aria-hidden="true" className="block h-0" id={anchor} /> : null}
+        {anchor ? <span aria-hidden="true" className="absolute h-0 scroll-m-28" id={anchor} /> : null}
         <MobileDocsBar toc={data.toc} />
       </>
     );

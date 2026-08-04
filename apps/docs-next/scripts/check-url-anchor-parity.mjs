@@ -85,7 +85,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -100,6 +100,7 @@ const REPO_ROOT = resolve(APP_ROOT, "../..");
 const INVENTORY_PATH = join(REPO_ROOT, "docs/url-inventory.json");
 const CONTENT_ROOT = join(APP_ROOT, "content/docs");
 const ALLOWLIST_PATH = join(SCRIPT_DIR, "url-anchor-drift-allowlist.json");
+const DEAD_ANCHORS_PATH = join(SCRIPT_DIR, "redirect-dead-anchors.json");
 const MAX_REDIRECT_HOPS = 5;
 const READY_TIMEOUT_MS = 120_000;
 
@@ -420,6 +421,47 @@ function loadAllowlist() {
   return { entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
 }
 
+/**
+ * The frozen list of redirect destinations whose `#anchor` production did not
+ * serve either — dead deep links inherited from the old app's table.
+ *
+ * Printing that number was not enough, and the review proved it: mutating all 255
+ * symbol destinations to `#<anchor>-MUTANT` kept the gate GREEN, because every
+ * mutated destination just moved from "resolves" into this bucket, whose only
+ * consequence was a counter going 117 → 275. A bucket that absorbs regressions
+ * silently is a hole in the gate, and the fix is the one this suite already uses
+ * twice — for the drift allowlist and for the nav curation snapshot: freeze the
+ * expected set, fail on the diff. Growth means a destination stopped resolving
+ * (repointed rule, or a heading that disappeared); shrinkage means one got fixed
+ * and the list has to shrink with it, in the same PR.
+ */
+function loadDeadAnchors() {
+  if (!existsSync(DEAD_ANCHORS_PATH)) return null;
+  const parsed = JSON.parse(readFileSync(DEAD_ANCHORS_PATH, "utf8"));
+  return { entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
+}
+
+function writeDeadAnchors(preexisting) {
+  const payload = {
+    $comment: [
+      "TGEIST-12, gate (d). Redirect destinations whose `#anchor` production did not serve",
+      "either: the manifest's `record.anchor` never matched a heading on the destination page,",
+      "so these deep links were already landing at the top of the page before the migration.",
+      "Frozen because the bucket used to be report-only, and a report-only bucket absorbs",
+      "regressions: repointing all 255 symbol destinations at nonexistent anchors kept the gate",
+      "green while this number went 117 → 275. Now any addition fails (a destination stopped",
+      "resolving) and any entry that no longer applies fails as stale (it got fixed — shrink the",
+      "list in the same PR). Fixing one for real means fixing `record.anchor` in the generator,",
+      "or the heading it should point at. Regenerate with",
+      "`node scripts/check-url-anchor-parity.mjs --write-allowlist` and review the diff.",
+    ].join(" "),
+    entries: preexisting
+      .map(({ source, path, anchor }) => ({ source, destination: `${path}#${anchor}` }))
+      .sort((a, b) => a.source.localeCompare(b.source) || a.destination.localeCompare(b.destination)),
+  };
+  writeFileSync(DEAD_ANCHORS_PATH, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
 function writeAllowlist(drifts) {
   const payload = {
     $comment: [
@@ -495,8 +537,17 @@ async function main() {
          * Every id the page really renders that can be an anchor target: heading
          * ids **and** the Decision 2.3 page-title anchor, which lives on a
          * zero-height element rather than on the `<h1>` (see
-         * `lib/title-anchor.mjs`). Framework ids (`nd-*`, `radix-*`, `_R*`) are
-         * dropped: they are per-render and no link points at them.
+         * `lib/title-anchor.mjs`).
+         *
+         * Exactly that, nothing else. An earlier revision filtered a blocklist of
+         * framework prefixes (`nd-*`, `radix-*`, `_R*`) out of *all* ids instead,
+         * which let fumadocs' 56 `sidebar-*` ids per page through — 5389 of the
+         * report's 6609 ids were navigation chrome, and the report weighed 472 KB.
+         * Nothing pointed at them, so no fragment passed on one, but
+         * `check-doc-links.mjs` verifies fragments against this set, and a set
+         * that contains ids no heading owns is a set that can say yes for the
+         * wrong reason. Allowlisting the two things that *are* anchor targets
+         * cannot.
          *
          * Written to the `--json` report so `check-doc-links.mjs` can validate
          * every `#fragment` in the corpus against ids observed in HTML instead of
@@ -511,7 +562,12 @@ async function main() {
         const title = extractTitle(resolved.html);
         const headings = extractHeadings(resolved.html);
         const headingIds = headings.map((heading) => heading.id);
-        entry.anchorIds = [...ids].filter((id) => !/^(?:nd-|radix-|_R)/u.test(id)).sort();
+        // headings ∪ {the page-title anchor}, which is the one anchor target that
+        // is not a heading. It is whichever legacy slug of the title the app
+        // actually rendered — `titleAnchorId` suppresses it on collision, and then
+        // the id is a heading's anyway.
+        const titleAnchor = title ? [...title.legacySlugs].filter((slug) => ids.has(slug)) : [];
+        entry.anchorIds = [...new Set([...headingIds, ...titleAnchor])].sort();
         entry.duplicateIds = duplicateAnchorIds(resolved.html, headingIds, title);
         idsByPath.set(resolved.finalPath, ids);
         for (const anchor of frozenAnchors) {
@@ -565,7 +621,17 @@ async function main() {
   if (options.writeAllowlist) {
     writeAllowlist(allDrifts);
     console.log(`wrote ${allDrifts.length} drift entries to ${ALLOWLIST_PATH}`);
+    writeDeadAnchors(destinations.preexisting);
+    console.log(`wrote ${destinations.preexisting.length} dead destination anchors to ${DEAD_ANCHORS_PATH}`);
   }
+
+  // --- dead-destination bookkeeping: the bucket is frozen, not just printed ----
+  const frozenDead = loadDeadAnchors();
+  const currentDead = new Set(destinations.preexisting.map((entry) => `${entry.source} → ${entry.path}#${entry.anchor}`));
+  const recordedDead = new Set((frozenDead?.entries ?? []).map((entry) => `${entry.source} → ${entry.destination}`));
+  const newDead = [...currentDead].filter((key) => !recordedDead.has(key)).sort();
+  const staleDead = [...recordedDead].filter((key) => !currentDead.has(key)).sort();
+  const deadListMissing = frozenDead === null;
 
   // --- drift bookkeeping: unrecorded, changed and stale entries all fail -----
   const allowlist = loadAllowlist();
@@ -602,7 +668,7 @@ async function main() {
   );
   console.log(
     `  targets ${destinations.resolved}/${destinations.total} redirect destinations land on an existing id` +
-      ` (${destinations.preexisting.length} already dead in production · ${destinations.regressions.length} regressions)`,
+      ` (${destinations.preexisting.length} already dead in production, ${recordedDead.size} recorded · ${destinations.regressions.length} regressions)`,
   );
 
   if (viaRedirect.length > 0) {
@@ -630,6 +696,9 @@ async function main() {
               total: destinations.total,
               resolved: destinations.resolved,
               deadInProduction: destinations.preexisting.length,
+              deadRecorded: recordedDead.size,
+              deadUnrecorded: newDead.length,
+              deadStale: staleDead.length,
               regressions: destinations.regressions.length,
             },
           },
@@ -643,16 +712,10 @@ async function main() {
     console.log(`\n  report written to ${options.json}`);
   }
 
-  if (destinations.preexisting.length > 0) {
+  if (destinations.preexisting.length > 0 && newDead.length === 0 && staleDead.length === 0) {
     console.log(
-      `\n  ${destinations.preexisting.length} redirect destination(s) point at an anchor production did not serve either —\n  dead deep links inherited from the old app's table (the manifest's \`record.anchor\` never\n  matched a heading on the destination page). Reported, not failed; the fix is the generator's:`,
+      `\n  ${destinations.preexisting.length} redirect destination(s) point at an anchor production did not serve either —\n  dead deep links inherited from the old app's table (the manifest's \`record.anchor\` never\n  matched a heading on the destination page), all of them recorded in\n  ${relative(APP_ROOT, DEAD_ANCHORS_PATH)}. Fixing one for real means fixing that anchor in the generator.`,
     );
-    for (const entry of destinations.preexisting.slice(0, 12)) {
-      console.log(`    ${entry.source} → ${entry.path}#${entry.anchor}`);
-    }
-    if (destinations.preexisting.length > 12) {
-      console.log(`    … ${destinations.preexisting.length - 12} more (full list in the --json report)`);
-    }
   }
 
   const failed =
@@ -661,6 +724,9 @@ async function main() {
     missingTitles.length > 0 ||
     duplicates.length > 0 ||
     destinations.regressions.length > 0 ||
+    newDead.length > 0 ||
+    staleDead.length > 0 ||
+    deadListMissing ||
     unrecordedDrifts.length > 0 ||
     changedDrifts.length > 0 ||
     staleAllowlistEntries.length > 0 ||
@@ -668,7 +734,7 @@ async function main() {
 
   if (!failed) {
     console.log(
-      `\n✓ gate (d): every URL production serves resolves here, every anchor it serves is either identical\n  or a recorded slugger rename whose heading is still present, no anchor id is ambiguous, and every\n  redirect destination lands on an id that exists (bar the ${destinations.preexisting.length} already dead in production).`,
+      `\n✓ gate (d): every URL production serves resolves here, every anchor it serves is either identical\n  or a recorded slugger rename whose heading is still present, no anchor id is ambiguous, and every\n  redirect destination lands on an id that exists (bar the ${destinations.preexisting.length} recorded as already dead in production).`,
     );
     return;
   }
