@@ -17,9 +17,19 @@ const proxy = createProxy({
 // deliberately the single literal path and NOT all of `.well-known/`: `.well-known/mcp.json` is a
 // localized geistdocs route under app/[lang]/, so excluding the whole directory would widen this
 // ticket into that route's behaviour for no reason.
+// ANCHOR TGEIST-08 (previews verbatim): `/preview/**` is excluded from the proxy, for the same
+// reason and with the same evidence as the TGEIST-06 entry above. `app/preview/[slug]` is a
+// non-localized route (transplanted byte-for-byte from apps/docs, where there is no i18n at all),
+// so while the proxy is active on it the i18n rewrite sends `/preview/gradient` to
+// `/en/preview/gradient`, which no route matches. Verified empirically against `next start` on this
+// build: 404 with `x-middleware-rewrite: /en/preview/gradient` before this entry, 200 with the
+// prerendered canvas after it. These URLs are the render targets of `render-example-thumbs.mjs`
+// (`thumbs:check` / `render:proof`, gate G6) and of the gallery iframes, so they must keep
+// resolving at exactly the path the old app serves -- a localized variant would change the URL
+// contract those PNG baselines were captured against.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 

@@ -23,7 +23,9 @@
     "check:mdast-parity": "node scripts/check-mdast-parity.mjs",
     "$comment:tgeist-06": "TGEIST-06: both checks guard the examples API transplanted byte-for-byte from apps/docs. `check:examples-api-tracing` runs after next build and asserts the generated artifact tree really is bundled into each of the 3 routes (they read it with fs at request time, so only outputFileTracingIncludes puts it in the lambda). `check:examples-api-transplant` is the byte-identity gate against apps/docs; both are removed at cutover (TGEIST-15).",
     "check:examples-api-tracing": "node scripts/check-examples-api-tracing.mjs",
-    "check:examples-api-transplant": "node scripts/check-examples-api-transplant.mjs"
+    "check:examples-api-transplant": "node scripts/check-examples-api-transplant.mjs",
+    "$comment:tgeist-08": "TGEIST-08: `check:example-bundles` measures the production chunks of the /preview/[slug] routes and grades them against scripts/example-chunk-budgets.json, whose numbers were re-measured against THIS app (Grupo D re-baseline; the script's algorithm is the old app's, unchanged apart from accepting the apps/docs-next directory name in its WGSL source markers). It reads .next/static/chunks and never builds, so it must run right after `build` in the same job -- it refuses to grade chunks older than the sources anyway.",
+    "check:example-bundles": "node scripts/check-example-bundles.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.134",

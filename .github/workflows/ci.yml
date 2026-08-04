@@ -254,6 +254,15 @@ jobs:
       # apps/docs-next/next.config.ts silently stopping to match its route.
       - name: Check the examples API artifact tree is bundled into its routes (docs-next)
         run: pnpm --filter docs-next check:examples-api-tracing
+      # ANCHOR TGEIST-08 (previews verbatim + Grupo D re-baseline). This is the third and last
+      # member of G1 for the new app ("build + check:examples-api-tracing + check:example-bundles",
+      # Decision 1'). It grades the /preview/[slug] production chunks against the budgets
+      # re-measured on this tree and asserts no example chunk carries another example's
+      # renderer/WGSL. It must stay inside this job, right after the build: the script measures
+      # .next/static/chunks and never builds (it hard-fails on chunks older than the sources rather
+      # than grade a stale tree).
+      - name: Check example bundle isolation and budgets (docs-next)
+        run: pnpm --filter docs-next check:example-bundles
       # TGEIST-05 anchor — remark plugins M1-M9 + gate (c) of Decision 4.
       # `test:remark` unit-tests the mappings (including the adversarial case the
       # design names: a `*.docs.md` path inside a code-span that must NOT be
