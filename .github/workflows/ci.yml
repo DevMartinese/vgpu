@@ -391,6 +391,12 @@ jobs:
         run: node packages/vgpu/lib/docs/generate/check-drift.js
       - name: Check docs/nav.json coverage against the docs manifest
         run: node scripts/check-nav-coverage.mjs
+      # TGEIST-12: the coverage check above cannot see a *deletion*. Every curated level of
+      # docs/nav.json ends in an explicit "..." catch-all, so removing (or reordering) an entry keeps
+      # coverage green while silently demoting the page to the alphabetical fallback at the bottom of
+      # the sidebar. The snapshot makes that a reviewed change instead of an invisible one.
+      - name: Check docs/nav.json curation against its snapshot
+        run: node scripts/check-nav-curation.mjs
       # Gate (b) of Decision 4 (content emission parity) moved to the `docs-parity` job above, where
       # it reports next to gates (a), (c) and (d) as one suite. It is not duplicated here.
 
