@@ -12,18 +12,18 @@ const docLinks: [href: string, title: string, description: string][] = [
 export function DocsLinksSection() {
   return (
     <section className="mb-24">
-      <h2 className="mb-10 text-2xl text-gray-12 md:text-3xl">Explore the Docs</h2>
+      <h2 className="mb-10 text-2xl text-gray-1000 md:text-3xl">Explore the Docs</h2>
       <div className="grid gap-4 md:grid-cols-2">
         {docLinks.map(([href, title, description]) => (
           <DynamicLink
             key={href}
             href={`/[lang]${href}`}
-            className="group rounded-lg border border-gray-4 bg-gray-1 p-6 transition-all hover:border-gray-5"
+            className="group rounded-lg border border-gray-200 bg-gray-100 p-6 transition-all hover:border-gray-300"
           >
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-gray-12 transition-colors group-hover:text-blue-9">{title} →</h3>
+              <h3 className="text-gray-1000 transition-colors group-hover:text-blue-900">{title} →</h3>
             </div>
-            <p className="text-sm text-gray-9">
+            <p className="text-sm text-gray-900">
               <InlineCode text={description} />
             </p>
           </DynamicLink>

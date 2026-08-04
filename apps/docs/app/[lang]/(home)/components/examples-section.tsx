@@ -15,10 +15,10 @@ export function ExamplesSection() {
   return (
     <section className="mb-24 mt-24">
       <div className="mb-10 flex items-center justify-between gap-4">
-        <h2 className="text-2xl text-gray-12 md:text-3xl">Examples</h2>
+        <h2 className="text-2xl text-gray-1000 md:text-3xl">Examples</h2>
         <DynamicLink
           href="/[lang]/examples"
-          className="text-sm text-gray-9 transition-colors hover:text-gray-12"
+          className="text-sm text-gray-900 transition-colors hover:text-gray-1000"
         >
           View all →
         </DynamicLink>

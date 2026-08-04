@@ -1,0 +1,13 @@
+/* Hero light-mode treatment.
+   Minimal, per owner directive: invert the whole composited hero section
+   (shader canvas + gradient scrims + white copy) as one unit in light mode.
+   Because a CSS `filter` rasterizes the element's rendered subtree before
+   compositing, relative contrast inside the section is preserved
+   automatically — no shader/WebGPU changes and no edits to hero-tabs.tsx or
+   hero-black-hole.tsx are needed.
+
+   Scoped to this file per the hero-solo.css convention (only imported by the
+   landing page) rather than added to the shared app/styles/geistdocs.css. */
+html.light [data-hero-invert] {
+  filter: invert(1) hue-rotate(180deg);
+}

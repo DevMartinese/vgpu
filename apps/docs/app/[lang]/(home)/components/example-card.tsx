@@ -17,7 +17,7 @@ export function ExampleCard({ example }: ExampleCardProps) {
   return (
     <DynamicLink
       href={`/[lang]/examples/${example.slug}`}
-      className="group block overflow-hidden rounded-lg border border-gray-4 bg-gray-1 transition-all hover:border-gray-5 hover:bg-gray-2"
+      className="group block overflow-hidden rounded-lg border border-gray-200 bg-gray-100 transition-all hover:border-gray-300 hover:bg-gray-200"
     >
       <div className="relative aspect-video bg-black">
         {example.thumbnail ? (
@@ -34,10 +34,10 @@ export function ExampleCard({ example }: ExampleCardProps) {
         )}
       </div>
       <div className="p-4">
-        <h3 className="mb-2 text-lg font-semibold text-gray-12 transition-colors group-hover:text-blue-9">
+        <h3 className="mb-2 text-lg font-semibold text-gray-1000 transition-colors group-hover:text-blue-900">
           {example.title}
         </h3>
-        <p className="line-clamp-2 text-sm leading-relaxed text-gray-9">{example.description}</p>
+        <p className="line-clamp-2 text-sm leading-relaxed text-gray-900">{example.description}</p>
       </div>
     </DynamicLink>
   );
