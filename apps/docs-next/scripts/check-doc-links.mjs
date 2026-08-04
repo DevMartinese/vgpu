@@ -28,7 +28,7 @@
  *   - **relative / still a `*.docs.md`**: fails. M7/M8 exist precisely to make
  *     these impossible; one surviving means the chain did not run on that file.
  *
- * Fragments (`…/page#section`) are verified against `headingIds` from the
+ * Fragments (`…/page#section`) are verified against `anchorIds` from the
  * `--json` report of `check-url-anchor-parity.mjs`, i.e. against ids observed in
  * the HTML a real server returned. That is deliberate: fumadocs slugs headings
  * with github-slugger, and a *reimplementation* of that slugger inside this gate
@@ -155,13 +155,12 @@ function makeRedirectResolver(redirects) {
  */
 function loadAnchorFacts(reportPath) {
   const report = JSON.parse(readFileSync(reportPath, "utf8"));
-  /** @type {Map<string, { ids: Set<string>, titleAnchors: Set<string>, drifts: Map<string, string> }>} */
+  /** @type {Map<string, { ids: Set<string>, drifts: Map<string, string> }>} */
   const byPath = new Map();
   for (const entry of report.results ?? []) {
-    if (!Array.isArray(entry.headingIds)) continue;
+    if (!Array.isArray(entry.anchorIds)) continue;
     const facts = {
-      ids: new Set(entry.headingIds),
-      titleAnchors: new Set(entry.titleAnchors ?? []),
+      ids: new Set(entry.anchorIds),
       drifts: new Map((entry.drifts ?? []).map((drift) => [drift.prodAnchor, drift.newAnchor])),
     };
     byPath.set(entry.path, facts);
@@ -218,8 +217,6 @@ async function main() {
   const failures = [];
   const emptyLinks = [];
   const unverifiedFragments = [];
-  /** fragment resolves to the target page's own title — lands at the top, fine */
-  const titleFragments = [];
   /** fragment is a recorded slugger rename: the section exists under a new id */
   const driftedFragments = [];
   /** production did not serve this fragment either — preexisting corpus bug */
@@ -235,10 +232,6 @@ async function main() {
    * failure (caller reports it), or a category label when it is accounted for.
    */
   const classifyMissingFragment = (targetPath, fragment, facts, at, url) => {
-    if (facts.titleAnchors.has(fragment)) {
-      titleFragments.push(`${at} → ${url}`);
-      return "title";
-    }
     const renamed = facts.drifts.get(fragment);
     if (renamed) {
       driftedFragments.push(`${at} → ${url}  (now #${renamed})`);
@@ -340,12 +333,6 @@ async function main() {
     `  fragments: ${fragmentChecked} verified against ids observed in HTML${unverifiedFragments.length > 0 ? ` · ${unverifiedFragments.length} unverified (no --anchors-from report)` : ""}`,
   );
 
-  if (titleFragments.length > 0) {
-    console.log(
-      `\n  ${titleFragments.length} fragment(s) point at the target page's own title, which the Geist layout renders\n  without an id (same accepted class as gate (d)'s page-title anchors — the link still lands\n  on the right page, heading at the top):`,
-    );
-    for (const at of titleFragments) console.log(`    ${at}`);
-  }
   if (driftedFragments.length > 0) {
     console.log(
       `\n  ${driftedFragments.length} fragment(s) point at a heading whose id the new slugger renamed (recorded in\n  scripts/url-anchor-drift-allowlist.json). The section is there, the fragment no longer\n  matches it, so these land at the top of the page:`,
