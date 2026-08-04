@@ -1,26 +1,12 @@
 {
-  "title": "Geistdocs Documentation",
-  "description": "Learn how to use and customize Geistdocs",
   "root": true,
   "pages": [
-    "index",
-    "getting-started",
+    "get-started",
+    "concepts",
     "guides",
-    "env",
-    "deployment",
-    "migration",
-    "configuration",
-    "---Internals---",
-    "syntax",
-    "provider",
-    "versioned-docs",
-    "proxy",
-    "---Features---",
-    "...",
-    "---AI---",
-    "open-in-chat",
-    "agent-readiness",
-    "llms-txt",
-    "ask-ai"
+    "[Examples](/examples)",
+    "cli",
+    "ml",
+    "reference"
   ]
 }
