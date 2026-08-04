@@ -1,0 +1,57 @@
+---
+title: Table of contents
+description: Show an "On this page" outline that tracks the reader's position along a straight guide rail
+type: reference
+summary: Geistdocs builds the "On this page" outline from your headings, indents sub-headings under their parent, and tracks the active section along a straight vertical guide rail.
+prerequisites:
+  - /docs/getting-started
+related:
+  - /docs/syntax
+  - /docs/configuration
+---
+
+Every documentation page shows an **On this page** outline on the right side of the desktop layout. Geistdocs builds it from your headings, so you get an in-page table of contents without extra configuration. This page nests its own headings so you can watch the outline update as you scroll.
+
+## Read the outline
+
+The outline lists your headings in document order and highlights the section you are currently reading.
+
+### Track the active section
+
+A vertical guide rail runs down the left edge of the outline. As you scroll, an indicator slides along the rail to mark the active heading, so readers always know where they are in a long page.
+
+### Follow the straight guide rail
+
+The guide rail stays straight for every heading level. Sub-headings indent to the right of the rail, and the rail no longer bends outward to meet them, which keeps deep pages readable at a glance.
+
+## Structure your headings
+
+The outline mirrors your heading hierarchy, so a clear structure produces a clear outline.
+
+### Start each section with an h2
+
+Use `##` for the top-level sections of a page. These sit closest to the guide rail and anchor the rest of the outline.
+
+### Nest sub-sections with an h3
+
+Use `###` for sub-sections. Geistdocs indents them under their parent `##` heading:
+
+```mdx
+## Structure your headings
+
+### Nest sub-sections with an h3
+
+#### Add detail with an h4
+```
+
+#### Add detail with an h4
+
+Use `####` when a sub-section needs its own breakdown. Geistdocs indents each level a little further so the relationship stays clear, while the guide rail itself remains a single straight line.
+
+## Adapt to smaller screens
+
+On mobile, Geistdocs replaces the sidebar outline with a compact menu in the page bar. The menu lists the same headings as a flat, indented list without the guide rail, so it stays legible on narrow screens.
+
+## Write scannable headings
+
+Keep headings short and descriptive so the outline reads like a summary of the page. Name each heading after the goal of its section, and avoid stacking two headings with no content between them.

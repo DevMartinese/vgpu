@@ -1,0 +1,110 @@
+---
+title: RSS
+description: Keep users updated with an automatically generated RSS feed for your documentation
+type: conceptual
+summary: An automatically generated RSS 2.0 feed that keeps users informed when documentation is published or updated.
+related:
+  - /docs/env
+  - /docs/configuration
+---
+
+The RSS feature provides an automatically generated RSS 2.0 feed for your documentation. This allows users to subscribe to updates and stay informed when new content is published or existing pages are modified.
+
+<CopyPrompt text="Help me verify the RSS feed for this Geistdocs site. Check the /rss.xml route, confirm the production URL environment variable is set, and explain how page metadata affects feed items.">
+  Help me verify the RSS feed for this Geistdocs site. Check the `/rss.xml` route, confirm the production URL environment variable is set, and explain how page metadata affects feed items.
+</CopyPrompt>
+
+## How it works
+
+Geistdocs automatically generates an RSS feed that includes:
+
+- All published documentation pages
+- Page titles and descriptions
+- Direct links to each page
+- Last modified dates
+- Author information
+
+The feed is regenerated on each request, ensuring subscribers always receive the most current information about your documentation.
+
+## Accessing the Feed
+
+The RSS feed is available at:
+
+```
+https://your-domain.com/rss.xml
+```
+
+Users can subscribe to this URL using:
+
+- RSS readers (Feedly, Inoreader, NewsBlur)
+- Email services (Blogtrottr, Kill the Newsletter)
+- Browser extensions
+- News aggregators
+
+### RSS Button
+
+An RSS button appears in the navigation bar so readers can discover and subscribe to your feed. Clicking the button opens the RSS XML in a new tab.
+
+The package Footer applies `config.basePath` to this link. Custom RSS generators must also apply the base path to channel and item URLs; source `page.url` values intentionally remain app-local for Next.js navigation.
+
+## Feed Format
+
+The RSS feed follows the RSS 2.0 specification and includes:
+
+### Channel Metadata
+
+```xml
+<channel>
+  <title>Your Documentation Title</title>
+  <link>https://your-domain.com</link>
+  <language>en</language>
+  <image>https://your-domain.com/banner.png</image>
+  <copyright>All rights reserved [Year], [Your Organization]</copyright>
+</channel>
+```
+
+### Item Format
+
+Each documentation page appears as an item:
+
+```xml
+<item>
+  <guid>page-url</guid>
+  <title>Page Title</title>
+  <description>Page description</description>
+  <link>https://your-domain.com/docs/page-url</link>
+  <pubDate>Thu, 12 Nov 2025 00:00:00 GMT</pubDate>
+  <author>
+    <name>Your Organization</name>
+  </author>
+</item>
+```
+
+## Configuration
+
+The RSS feed requires the `NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL` environment variable to be set, which you can read more about in the [Environment Variables](/docs/env) section.
+
+It also requires a `title` exported from the Geistdocs configuration file, which you can read more about in the [Configuration](/docs/configuration) section.
+
+## Features
+
+### Automatic Updates
+
+The feed automatically includes:
+
+- Newly created pages
+- Updated page content (using last modified dates)
+- Changed titles or descriptions
+- All pages from your documentation source
+
+### Last Modified Dates
+
+Pages use their `lastModified` frontmatter field or fall back to the current date:
+
+```mdx title="content/docs/example.mdx"
+---
+title: Example Page
+description: An example documentation page
+lastModified: 2025-11-12
+---
+```

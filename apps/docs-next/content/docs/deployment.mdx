@@ -1,0 +1,51 @@
+---
+title: Deploy to Vercel
+description: Learn how to deploy your Geistdocs site to Vercel
+type: guide
+summary: Deploy your Geistdocs site to Vercel from the dashboard with the correct project settings.
+prerequisites:
+  - /docs/getting-started
+  - /docs/env
+related:
+  - /docs/configuration
+---
+
+Deploy a Geistdocs site to Vercel as a Next.js app. Make sure your package dependency, environment variables, and production URL are configured before shipping.
+
+<CopyPrompt text="Help me deploy this Geistdocs project to Vercel. Check the package scripts, required environment variables, and Vercel project settings, then give me a deploy checklist for production.">
+  Help me deploy this Geistdocs project to Vercel. Check the package scripts, required environment variables, and Vercel project settings, then give me a deploy checklist for production.
+</CopyPrompt>
+
+## Prerequisites
+
+Before deploying, you need:
+
+- A [GitHub account](https://github.com) with your Geistdocs repository
+- A [Vercel account](https://vercel.com) (sign up at [vercel.com](https://vercel.com))
+- Your Vercel account connected to your GitHub account
+- Environment variables ready (see [Environment Variables](/docs/env))
+
+## Deploy to Vercel
+
+To deploy from the Vercel dashboard:
+
+1. Go to [vercel.com/new](https://vercel.com/new)
+2. Select your Geistdocs repository
+3. Configure your project settings:
+   - **Framework Preset**: Next.js (automatically detected)
+   - **Build Command**: `pnpm build` or `npm run build`
+   - **Output Directory**: `.next` (default)
+   - **Install Command**: `pnpm install` or `npm install`
+4. Add your environment variables (see [Environment Variables](/docs/env))
+5. Click "Deploy"
+
+## Deploy with Vertex-backed Ask AI
+
+If your site routes Ask AI through the central Vertex-backed proxy, configure both the Geistdocs site and the Vertex deployment before testing production chat.
+
+1. Set `GEISTDOCS_CHAT_PROXY_URL` on the Geistdocs site to the platform proxy URL, including `/vertex`.
+2. Leave `GEISTDOCS_CHAT_PROXY_TOKEN` unset unless your proxy requires bearer authentication.
+3. Add the Geistdocs platform Vercel project as a Trusted Source in the Vertex deployment's Deployment Protection settings.
+4. Confirm the platform proxy can forward the Vercel OIDC token to Vertex in `x-vercel-trusted-oidc-idp-token`.
+
+The Geistdocs site does not need Vertex credentials. The platform proxy authenticates to Vertex with Vercel OIDC and Trusted Sources.

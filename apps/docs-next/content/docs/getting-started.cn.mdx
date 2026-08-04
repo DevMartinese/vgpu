@@ -1,0 +1,86 @@
+---
+title: 入门指南
+description: 关于 Geistdocs 的全面入门指南
+type: guide
+summary: 创建新的 Geistdocs 项目、配置环境变量并创建您的第一个文档页面。
+related:
+  - /docs/env
+  - /docs/syntax
+  - /docs/deployment
+---
+
+本指南将引导您完成设置和自定义文档站点所需的所有内容。
+
+## 先决条件
+
+开始之前，请确保您具备：
+
+- **Node.js 18+** 已在您的系统上安装
+- **pnpm**（推荐）或您喜欢的 **npm** 包管理器
+- **GitHub 账户** 用于仓库托管
+- 对 **MDX**、**Next.js** 和 **React** 有基本了解
+
+## 安装
+
+### 1. 创建新项目
+
+使用 Geistdocs CLI 创建新项目：
+
+```bash title="Terminal"
+npx @vercel/geistdocs init
+```
+
+这将把 Geistdocs 的 `template` 应用克隆到一个新目录。它会提示您输入项目名称，然后安装所有依赖并删除 Geistdocs 网站内容。
+
+### 2. 配置环境变量
+
+复制示例环境文件：
+
+```bash title="Terminal"
+cp .env.example .env.local
+```
+
+然后编辑 `.env.local` 文件中的环境变量。您可以在 [环境变量](/docs/env) 部分了解有关环境变量的更多信息。
+
+### 3. 启动开发服务器
+
+运行开发服务器：
+
+```bash title="Terminal"
+pnpm dev
+```
+
+在浏览器中打开 [http://localhost:3000](http://localhost:3000) 来查看您的文档站点。
+
+### 4. 创建新页面
+
+在 `content/docs/` 中创建一个新文件：
+
+````mdx title="content/docs/my-first-page.mdx"
+---
+title: 我的第一页
+description: 这是我的第一个文档页面
+---
+
+# My First Page
+
+Welcome to my documentation! Find this page at `/docs/my-first-page`.
+
+## Features
+
+- Easy to write with Markdown
+- Full React component support
+- Automatic navigation generation
+
+## Code Example
+
+```typescript
+const greeting = (name: string): string => {
+  return `Hello, ${name}!`;
+};
+
+console.log(greeting("World"));
+```
+````
+
+在 [语法](/docs/syntax) 部分了解有关可用语法的更多信息。

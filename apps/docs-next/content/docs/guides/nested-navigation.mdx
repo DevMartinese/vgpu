@@ -1,0 +1,181 @@
+---
+title: Configure sidebar navigation
+description: Organize Geistdocs pages with ordered groups, separators, folder indexes, and nested navigation
+badge: Beta
+type: guide
+summary: Configure sidebar order, section labels, folder landing pages, and deeply nested page trees with meta.json files.
+prerequisites:
+  - /docs/getting-started
+related:
+  - /docs/configuration
+  - /docs/syntax
+---
+
+Use `meta.json` files to organize the Geistdocs sidebar without changing layout components. Each `meta.json` controls the pages and folders in its own directory, so the same pattern works at every nesting level.
+
+## Start with the content tree
+
+Directories become sidebar folders, and `.mdx` files become pages. The examples on this page use the following content tree:
+
+```text
+content/docs/
+├── index.mdx
+├── getting-started.mdx
+├── architecture.mdx
+├── api-reference.mdx
+├── changelog.mdx
+├── meta.json
+└── guides/
+    ├── index.mdx
+    ├── quickstarts.mdx
+    ├── meta.json
+    └── integrations/
+        ├── nextjs.mdx
+        ├── sveltekit.mdx
+        ├── meta.json
+        └── advanced/
+            ├── index.mdx
+            ├── caching.mdx
+            ├── security.mdx
+            └── meta.json
+```
+
+Every page needs a frontmatter `title`. Add a `description` to summarize the page. For a regular page, the frontmatter title becomes its sidebar label. Folder landing pages use the folder behavior described below.
+
+## Order top-level pages and add separators
+
+Add page and folder names to the root `pages` array without file extensions:
+
+```json title="content/docs/meta.json"
+{
+  "title": "My Product Documentation",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Guides---",
+    "guides",
+    "---Internals---",
+    "architecture",
+    "api-reference",
+    "---Resources---",
+    "..."
+  ]
+}
+```
+
+This configuration produces three labeled groups after the two introductory pages:
+
+- `---Guides---` adds a non-clickable **Guides** separator before the `guides` folder.
+- `---Internals---` adds an **Internals** separator before the architecture and API reference pages.
+- `---Resources---` adds a **Resources** separator before pages inserted by `...`.
+
+The `...` entry inserts every page or folder that is not named elsewhere in the array. Place it where the remaining items should appear. Without `...`, unnamed items do not appear in that folder's sidebar navigation.
+
+On desktop, top-level folders open as dedicated sidebar sections. On mobile, Geistdocs renders the same page tree as expandable nested navigation. Both layouts use the same `meta.json` files.
+
+## Add a folder landing page
+
+Create `index.mdx` inside a nested directory when the folder needs its own landing page:
+
+```mdx title="content/docs/guides/index.mdx"
+---
+title: Guides
+description: Follow task-focused guides for My Product.
+---
+
+Choose a guide based on the workflow you want to complete.
+```
+
+Then order the folder's child pages in its `meta.json`:
+
+```json title="content/docs/guides/meta.json"
+{
+  "title": "Guides",
+  "pages": ["quickstarts", "integrations"]
+}
+```
+
+Leave `index` out of a nested folder's `pages` array to use `index.mdx` as the folder landing page. In the desktop section view, Geistdocs exposes a top-level folder index as **Overview**. For a nested folder, the folder label links to its index while the disclosure control expands its children.
+
+If you include `index` explicitly in `pages`, Geistdocs treats it as a regular child page instead of the folder landing page.
+
+## Configure deeply nested folders
+
+Add another `meta.json` inside each nested directory. For the `integrations` folder from the example tree, group framework pages separately from advanced topics:
+
+```json title="content/docs/guides/integrations/meta.json"
+{
+  "title": "Integrations",
+  "defaultOpen": true,
+  "pages": [
+    "---Frameworks---",
+    "nextjs",
+    "sveltekit",
+    "---Advanced---",
+    "advanced"
+  ]
+}
+```
+
+The `advanced` directory can define another level:
+
+```json title="content/docs/guides/integrations/advanced/meta.json"
+{
+  "title": "Advanced Integrations",
+  "pages": ["caching", "security"]
+}
+```
+
+Because `advanced/index.mdx` exists and is not listed in `pages`, **Advanced Integrations** links to `/docs/guides/integrations/advanced`. Its child pages resolve to:
+
+- `/docs/guides/integrations/advanced/caching`
+- `/docs/guides/integrations/advanced/security`
+
+Set `defaultOpen` to `true` when a folder should start expanded. Geistdocs also opens the folders that contain the active page, unless a folder explicitly sets `defaultOpen` to `false`.
+
+## Add a badge to a page
+
+Add a short `badge` value to page frontmatter to show status or availability beside its sidebar label:
+
+```yaml title="content/docs/guides/new-api.mdx"
+---
+title: New API
+description: Use the new API in your application.
+badge: Beta
+---
+```
+
+Geistdocs renders the badge in desktop and mobile navigation. Badges also appear on folder landing pages because their sidebar items use the folder's `index.mdx` frontmatter. Keep badge text short so the page label has enough room to remain readable.
+
+## Add links to the navigation
+
+The `pages` array can include internal and external links alongside content files:
+
+```json title="content/docs/meta.json"
+{
+  "pages": [
+    "index",
+    "[Status](/status)",
+    "external:[GitHub](https://github.com/my-org/my-repo)"
+  ]
+}
+```
+
+Use `[Label](/path)` for an internal link. Prefix an external link with `external:` so Geistdocs opens it in a new tab and shows the external-link indicator.
+
+## Check breadcrumbs for nested pages
+
+Geistdocs builds breadcrumbs from the same page tree. A page at `content/docs/guides/integrations/advanced/caching.mdx` receives the folder path **Guides**, **Integrations**, and **Advanced Integrations** before its page title.
+
+Breadcrumbs render on the server from the page URL and sidebar tree, so they are present in the initial HTML. Top-level pages have no folder ancestors and do not render a breadcrumb.
+
+## Troubleshoot missing navigation items
+
+Check these rules when a page or folder does not appear where expected:
+
+- Match each `pages` entry to a file or directory name without its extension.
+- Add a `meta.json` to every folder that needs custom ordering, separators, `defaultOpen` behavior, or a title override.
+- Add `...` when unlisted files and folders should remain visible.
+- Leave `index` out of a nested folder's `pages` array when it should act as the folder landing page.
+- Keep separator labels between three hyphens on each side, such as `---Internals---`.

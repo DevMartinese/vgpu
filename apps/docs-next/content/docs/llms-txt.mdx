@@ -1,0 +1,86 @@
+---
+title: llms.txt
+description: A single file containing all your documentation in plain text for AI consumption
+type: conceptual
+summary: A single endpoint that returns all documentation as plain Markdown text following the llms.txt standard.
+related:
+  - /docs/agent-readiness
+  - /docs/md
+  - /docs/ask-ai
+  - /docs/proxy
+---
+
+Geistdocs implements the [llms.txt standard](https://llmstxt.org/), a convention for exposing documentation as one AI-readable text file. Language models and coding agents can use `/llms.txt` to retrieve broad documentation context.
+
+<CopyPrompt text="Help me verify this Geistdocs site's AI-readable docs. Check /llms.txt and a few .mdx page URLs, then explain whether an AI assistant can retrieve the full documentation context.">
+  Help me verify this Geistdocs site's AI-readable docs. Check `/llms.txt` and a few `.mdx` page URLs, then explain whether an AI assistant can retrieve the full documentation context.
+</CopyPrompt>
+
+## What it is
+
+The `/llms.txt` endpoint returns all configured documentation pages as Markdown in a single response. Each page is separated by blank lines so AI tools can parse the complete documentation set. When agent metadata is configured, page-level Markdown also links agents to `/agents.md` for API and MCP discovery.
+
+### Access
+
+```
+https://yourdomain.com/llms.txt
+```
+
+Returns all documentation pages concatenated together as Markdown.
+
+## How it works
+
+The package route helper:
+
+1. Fetches pages from one or more source bundles.
+2. Processes each page to extract clean Markdown.
+3. Combines the pages into a single response.
+4. Returns the response as `text/markdown`.
+
+Pages are joined with double newlines (`\n\n`) for clear separation.
+
+## Use cases
+
+This feature enables:
+
+- **AI Training** - Provide your docs as context for AI assistants
+- **Search Indexing** - Feed your entire documentation to search systems
+- **Content Analysis** - Analyze patterns and content across all docs
+- **Bulk Processing** - Process all documentation at once
+- **LLM Context** - Give language models complete documentation context
+
+## Configure sources
+
+Generated projects use one documentation source:
+
+```ts title="app/[lang]/llms.txt/route.ts"
+import { createLlmsRoute } from "@vercel/geistdocs/routes/llms";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+export const { GET, revalidate } = createLlmsRoute({
+  source: geistdocsSource,
+});
+```
+
+Sites with multiple content sections or versions can pass `sources`:
+
+```ts title="app/[lang]/llms.txt/route.ts"
+export const { GET, revalidate } = createLlmsRoute({
+  sources: [docsSource, cookbookSource],
+});
+```
+
+Use `filterPage` to exclude pages from `/llms.txt`, such as internal or preview-only docs:
+
+```ts title="app/[lang]/llms.txt/route.ts"
+export const { GET, revalidate } = createLlmsRoute({
+  source: geistdocsSource,
+  filterPage: (page) => !page.url.includes("/internal"),
+});
+```
+
+## The llms.txt standard
+
+The llms.txt standard is a simple convention that makes documentation more accessible to AI tools. It's similar in spirit to `robots.txt` but designed for language models instead of search crawlers.
+
+Learn more at [llmstxt.org](https://llmstxt.org/)

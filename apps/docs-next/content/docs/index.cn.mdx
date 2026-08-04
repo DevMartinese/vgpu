@@ -1,0 +1,57 @@
+---
+title: 概述
+description: 了解 Geistdocs 如何将 CLI、运行时和模板打包为文档站点
+type: overview
+summary: Geistdocs 是一个打包的文档系统，用于创建带共享运行时功能的 Next.js 和 Fumadocs 站点。
+related:
+  - /docs/getting-started
+  - /docs/configuration
+---
+
+Geistdocs 是一个基于 Next.js、Fumadocs 和 Vercel 文档模式的打包文档系统。使用它创建一个本地保存内容、运行时由包管理的文档站点。
+
+## Geistdocs 的工作方式
+
+Geistdocs 由三部分组成：
+
+- `@vercel/geistdocs`：提供 CLI、运行时组件、route helpers、MDX 组件、页面操作和打包模板的 npm package。
+- 本地 adapter 文件：生成项目中的文件，用于连接配置、内容 source、路由和 UI 自定义。
+- 平台服务：`geistdocs.com` 上的可选翻译、反馈和 Markdown 请求追踪端点。
+
+## 你会编辑的文件
+
+大多数项目从这些文件开始：
+
+- `content/docs`：编写和组织文档。
+- `content/docs/meta.json`：控制侧边栏顺序和分组。
+- `geistdocs.tsx`：配置 logo、nav、GitHub 仓库、标题、AI prompt、翻译和功能开关。
+- `components/geistdocs/mdx-components.tsx`：添加或覆盖 MDX 组件。
+- `app/[lang]/docs/[[...slug]]/page.tsx`：配置文档页面行为。
+- `proxy.ts`：在包管理的 Markdown 协商前后添加站点特有的请求逻辑。
+
+## 包负责的内容
+
+包负责文档渲染、页面操作、搜索、Ask AI、Markdown 路由、`llms.txt` 和可复用 MDX 组件等共享行为。更新 `@vercel/geistdocs` 可以获得包级别修复和功能，而不会覆盖你拥有的 adapter 文件。
+
+高级项目可以使用包 API 配置版本化文档、多个内容 source、自定义页面 metadata 和自定义 proxy hooks。
+
+## 包含的功能
+
+- MDX 文档和自定义组件
+- `content/docs` 中的本地内容
+- 搜索和 Ask AI
+- 页面操作，包括反馈、复制页面、在 chat 中打开和在 GitHub 编辑
+- 面向 AI 工具的原始 Markdown 路由
+- `llms.txt`
+- 版本化文档和多个内容 source
+- 用于自定义请求逻辑的 proxy hooks
+- RSS feed
+- 国际化路由
+- init、update 和 translate CLI 命令
+
+## 下一步
+
+- 阅读 [Getting Started](/docs/getting-started) 创建并运行项目。
+- 阅读 [Configuration](/docs/configuration) 自定义生成的站点。
+- 阅读 [版本化文档](/docs/versioned-docs) 配置多个文档版本。
+- 阅读 [Proxy 和 Markdown 路由](/docs/proxy) 添加自定义请求逻辑。

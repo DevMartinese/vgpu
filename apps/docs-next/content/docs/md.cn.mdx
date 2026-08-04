@@ -1,0 +1,65 @@
+---
+title: .md 扩展
+description: 通过在任何 URL 后追加 .md 或 .mdx 来以原始 Markdown 访问文档页面
+type: conceptual
+summary: 通过在 URL 后追加 .md 或 .mdx 以原始 Markdown 格式访问任何文档页面，供 AI 工具使用。
+related:
+  - /docs/llms-txt
+  - /docs/proxy
+---
+
+Geistdocs 允许 AI 工具和语言模型以纯 Markdown 的形式访问文档页面。在文档 URL 后追加 `.md` 或 `.mdx`，即可获取该页面处理后的 Markdown 内容。
+
+## 工作原理
+
+当你在任何文档 URL 后添加 `.md` 或 `.mdx` 时，你将得到页面内容的纯文本 Markdown，而不是呈现的 HTML。这样可以方便 AI 工具读取并理解你的文档。
+
+### 示例
+
+```
+# Normal page
+https://yourdomain.com/docs/getting-started
+
+# Markdown version
+https://yourdomain.com/docs/getting-started.mdx
+```
+
+`.mdx` 版本返回：
+
+- 页面标题作为 H1 级标题
+- 完整的处理后 Markdown 内容
+- 无 HTML、样式或导航
+
+## 使用场景
+
+此功能特别适用于：
+
+- **AI 聊天工具** - 像 ChatGPT、Claude 和 Cursor 这样的工具可以获取并读取你的文档
+- **LLM 上下文** - 为语言模型提示提供干净的文本
+- **文档分析** - 提取内容以便处理或分析
+- **内容迁移** - 以干净的格式导出文档
+
+## 实现
+
+包内 proxy 会将 `.md` 和 `.mdx` 请求路由到返回 Markdown 的 route handler：
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [
+    { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
+  ],
+});
+```
+
+目标 route 使用 `createDocsMarkdownRoute` 处理页面，并以 `text/markdown` 内容类型返回 Markdown。
+
+## 响应格式
+
+响应包含：
+
+- Content-Type: `text/markdown`
+- 页面标题作为一级标题
+- 来自 Fumadocs 的处理后 Markdown 内容
+
+所有 MDX 组件都会被处理并转换为等效的纯 Markdown。

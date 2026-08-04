@@ -1,0 +1,85 @@
+---
+title: 向 AI 提问
+description: 一个由 AI 提供支持的聊天助手，通过上下文感知的回答帮助用户理解您的文档
+type: conceptual
+summary: 具有上下文感知搜索、持久历史记录和建议提示的 AI 聊天助手。
+prerequisites:
+  - /docs/env
+related:
+  - /docs/open-in-chat
+  - /docs/llms-txt
+  - /docs/configuration
+---
+
+The Ask AI feature provides an intelligent chat assistant built directly into your documentation. Users can ask questions about your docs and get instant, context-aware answers powered by AI. The assistant can search through your documentation, understand context, and provide helpful responses.
+
+## 工作原理
+
+The AI chat assistant is available in two ways:
+
+### 1. 每页快速访问
+
+Each documentation page has an "Ask AI about this page" button in the table of contents sidebar. When clicked, it:
+
+1. Opens the chat interface
+2. Pre-fills a prompt asking the AI to read the current page
+3. Allows users to ask specific questions about that page
+
+### 2. 全局聊天界面
+
+Users can open the chat interface at any time by:
+
+- Clicking the "Ask AI" button in the navbar
+- Using the keyboard shortcut: `⌘I` (Mac) or `Ctrl+I` (Windows/Linux)
+
+Once open, users can:
+
+- Ask questions about any part of your documentation
+- Upload files or images for context
+- View AI-powered search results from your docs
+- Get step-by-step guidance on complex topics
+
+## 功能
+
+### 上下文感知搜索
+
+The AI assistant includes a built-in `search_docs` tool that:
+
+1. Searches through your documentation content
+2. Finds relevant pages based on the user's question
+3. Shows source citations with links to the referenced pages
+4. Uses the content to provide accurate, contextual answers
+
+### 持久化聊天历史
+
+Conversations are automatically saved to the browser's IndexedDB, providing:
+
+- 聊天历史在页面重新加载后仍然保留
+- 能够继续先前的对话
+- 开始新聊天或清除历史的选项
+- 离线访问过去的对话
+
+### 交互功能
+
+- **建议**：首次使用的用户会看到建议的问题以便入门
+- **文件上传**：用户可以附加文件或图像以提供上下文
+- **支持 Markdown**：响应以正确的 Markdown 格式呈现
+- **代码语法高亮**：响应中的代码块包含语法高亮
+- **推理显示**：在开发模式下，可以查看 AI 的推理过程
+
+### 移动响应式
+
+The chat interface adapts to different screen sizes:
+
+- **桌面**：作为侧边栏面板从右侧滑入
+- **移动端**：以底部抽屉的形式打开，便于访问
+
+## 配置
+
+The environment variables `AI_GATEWAY_API_KEY` and `NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL` must be set, which you can read more about in the [环境变量](/docs/env) section.
+
+The model used is `openai/gpt-4.1-mini` via the Vercel AI Gateway.
+
+## 建议的提示
+
+You can customize the initial suggested prompts shown to users. These are configured in the Geistdocs configuration file, which you can read more about in the [配置](/docs/configuration) section.
