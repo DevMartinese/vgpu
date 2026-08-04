@@ -248,6 +248,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build docs-next app
         run: pnpm --filter docs-next build
+      # TGEIST-05 anchor — remark plugins M1-M9 + gate (c) of Decision 4.
+      # `test:remark` unit-tests the mappings (including the adversarial case the
+      # design names: a `*.docs.md` path inside a code-span that must NOT be
+      # rewritten). `check:mdast-parity` is the render-parity gate: for every
+      # page, the text of the mdast before the plugins must equal the text after
+      # them, modulo whitespace — M1-M9 only change node types and attributes, so
+      # any plugin that loses content fails here. It also asserts (a) every fence
+      # language surviving the chain is one Shiki can load, which is what makes
+      # the 19 ` ```terminal ` fences a build error rather than a surprise, and
+      # (b) no `*.docs.md`/bare logical link survives unresolved (the 85 links
+      # that would 404). Runs against the fixtures today and automatically
+      # against `content/docs/**` once TGEIST-04 lands the real corpus.
+      - name: Unit-test the docs-next remark plugins (M1-M9)
+        run: pnpm --filter docs-next test:remark
+      - name: Check mdast render parity (Decision 4c)
+        run: pnpm --filter docs-next check:mdast-parity
 
   docs-generated:
     # Guards that the committed docs manifest + generated skill (skills/vgpu, the payload
