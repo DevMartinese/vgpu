@@ -1,5 +1,20 @@
 # @vgpu/core
 
+## 0.3.0
+
+### Patch Changes
+
+- Updated dependencies [1451232]
+- Updated dependencies [6ea8edf]
+- Updated dependencies [42bffb4]
+- Updated dependencies [1e27582]
+- Updated dependencies [836116e]
+- Updated dependencies [43dfa78]
+- Updated dependencies [d1b73c8]
+- Updated dependencies [1255833]
+- Updated dependencies [9812605]
+  - @vgpu/wgsl@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
@@ -37,6 +52,7 @@
 - Updated dependencies [2856407]
 - Updated dependencies [3731a3c]
 - Updated dependencies [eba8e4d]
+
   - @vgpu/wgsl@0.2.0
 
 - 388477e: Implement `copyTextureToTexture` on the mock command encoder so code that builds mip chains or copies between textures boots on the mock adapter.
