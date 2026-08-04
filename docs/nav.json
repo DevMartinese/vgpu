@@ -164,7 +164,7 @@
     {
       "title": "Examples",
       "href": "/examples",
-      "groups": "..."
+      "groups": [{ "...": [] }]
     },
     {
       "title": "CLI",
@@ -189,7 +189,7 @@
     {
       "title": "API Reference",
       "href": "/reference",
-      "groups": "..."
+      "groups": [{ "...": [] }]
     }
   ]
 }

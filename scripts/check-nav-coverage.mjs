@@ -62,7 +62,7 @@ function isCatchAll(entry) {
 }
 
 function collectHrefs(node, into) {
-  if (node === undefined || node === null || node === '...') return;
+  if (node === undefined || node === null || isCatchAll(node)) return;
   if (Array.isArray(node)) {
     for (const item of node) collectHrefs(item, into);
     return;
