@@ -184,8 +184,9 @@ async function main() {
         const lang = typeof node.lang === "string" ? node.lang : "";
         if (lang && !shikiLanguages.has(lang)) {
           failures.push(
-            `${label}:${node.position?.start?.line ?? "?"}: fence language "${lang}" is not one ` +
-              "Shiki can load (it is case-sensitive) — this is exactly what fails `next build` (M4).",
+            `${label}:${node.position?.start?.line ?? "?"}: fence language "${lang}" is unknown ` +
+              "to Shiki after normalization (the lookup is case-sensitive, so `JSON` is not " +
+              "`json`) — this is exactly what fails `next build` (M4).",
           );
         }
       }
