@@ -281,6 +281,8 @@ jobs:
           node-version: 22
       - name: Check skills/vgpu + docs manifest for drift
         run: node packages/vgpu/lib/docs/generate/check-drift.js
+      - name: Check docs/nav.json coverage against the docs manifest
+        run: node scripts/check-nav-coverage.mjs
 
   examples-api-generated:
     # Frozen schemas, controlled vocabulary, and deterministic revision artifacts.
