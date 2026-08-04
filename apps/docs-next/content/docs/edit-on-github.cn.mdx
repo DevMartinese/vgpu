@@ -1,0 +1,47 @@
+---
+title: 在 GitHub 上编辑
+description: 允许读者通过在 GitHub 上编辑文档页面直接贡献更改
+type: integration
+summary: 每个文档页面上的直接链接，让读者通过 GitHub 拉取请求提出更改。
+related:
+  - /docs/configuration
+---
+
+“在 GitHub 上编辑” 功能为读者提供了一个直接的链接，用于建议对您的文档进行更改。该链接出现在每个文档页面的目录侧栏中，方便用户提交修复、改进或更新。
+
+## 工作原理
+
+当用户点击 **“在 GitHub 上编辑此页”** 链接时，会直接跳转到您 GitHub 仓库中的源文件。在那里，他们可以：
+
+1. Fork 仓库（如果尚未 Fork）
+2. 在 GitHub 网页编辑器中进行编辑
+3. 提交包含其更改的 pull request
+
+此工作流程利用了 GitHub 内置的编辑功能，使技术用户和非技术用户都能方便地进行贡献。
+
+## 配置
+
+"在 GitHub 上编辑" 链接基于 `geistdocs.tsx` 配置文件中的 `github` 对象自动生成。设置 `owner` 和 `repo` 属性以启用此功能：
+
+```tsx
+export const github = {
+  owner: "your-username",
+  repo: "your-repo-name",
+};
+```
+
+如果这些值未设置，该链接将不会出现在您的文档页面上。
+
+### 生成的 URL 格式
+
+链接遵循以下模式：
+
+```
+https://github.com/{owner}/{repo}/edit/main/content/docs/{file-path}
+```
+
+例如，如果您的页面位于 `content/docs/getting-started.mdx`，则生成的链接为：
+
+```
+https://github.com/your-username/your-repo-name/edit/main/content/docs/getting-started.mdx
+```

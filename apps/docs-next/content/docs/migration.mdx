@@ -1,0 +1,378 @@
+---
+title: Migration guide
+description: Migrate a Fumadocs or custom Geist docs site to package-backed Geistdocs
+type: guide
+summary: Move an existing documentation site to @vercel/geistdocs while keeping local content, routing, middleware behavior, and AI-readable surfaces intact.
+prerequisites:
+  - /docs/configuration
+  - /docs/proxy
+related:
+  - /docs/versioned-docs
+  - /docs/llms-txt
+  - /docs/agent-readiness
+---
+
+Migrate an existing Fumadocs or custom Geist documentation site to `@vercel/geistdocs` by moving shared behavior into package APIs and keeping site-specific adapters local. The safest migration keeps content, routing decisions, and product-specific UI in your app while replacing copied runtime code with thin package-backed adapters.
+
+<CopyPrompt text="Help me migrate this existing docs site to package-backed Geistdocs. Inspect source.config.ts, lib/geistdocs/source.ts, app route files, proxy.ts or middleware.ts, public/llms.txt, Open Graph routes, Tailwind CSS setup, package.json AI SDK dependencies, and environment variables. Then produce a step-by-step migration plan using @vercel/geistdocs package APIs without copying package internals.">
+  Help me migrate this existing docs site to package-backed Geistdocs. Inspect `source.config.ts`, `lib/geistdocs/source.ts`, app route files, `proxy.ts` or `middleware.ts`, `public/llms.txt`, Open Graph routes, Tailwind CSS setup, `package.json` AI SDK dependencies, and environment variables. Then produce a step-by-step migration plan using `@vercel/geistdocs` package APIs without copying package internals.
+</CopyPrompt>
+
+## Before you migrate
+
+Create a working branch and inventory the current site before replacing code:
+
+- Existing Fumadocs collections in `source.config.ts`.
+- Public route families, such as `/docs`, `/api-reference`, `/guides`, or `/`.
+- Existing `middleware.ts` or `proxy.ts` behavior.
+- Static files that overlap package routes, such as `public/llms.txt`.
+- Search, chat, `llms.txt`, page-level Markdown, `sitemap.md`, `agents.md`, `/.well-known/mcp.json`, RSS, and Open Graph routes.
+- Tailwind CSS version and custom plugins.
+- Direct app usage of `ai` or `@ai-sdk/react` outside Geistdocs.
+- Environment variables required by the homepage, docs routes, or API routes.
+
+Run the current project before changing it:
+
+```bash title="Terminal"
+pnpm install
+pnpm build
+```
+
+Fix unrelated build failures first. A migration is safer when the starting point is reproducible.
+
+## Install Geistdocs
+
+Add `@vercel/geistdocs` and align the supported Fumadocs and Next.js dependencies for the package version you are adopting.
+
+For an existing project, use your package manager directly:
+
+```bash title="Terminal"
+pnpm add @vercel/geistdocs
+```
+
+If you are starting from a generated Geistdocs project and moving content into it, use the CLI:
+
+```bash title="Terminal"
+pnpm dlx @vercel/geistdocs init --name my-docs
+```
+
+## Align Ask AI dependencies
+
+Geistdocs Ask AI uses AI SDK v6. Generated projects install `ai` v6 and `@ai-sdk/react` v3 so package-owned chat components and route helpers use the supported AI SDK APIs.
+
+If the existing app imports `ai` or `@ai-sdk/react` for product-specific features, migrate that code separately. Keep Geistdocs route adapters package-backed, and do not copy package chat internals into the app to preserve older AI SDK behavior.
+
+## Update source config
+
+Use the source-config-safe export from `@vercel/geistdocs/source-config` in `source.config.ts`. This file is evaluated by `fumadocs-mdx` during dependency installation and builds, so avoid importing runtime component entry points from it.
+
+```ts title="source.config.ts"
+import {
+  defineGeistdocsSourceConfig,
+  geistdocsFrontmatterSchema,
+  geistdocsMetaSchema,
+} from "@vercel/geistdocs/source-config";
+import { defineDocs } from "fumadocs-mdx/config";
+
+export const docs = defineDocs({
+  dir: "content/docs",
+  docs: {
+    schema: geistdocsFrontmatterSchema,
+    postprocess: {
+      includeProcessedMarkdown: true,
+    },
+  },
+  meta: {
+    schema: geistdocsMetaSchema,
+  },
+});
+
+export default defineGeistdocsSourceConfig();
+```
+
+For multiple docs families, create one collection per directory and reuse `geistdocsFrontmatterSchema`.
+
+## Create the package config
+
+Use `@vercel/geistdocs/config` to centralize site metadata and route families in `lib/geistdocs/config.tsx`.
+
+```tsx title="lib/geistdocs/config.tsx"
+import { defineConfig } from "@vercel/geistdocs/config";
+import { Logo, github, nav, prompt, suggestions, title } from "@/geistdocs";
+
+export const config = defineConfig({
+  title,
+  defaultLanguage: "en",
+  logo: <Logo />,
+  github,
+  nav,
+  content: [{ id: "docs", label: "Docs", dir: "content/docs", route: "/docs" }],
+  ai: {
+    prompt,
+    suggestions,
+  },
+});
+```
+
+Set `content` to every public documentation route family. `createProxy` uses this metadata to infer standard Markdown mappings for non-root sections.
+
+## Connect Fumadocs sources
+
+Wrap each Fumadocs collection with `createSource` in `lib/geistdocs/source.ts`.
+
+```ts title="lib/geistdocs/source.ts"
+import { createSource } from "@vercel/geistdocs/source";
+import { docs } from "@/.source/server";
+import { config } from "./config";
+
+export const geistdocsSource = createSource({
+  docs,
+  config,
+  id: "docs",
+  label: "Docs",
+});
+
+export const source = geistdocsSource.source;
+```
+
+For root-mounted docs, set `baseUrl: "/"` and use explicit `markdownRoutes` in `proxy.ts`:
+
+```ts title="lib/geistdocs/source.ts"
+export const geistdocsSource = createSource({
+  docs,
+  config,
+  baseUrl: "/",
+});
+```
+
+If the Next.js application also uses `basePath`, pass the same value through `defineConfig` but do not add it to `baseUrl`, `content.route`, `getPageUrl`, or `markdownRoutes`. Those values remain app-local. Geistdocs adds the public prefix to page actions, metadata, generated Markdown, discovery links, chat citations, and proxy destinations.
+
+## Add route adapters
+
+Keep App Router files thin. Route files should call package helpers instead of copying package internals.
+
+```tsx title="app/[lang]/docs/[[...slug]]/page.tsx"
+import { createDocsPage } from "@vercel/geistdocs/pages/docs";
+import { config } from "@/lib/geistdocs/config";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+const docsPage = createDocsPage({
+  config,
+  source: geistdocsSource,
+  openGraph: {
+    images: true,
+  },
+});
+
+export default docsPage.Page;
+export const generateStaticParams = docsPage.generateStaticParams;
+export const generateMetadata = docsPage.generateMetadata;
+```
+
+Set `openGraph.images` to `true` only when your app includes the Geistdocs OG route. If you do not add the OG route, omit `openGraph` or override metadata to avoid broken `/og/...` references.
+
+## Add AI-readable routes
+
+Add the package route helpers for machine-readable docs surfaces.
+
+```ts title="app/[lang]/llms.txt/route.ts"
+import { createLlmsRoute } from "@vercel/geistdocs/routes/llms";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+export const { GET, revalidate } = createLlmsRoute({
+  sources: [geistdocsSource],
+});
+```
+
+```ts title="app/[lang]/llms.mdx/[[...slug]]/route.ts"
+import { createDocsMarkdownRoute } from "@vercel/geistdocs/routes/llms";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+export const { GET, generateStaticParams, revalidate } =
+  createDocsMarkdownRoute({
+    source: geistdocsSource,
+  });
+```
+
+```ts title="app/[lang]/sitemap.md/route.ts"
+import { createSitemapMarkdownRoute } from "@vercel/geistdocs/routes/sitemap";
+import { config } from "@/lib/geistdocs/config";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+export const { GET, generateStaticParams, revalidate, dynamic } =
+  createSitemapMarkdownRoute({
+    config,
+    sources: [{ source: geistdocsSource.source }],
+  });
+```
+
+```ts title="app/[lang]/agents.md/route.ts"
+import { createAgentsRoute } from "@vercel/geistdocs/routes/agents";
+import { config } from "@/lib/geistdocs/config";
+
+export const { GET, generateStaticParams, revalidate } = createAgentsRoute({
+  config,
+});
+```
+
+```ts title="app/[lang]/.well-known/mcp.json/route.ts"
+import { createMcpManifestRoute } from "@vercel/geistdocs/routes/mcp";
+import { config } from "@/lib/geistdocs/config";
+
+export const { GET, generateStaticParams, revalidate } = createMcpManifestRoute({
+  config,
+});
+```
+
+Delete `public/llms.txt` after adding `createLlmsRoute`. Static files in `public` can mask App Router route behavior.
+
+## Add search and Ask AI routes
+
+Use package route helpers for search and chat. Keep these files as adapters so `@vercel/geistdocs` can ship AI SDK compatibility fixes.
+
+```ts title="app/api/search/route.ts"
+import { createSearchRoute } from "@vercel/geistdocs/routes/search";
+import { config } from "@/lib/geistdocs/config";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+export const GET = createSearchRoute({ config, sources: [geistdocsSource] });
+```
+
+```ts title="app/api/chat/route.ts"
+import { createChatRoute } from "@vercel/geistdocs/routes/chat";
+import { config } from "@/lib/geistdocs/config";
+import { geistdocsSource } from "@/lib/geistdocs/source";
+
+const chatProxyUrl = process.env.GEISTDOCS_CHAT_PROXY_URL;
+const chatProxyToken = process.env.GEISTDOCS_CHAT_PROXY_TOKEN;
+
+export const { POST, maxDuration } = createChatRoute({
+  config,
+  proxy: chatProxyUrl
+    ? {
+        url: chatProxyUrl,
+        headers: chatProxyToken
+          ? { Authorization: `Bearer ${chatProxyToken}` }
+          : undefined,
+      }
+    : undefined,
+  sources: [geistdocsSource],
+});
+```
+
+Leave `GEISTDOCS_CHAT_PROXY_URL` unset for default AI Gateway mode. Set it to a `/vertex` proxy URL only when Ask AI should route model requests through the central Vertex-backed service.
+
+## Migrate middleware behavior
+
+Use `createProxy` in `proxy.ts`. Put existing `middleware.ts` behavior in `before` or `after` hooks instead of replacing Geistdocs markdown negotiation.
+
+```ts title="proxy.ts"
+import { createProxy } from "@vercel/geistdocs/proxy";
+import { NextResponse } from "next/server";
+import { config as geistdocsConfig } from "@/lib/geistdocs/config";
+
+const proxy = createProxy({
+  config: geistdocsConfig,
+  before: async ({ request }) => {
+    if (request.nextUrl.pathname === "/legacy-docs") {
+      return NextResponse.redirect(new URL("/docs", request.url));
+    }
+
+    return null;
+  },
+});
+
+export const config = {
+  matcher: [
+    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+  ],
+};
+
+export default proxy;
+```
+
+Use `api(?:/|$)` in the matcher. A broad `api` exclusion also excludes routes such as `/api-reference`.
+
+## Configure Markdown route mappings
+
+For standard non-root sections, `createProxy` can infer Markdown routes from `config.content`.
+
+Use explicit `markdownRoutes` when the public docs URL does not map directly to the Markdown route handler:
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [
+    { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
+    { from: "/api-reference/*path", to: "/[lang]/llms.mdx/api-reference/*path" },
+  ],
+});
+```
+
+Root-mounted docs need explicit mappings. If a homepage or app routes also live at `/`, do not use a broad `/*path` mapping. Map each docs family separately:
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [
+    { from: "/guides/*path", to: "/[lang]/llms.mdx/guides/*path" },
+    { from: "/api-reference/*path", to: "/[lang]/llms.mdx/api-reference/*path" },
+  ],
+});
+```
+
+For a base-path application whose root page is documentation, add `"/"` to the static proxy matcher and verify `<basePath>/index.md`. Keep normal application and API paths out of a broad root Markdown mapping with matcher exclusions or a `before` hook.
+
+## Configure Tailwind CSS
+
+Tailwind CSS v4 requires `@source` entries for package components and related dependencies.
+
+```css title="app/styles/geistdocs.css"
+@import "tailwindcss";
+@import "fumadocs-ui/css/shadcn.css";
+@import "fumadocs-ui/css/preset.css";
+@import "tw-animate-css";
+
+@source "../../node_modules/@vercel/geistdocs/dist/**/*.js";
+@source "../../node_modules/streamdown/dist/*.js";
+```
+
+Move Tailwind CSS v3 plugin utilities into CSS-first v4 utilities or theme variables. Keep custom token names stable while you migrate components.
+
+## Handle environment variables
+
+Do not require production secrets for local migration builds. If a homepage or API route depends on a production-only secret, add a local fallback or disable that integration in development.
+
+```ts title="lib/example-secret.ts"
+export const flagsSecret =
+  process.env.FLAGS_SECRET ??
+  (process.env.NODE_ENV === "development" ? "local-development-secret" : undefined);
+```
+
+Keep real secrets in `.env.local` and out of Git.
+
+## Verify the migration
+
+Run the same checks after each routing or source change:
+
+```bash title="Terminal"
+pnpm postinstall
+pnpm build
+pnpm dev
+```
+
+Check these URLs locally:
+
+- `/docs` or the migrated docs root.
+- `/llms.txt`.
+- `/sitemap.md`.
+- `/agents.md`.
+- `/.well-known/mcp.json` if `agent.mcp.servers` is configured.
+- A page-level Markdown URL such as `/docs/getting-started.mdx`.
+- A non-docs route that should not be rewritten as Markdown, such as the homepage.
+
+## Next steps
+
+- Read [Configuration](/docs/configuration) to review package config options.
+- Read [Proxy and markdown routes](/docs/proxy) to tune request handling.
+- Read [Agent readiness](/docs/agent-readiness) to configure `/agents.md` and `/.well-known/mcp.json` for AI agents.

@@ -1,0 +1,51 @@
+---
+title: Edit on GitHub
+description: Allow readers to contribute directly by editing documentation pages on GitHub
+type: integration
+summary: A direct link on every documentation page that lets readers propose changes through GitHub pull requests.
+related:
+  - /docs/configuration
+---
+
+The "Edit on GitHub" feature gives readers a direct link to propose documentation changes. This link appears in the table of contents sidebar on every documentation page.
+
+<CopyPrompt text="Help me configure Edit on GitHub for this Geistdocs site. Check the github owner and repo in geistdocs.tsx, verify the generated edit URL for this page, and tell me how to disable the action if needed.">
+  Help me configure Edit on GitHub for this Geistdocs site. Check the `github` owner and repo in `geistdocs.tsx`, verify the generated edit URL for this page, and tell me how to disable the action if needed.
+</CopyPrompt>
+
+## How it works
+
+When users click the "Edit this page on GitHub" link, they are taken directly to the source file in your GitHub repository. From there, they can:
+
+1. Fork the repository (if they haven't already)
+2. Make their edits in the GitHub web editor
+3. Submit a pull request with their changes
+
+This workflow leverages GitHub's built-in editing capabilities, making it straightforward for both technical and non-technical users to contribute.
+
+## Configuration
+
+The Edit on GitHub link is automatically generated based on the `github` object in your `geistdocs.tsx` configuration file. Set the `owner` and `repo` properties to enable this feature:
+
+```tsx
+export const github = {
+  owner: "your-username",
+  repo: "your-repo-name",
+};
+```
+
+If these values are not set, the link will not appear on your documentation pages.
+
+### Generated URL Format
+
+The link follows this pattern:
+
+```
+https://github.com/{owner}/{repo}/edit/main/content/docs/{file-path}
+```
+
+For example, if your page is located at `content/docs/getting-started.mdx`, the generated link would be:
+
+```
+https://github.com/your-username/your-repo-name/edit/main/content/docs/getting-started.mdx
+```

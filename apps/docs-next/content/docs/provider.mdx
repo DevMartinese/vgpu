@@ -1,0 +1,74 @@
+---
+title: Geistdocs Provider
+description: The root provider component that handles notifications, search and analytics
+type: reference
+summary: The root provider component that wraps your application to handle toast notifications, search, and analytics.
+prerequisites:
+  - /docs/getting-started
+related:
+  - /docs/configuration
+---
+
+The `GeistdocsProvider` wraps the root of your application with package-managed UI state. It connects theme, search, AI chat, notifications, and optional analytics to the rest of your Geistdocs site.
+
+<CopyPrompt text="Review my Geistdocs provider setup. Check that the root layout wraps the app with GeistdocsProvider, that config is passed correctly, and that analytics, search, theme, and Ask AI behavior are wired safely.">
+  Review my Geistdocs provider setup. Check that the root layout wraps the app with `GeistdocsProvider`, that config is passed correctly, and that analytics, search, theme, and Ask AI behavior are wired safely.
+</CopyPrompt>
+
+## What it does
+
+The provider handles these behaviors:
+
+1. **Toast notifications**: Provides a global notification system for user feedback.
+2. **Analytics**: Integrates Vercel Analytics and Speed Insights when the local adapter includes them.
+3. **Search**: Configures the search dialog and connects it to your search API.
+4. **Ask AI**: Provides the client state used by the chat sidebar and page actions.
+
+## Usage
+
+Ensure your application is wrapped with the provider in your root layout:
+
+```tsx title="app/layout.tsx"
+import { GeistdocsProvider } from "@/components/geistdocs/provider";
+
+const Layout = ({ children }: LayoutProps) => (
+  <html lang="en">
+    <body>
+      <GeistdocsProvider>
+        <Navbar />
+        {children}
+      </GeistdocsProvider>
+    </body>
+  </html>
+);
+```
+
+The generated local adapter imports the package provider and passes your site config to it.
+
+## AI Sidebar
+
+When users open the AI chat on desktop, the provider automatically adds padding to prevent content from being hidden behind the sidebar. On mobile, the chat opens as a drawer instead, so no padding is needed.
+
+The provider detects the screen size and chat state.
+
+## Toast Notifications
+
+The provider includes a global toast notification system. Use it anywhere in your app:
+
+```tsx title="page.tsx"
+import { toast } from "sonner";
+
+toast.success("Changes saved");
+toast.error("Something went wrong");
+```
+
+## Analytics
+
+Vercel Analytics is automatically included and tracks:
+
+- Page views
+- Web Vitals
+- User interactions
+- Performance metrics
+
+No configuration needed - it works automatically when deployed on Vercel.

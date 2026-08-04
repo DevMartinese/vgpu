@@ -1,0 +1,96 @@
+---
+title: Proxy 和 Markdown 路由
+description: 在保留包内 Markdown 协商逻辑的同时添加自定义请求逻辑
+type: reference
+summary: 使用 createProxy 的 before 和 after hooks、markdownRoutes 和静态 Next.js matcher 配置代理。
+prerequisites:
+  - /docs/configuration
+related:
+  - /docs/md
+  - /docs/llms-txt
+  - /docs/versioned-docs
+---
+
+Geistdocs proxy 负责 Markdown 协商、AI agent 重写、请求追踪和 i18n fallback。使用 hooks 添加站点特有的请求逻辑，而不是复制包内实现。
+
+## 基础 proxy
+
+生成的项目使用 `createProxy` 和默认的 `/docs` Markdown 路由：
+
+```ts title="proxy.ts"
+import { createProxy } from "@vercel/geistdocs/proxy";
+import { config as geistdocsConfig } from "@/lib/geistdocs/config";
+import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
+
+const proxy = createProxy({
+  config: geistdocsConfig,
+  trackMarkdownRequest: trackMdRequest,
+});
+
+export const config = {
+  matcher: [
+    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+  ],
+};
+
+export default proxy;
+```
+
+`export const config` 必须保持为静态对象。Next.js 会在构建时读取 proxy matcher，不支持在该导出中调用 helper。
+
+## 自定义请求逻辑
+
+使用 `before` 在 Geistdocs Markdown 处理之前运行逻辑。返回 `Response` 会停止后续处理。
+
+```ts title="proxy.ts"
+import { createProxy } from "@vercel/geistdocs/proxy";
+import { NextResponse } from "next/server";
+import { config as geistdocsConfig } from "@/lib/geistdocs/config";
+
+const proxy = createProxy({
+  config: geistdocsConfig,
+  before: async ({ request, defaultLanguage }) => {
+    if (request.nextUrl.pathname === "/") {
+      return NextResponse.rewrite(
+        new URL(`/${defaultLanguage}/home`, request.url)
+      );
+    }
+
+    return null;
+  },
+});
+```
+
+使用 `after` 在 Markdown 处理之后、i18n fallback 之前运行逻辑。
+
+## Markdown 路由映射
+
+`markdownRoutes` 将公开页面 URL 映射到返回 Markdown 的 App Router handler。包仍然通过 route helpers 服务 `/llms.txt` 和单页 Markdown；proxy 使用这些映射处理 `.md`、`.mdx`、`Accept: text/markdown` 和 AI-agent 请求。
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [
+    { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
+    { from: "/cookbook/*path", to: "/[lang]/llms.mdx/cookbook/*path" },
+    { from: "/v5/docs/*path", to: "/[lang]/v5/llms.mdx/*path" },
+  ],
+});
+```
+
+| Request | Rewritten destination |
+| --- | --- |
+| `/docs/getting-started.md` | `/en/llms.mdx/getting-started` |
+| `/cookbook/install.mdx` | `/en/llms.mdx/cookbook/install` |
+| `/v5/docs/intro` with `Accept: text/markdown` | `/en/v5/llms.mdx/intro` |
+
+## Hook context
+
+`before` 和 `after` 接收相同的 context：
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `request` | `NextRequest` | 传入请求。 |
+| `context` | `NextFetchEvent` | Proxy event，包含 `waitUntil`。 |
+| `defaultLanguage` | `string` | 配置的默认语言。 |
+| `languages` | `string[]` | 所有配置的语言。 |

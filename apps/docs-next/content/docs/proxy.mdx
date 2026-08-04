@@ -1,0 +1,193 @@
+---
+title: Proxy and markdown routes
+description: Add custom request logic while keeping Geistdocs markdown negotiation in the package
+type: reference
+summary: Configure createProxy with before and after hooks, markdown route mappings, and a static Next.js matcher.
+prerequisites:
+  - /docs/configuration
+related:
+  - /docs/migration
+  - /docs/md
+  - /docs/llms-txt
+  - /docs/versioned-docs
+---
+
+The Geistdocs proxy handles markdown negotiation, AI-agent rewrites, request tracking, and i18n fallback. Add site-specific request logic with hooks instead of copying the package proxy implementation.
+
+<CopyPrompt text="Review this Geistdocs proxy.ts file. Check that export const config is static, custom logic is inside createProxy before or after hooks, and markdownRoutes cover every public docs route family.">
+  Review this Geistdocs `proxy.ts` file. Check that `export const config` is static, custom logic is inside `createProxy` `before` or `after` hooks, and `markdownRoutes` cover every public docs route family.
+</CopyPrompt>
+
+## Basic proxy
+
+Generated projects use `createProxy` with the default `/docs` markdown route:
+
+```ts title="proxy.ts"
+import { createProxy } from "@vercel/geistdocs/proxy";
+import { config as geistdocsConfig } from "@/lib/geistdocs/config";
+import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
+
+const proxy = createProxy({
+  config: geistdocsConfig,
+  trackMarkdownRequest: trackMdRequest,
+});
+
+export const config = {
+  matcher: [
+    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+  ],
+};
+
+export default proxy;
+```
+
+Keep `export const config` as a static object. Next.js reads proxy matchers at build time and does not support calling a helper for this export.
+
+## Custom request logic
+
+Use `before` for logic that should run before Geistdocs markdown handling. Return a `Response` to stop processing.
+
+```ts title="proxy.ts"
+import { createProxy } from "@vercel/geistdocs/proxy";
+import { NextResponse } from "next/server";
+import { config as geistdocsConfig } from "@/lib/geistdocs/config";
+
+const proxy = createProxy({
+  config: geistdocsConfig,
+  before: async ({ request, defaultLanguage }) => {
+    if (request.nextUrl.pathname === "/") {
+      return NextResponse.rewrite(
+        new URL(`/${defaultLanguage}/home`, request.url)
+      );
+    }
+
+    return null;
+  },
+});
+```
+
+Use `after` for logic that should run after markdown handling but before the i18n fallback:
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  after: async ({ request }) => {
+    const session = await getSessionFromReq(request);
+
+    if (!session) {
+      return null;
+    }
+
+    return refreshSession(request, session);
+  },
+});
+```
+
+## Markdown route mappings
+
+Define `content` sections in `lib/geistdocs/config.tsx` to infer standard Markdown route mappings from each section route. The package still serves `/llms.txt` and individual page Markdown through route helpers; the proxy uses these mappings for `.md`, `.mdx`, `Accept: text/markdown`, and AI-agent requests.
+
+Geistdocs does not infer Markdown mappings for `content` sections with `route: "/"`. A root catch-all such as `/*path` can make a homepage or other application routes look like documentation. Use explicit `markdownRoutes` for root-mounted docs.
+
+```tsx title="lib/geistdocs/config.tsx"
+export const config = defineConfig({
+  // ...
+  content: [{ id: "docs", label: "Docs", dir: "content/docs", route: "/docs" }],
+});
+```
+
+Use `markdownRoutes` when you need to override the inferred mappings:
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [
+    { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
+    { from: "/cookbook/*path", to: "/[lang]/llms.mdx/cookbook/*path" },
+    { from: "/v5/docs/*path", to: "/[lang]/v5/llms.mdx/*path" },
+  ],
+});
+```
+
+With these mappings:
+
+| Request | Rewritten destination |
+| --- | --- |
+| `/docs/getting-started.md` | `/en/llms.mdx/getting-started` |
+| `/cookbook/install.mdx` | `/en/llms.mdx/cookbook/install` |
+| `/v5/docs/intro` with `Accept: text/markdown` | `/en/v5/llms.mdx/intro` |
+
+Use `[lang]` in the destination when your markdown route is nested under `app/[lang]`. Use `*path` or `:path*` to insert the matched wildcard path.
+
+`markdownRoutes` are app-local even when `config.basePath` is set. For a Next.js `basePath` of `/docs`, keep a mapping such as `{ from: "/*path", to: "/[lang]/llms.mdx/*path" }`. `createProxy` preserves `/docs` when it rewrites the public request.
+
+## Root-mounted docs
+
+For docs served from the site root, set the source `baseUrl` and config route to `/`:
+
+```ts title="lib/geistdocs/source.ts"
+export const geistdocsSource = createSource({
+  docs,
+  config,
+  baseUrl: "/",
+});
+```
+
+```tsx title="lib/geistdocs/config.tsx"
+export const config = defineConfig({
+  // ...
+  content: [{ id: "docs", label: "Docs", dir: "content/docs", route: "/" }],
+});
+```
+
+If the whole site is documentation and there is no separate homepage, you can map all root paths to page-level Markdown:
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [{ from: "/*path", to: "/[lang]/llms.mdx/*path" }],
+});
+```
+
+If a homepage or app routes also live at `/`, do not use a broad `/*path` mapping. Enumerate each docs route family instead:
+
+```ts title="proxy.ts"
+const proxy = createProxy({
+  config: geistdocsConfig,
+  markdownRoutes: [
+    { from: "/api-reference/*path", to: "/[lang]/llms.mdx/api-reference/*path" },
+    { from: "/guides/*path", to: "/[lang]/llms.mdx/guides/*path" },
+    { from: "/concepts/*path", to: "/[lang]/llms.mdx/concepts/*path" },
+  ],
+});
+```
+
+When root-mounted docs are the entire base-path application, include `"/"` explicitly in the static matcher. Next.js does not apply a catch-all matcher to the base-path root:
+
+```ts title="proxy.ts"
+export const config = {
+  matcher: [
+    "/",
+    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+  ],
+};
+```
+
+The package keeps `llms.txt`, `sitemap.md`, `agents.md`, MCP discovery, and RSS out of root page-Markdown negotiation. Continue to exclude site-specific application and API routes with the matcher or a `before` hook. A root Markdown page is exposed as `/index.md`, or `<basePath>/index.md` publicly.
+
+## Hook context
+
+Both `before` and `after` receive the same context:
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `request` | `NextRequest` | The incoming request. |
+| `context` | `NextFetchEvent` | The proxy event, including `waitUntil`. |
+| `defaultLanguage` | `string` | The configured default language. |
+| `languages` | `string[]` | All configured languages. |
+
+## Next steps
+
+- Read [.md extension](/docs/md) to understand single-page Markdown responses.
+- Read [Migration guide](/docs/migration) to move existing middleware behavior into `createProxy` hooks.
+- Read [Versioned docs](/docs/versioned-docs) to map multiple public route families.

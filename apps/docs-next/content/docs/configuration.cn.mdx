@@ -1,0 +1,155 @@
+---
+title: 配置
+description: 通过本地 adapter 文件和包 API 配置 Geistdocs 站点
+type: reference
+summary: 配置站点 metadata、导航、AI 功能、页面操作、翻译和本地 adapters。
+prerequisites:
+  - /docs/getting-started
+related:
+  - /docs/provider
+  - /docs/env
+  - /docs/versioned-docs
+  - /docs/proxy
+---
+
+通过生成项目中你拥有的文件配置 Geistdocs。运行时功能来自 `@vercel/geistdocs`，本地文件控制内容、品牌、路由 adapters 和可选自定义。
+
+## 配置文件
+
+| File | Purpose |
+| --- | --- |
+| `geistdocs.tsx` | 站点级设置，包括 logo、nav、GitHub 仓库、AI prompt、翻译和功能开关。 |
+| `lib/geistdocs/config.tsx` | 使用 `defineConfig` 将 `geistdocs.tsx` exports 转换为包配置。 |
+| `lib/geistdocs/source.ts` | 将 Fumadocs content collections 连接到包 source adapter。 |
+| `components/geistdocs/mdx-components.tsx` | 添加或覆盖 MDX 组件。 |
+| `app/[lang]/docs/[[...slug]]/page.tsx` | 配置包提供的 docs page renderer。 |
+| `proxy.ts` | 配置 Markdown 协商、AI-agent 重写、请求追踪和自定义 request hooks。 |
+| `content/docs/meta.json` | 控制侧边栏顺序和分组标签。 |
+
+## `geistdocs.tsx`
+
+项目根目录下的 `geistdocs.tsx` 文件包含主要自定义选项：
+
+```tsx title="geistdocs.tsx"
+import { BookHeartIcon } from "lucide-react";
+
+export const Logo = () => (
+  <div className="flex items-center gap-2">
+    <BookHeartIcon className="size-5" />
+    <p className="font-semibold text-xl tracking-tight">Geistdocs</p>
+  </div>
+);
+
+export const nav = [
+  {
+    label: "Docs",
+    href: "/docs",
+  },
+];
+
+export const suggestions = [
+  "What is Vercel?",
+  "What can I deploy with Vercel?",
+  "What is Fluid Compute?",
+  "How much does Vercel cost?",
+];
+
+export const title = "Geistdocs Documentation";
+
+export const prompt =
+  "You are a helpful assistant specializing in answering questions about Geistdocs, a modern documentation template built with Next.js and Fumadocs.";
+```
+
+## 配置选项
+
+### `Logo`
+
+自定义显示在站点页眉中的徽标组件：
+
+```tsx title="geistdocs.tsx"
+export const Logo = () => (
+  <div className="flex items-center gap-2">
+    <YourIcon className="size-5" />
+    <p className="font-semibold text-xl tracking-tight">Your Brand</p>
+  </div>
+);
+```
+
+### `nav`
+
+定义显示在页眉中的导航链接：
+
+```tsx title="geistdocs.tsx"
+export const nav = [
+  {
+    label: "Documentation",
+    href: "/docs",
+  },
+  {
+    label: "API Reference",
+    href: "/api",
+  },
+  {
+    label: "GitHub",
+    href: "https://github.com/your-org/your-repo",
+  },
+];
+```
+
+### `suggestions`
+
+为 AI 助手配置建议的问题：
+
+```tsx title="geistdocs.tsx"
+export const suggestions = [
+  "How do I get started?",
+  "What are the key features?",
+  "How do I deploy my site?",
+  "Where can I get help?",
+];
+```
+
+### `title`
+
+设置文档站点的主标题：
+
+```tsx title="geistdocs.tsx"
+export const title = "Your Product Documentation";
+```
+
+### `prompt`
+
+自定义 AI 助手的系统提示，以匹配您的文档上下文：
+
+```tsx title="geistdocs.tsx"
+export const prompt =
+  "You are a helpful assistant specializing in answering questions about Your Product, a platform for building amazing applications.";
+```
+
+## 高级配置
+
+`lib/geistdocs/config.tsx` 可以添加 `content` 和 `versions` metadata，让本地 adapters 和自定义 UI 共用同一个配置对象：
+
+```tsx title="lib/geistdocs/config.tsx"
+export const config = defineConfig({
+  // ...
+  content: [
+    { id: "docs", label: "Docs", dir: "content/docs", route: "/docs" },
+    {
+      id: "cookbook",
+      label: "Cookbook",
+      dir: "content/cookbook",
+      route: "/cookbook",
+    },
+  ],
+  versions: {
+    current: "v6",
+    items: [
+      { id: "v6", label: "v6 latest" },
+      { id: "v5", label: "v5", href: "https://v5.example.com/:path*" },
+    ],
+  },
+});
+```
+
+阅读 [版本化文档](/docs/versioned-docs) 配置 versioned sources，阅读 [Proxy 和 Markdown 路由](/docs/proxy) 配置 route mappings。

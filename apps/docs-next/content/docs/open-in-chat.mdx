@@ -1,0 +1,80 @@
+---
+title: Open in Chat
+description: Allow users to continue conversations in their preferred AI chat platform with a single click
+type: conceptual
+summary: Transfer documentation context to AI chat platforms like ChatGPT, Claude, Cursor, and v0 with a single click.
+related:
+  - /docs/ask-ai
+  - /docs/env
+---
+
+The "Open in Chat" feature enables users to seamlessly transfer documentation context to their preferred AI assistant. With a single click, users can open the current page in external AI chat platforms like ChatGPT, Claude, v0, Cursor, and more.
+
+<CopyPrompt text="Help me test Open in Chat for this Geistdocs site. Verify that page URLs resolve correctly, markdown endpoints work, and each configured AI platform receives useful context.">
+  Help me test Open in Chat for this Geistdocs site. Verify that page URLs resolve correctly, markdown endpoints work, and each configured AI platform receives useful context.
+</CopyPrompt>
+
+## How it works
+
+On every documentation page, users will find an "Open in chat" button in the table of contents sidebar. When clicked, a menu appears with options to open the page in various AI platforms:
+
+1. User clicks "Open in chat"
+2. A dropdown menu shows available platforms
+3. User selects their preferred AI assistant
+4. The platform opens with a pre-filled prompt containing the page URL and context
+
+The prompt automatically includes:
+
+```
+Read this page, I want to ask questions about it. [URL]
+```
+
+This allows the AI assistant to fetch and understand the page content before answering user questions.
+
+## Supported Platforms
+
+The feature integrates with multiple popular AI platforms:
+
+### Code & Development Tools
+
+- **[Cursor](https://cursor.sh/)** - AI-powered code editor
+- **[v0](https://v0.dev/)** - Vercel's AI interface design tool
+
+### General AI Assistants
+
+- **[ChatGPT](https://chat.openai.com/)** - OpenAI's conversational AI
+- **[Claude](https://claude.ai/)** - Anthropic's AI assistant
+- **[T3](https://t3.gg/)** - T3 Stack AI assistant
+- **[Scira](https://scira.app/)** - AI-powered documentation assistant
+
+## Configuration
+
+The environment variable `NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL` must be set, which you can read more about in the [Environment Variables](/docs/env) section.
+
+## User Experience
+
+### Desktop Experience
+
+The "Open in chat" button appears in the table of contents sidebar with an external link icon. Clicking it reveals a dropdown menu with all available platforms.
+
+### Platform-Specific Behavior
+
+Each platform has its own integration:
+
+- **Browser-based platforms** (ChatGPT, Claude, v0): Open in a new browser tab with the prompt pre-filled
+- **Desktop applications** (Cursor): Open using a custom URL scheme that launches the application
+- **Specialized tools** (T3, Scira): Open with platform-specific parameters and context
+
+## Outcomes
+
+### For Users
+
+1. **Context transfer**: Users do not need to manually copy URLs or switch contexts.
+2. **Consistent starting point**: Each AI platform receives the same page context.
+3. **Tool choice**: Users can open the AI platform they prefer.
+
+### For Documentation Authors
+
+1. **More support paths**: Users can ask follow-up questions about a page.
+2. **Lower support load**: AI assistants can answer common documentation questions.
+3. **Platform flexibility**: Teams can support different AI preferences.
