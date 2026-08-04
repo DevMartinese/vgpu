@@ -50,10 +50,19 @@ export const DEFAULT_CALLOUT_PREFIXES = Object.freeze([
  */
 
 /**
+ * The Callout type a blockquote maps to, or `null` for M3 (leave it alone).
+ *
+ * Exported because the parity gate asserts the M1/M2 post-condition with it:
+ * after the chain, no blockquote may still match a recognized prefix. Sharing
+ * the predicate is deliberate — text parity alone cannot notice that M1/M2 have
+ * stopped happening (a Callout and a blockquote hold the same words), so
+ * dropping the plugin used to leave the gate green with the Callouts gone from
+ * the HTML.
+ *
  * @param {import("./mdast-utils.mjs").MdastNode} blockquote
- * @param {ReadonlyArray<{ prefix: string, calloutType: string }>} prefixes
+ * @param {ReadonlyArray<{ prefix: string, calloutType: string }>} [prefixes]
  */
-function calloutTypeFor(blockquote, prefixes) {
+export function calloutTypeFor(blockquote, prefixes = DEFAULT_CALLOUT_PREFIXES) {
   const text = flattenNode(blockquote).replace(/^\s+/u, "");
   for (const { prefix, calloutType } of prefixes) {
     if (text.startsWith(prefix)) return calloutType;

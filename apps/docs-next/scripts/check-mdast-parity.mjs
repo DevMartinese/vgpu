@@ -46,6 +46,7 @@ import { mdastToText, normalizeWhitespace, visit } from "../lib/remark-geist/mda
 import { SHIKI_SPECIAL_LANGUAGES } from "../lib/remark-geist/normalize-code-lang.mjs";
 import { isMarkdownDocHref } from "../lib/remark-geist/doc-link-index.mjs";
 import { needsDocsPrefix } from "../lib/remark-geist/resolve-doc-links.mjs";
+import { calloutTypeFor } from "../lib/remark-geist/callout-blockquotes.mjs";
 
 const APP_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/u, "");
 const DEFAULT_TARGETS = ["content/docs", "lib/remark-geist/fixtures"];
@@ -164,6 +165,20 @@ async function main() {
 
     visit(tree, (node) => {
       if (node.type === "mdxJsxFlowElement" && node.name === "Callout") calloutCount += 1;
+      // M1/M2, using the plugin's own matcher. Text parity cannot see this
+      // mapping stop happening — a Callout and a blockquote hold the same words —
+      // so without this post-condition the whole mapping could be dropped and the
+      // gate would stay green while the Callouts vanished from the HTML.
+      if (node.type === "blockquote") {
+        const calloutType = calloutTypeFor(node);
+        if (calloutType) {
+          failures.push(
+            `${label}:${node.position?.start?.line ?? "?"}: blockquote still matches a ` +
+              `recognized callout prefix (would be <Callout type="${calloutType}">) but was left ` +
+              "as a plain blockquote (M1/M2).",
+          );
+        }
+      }
       if (node.type === "code") {
         const action = node.data?.geistLangAction;
         if (action) {

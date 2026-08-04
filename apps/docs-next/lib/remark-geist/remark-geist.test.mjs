@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { remarkCalloutBlockquotes } from "./callout-blockquotes.mjs";
+import { calloutTypeFor, remarkCalloutBlockquotes } from "./callout-blockquotes.mjs";
 import {
   buildDocLinkIndex,
   docsHref,
@@ -546,6 +546,26 @@ describe("gate post-conditions — the predicates the parity gate asserts with",
     const urls = collect(tree, "link").map((node) => node.url);
     assert.equal(urls.filter((url) => isMarkdownDocHref(url)).length, 1);
     assert.equal(urls.filter((url) => needsDocsPrefix(url)).length, 1);
+  });
+
+  it("calloutTypeFor flags a blockquote M1/M2 should have converted", async () => {
+    // Text parity is blind to this mapping disappearing: a Callout and a
+    // blockquote hold the same words. So the gate asserts on the matcher instead.
+    const source = "> Good to know: frames are cheap.\n\n> Warning: not reentrant.\n\n> Plain note.\n";
+
+    const untouched = collect(await transform(source, []), "blockquote");
+    assert.deepEqual(
+      untouched.map((node) => calloutTypeFor(node)),
+      ["info", "warn", null],
+      "without the plugin, two blockquotes still match — the gate must catch this",
+    );
+
+    const converted = collect(await transform(source, [remarkCalloutBlockquotes()]), "blockquote");
+    assert.deepEqual(
+      converted.map((node) => calloutTypeFor(node)),
+      [null],
+      "after the plugin only the M3 blockquote survives, and it matches nothing",
+    );
   });
 
   it("the Shiki oracle is case-sensitive, like Shiki itself", () => {
