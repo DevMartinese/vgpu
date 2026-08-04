@@ -6,7 +6,12 @@ import { geistdocsSource } from "@/lib/geistdocs/source";
 
 const docsPage = createDocsPage({
   config,
-  mdx: ({ link }) => getMDXComponents({ a: link }),
+  // `link` can be `undefined`; only pass an `a` override when the package
+  // actually provides one, otherwise `{ a: undefined }` fails MDXComponents'
+  // type (it disallows `undefined` values, only `NestedMDXComponents |
+  // Component<any>`). Real bug in the vanilla 1.15.2 template, fixed here in
+  // this user-owned adapter file rather than patched in the package.
+  mdx: ({ link }) => getMDXComponents(link ? { a: link } : undefined),
   openGraph: {
     images: true,
   },
