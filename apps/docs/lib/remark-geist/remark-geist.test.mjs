@@ -2,9 +2,8 @@
  * Unit tests for the M1–M9 remark plugins (TGEIST-05).
  *
  * Run with `pnpm --filter docs test:remark` (plain `node --test`, no test
- * runner dependency: `apps/docs-next` must not grow devDependencies during the
- * dual-run window, and the root vitest config does not include `apps/docs-next`
- * yet — TGEIST-06 is the ticket that extends it).
+ * runner dependency: the root vitest config only picks up `*.test.ts` under
+ * `apps/docs`, so this `.mjs` suite still needs its own runner).
  *
  * Every input is a real line of the vgpu corpus (path + line noted), parsed by
  * the same `remark-parse` + `remark-gfm` the MDX pipeline uses, so the trap

@@ -183,8 +183,8 @@ export function resolveMarkdownHref(href, index) {
  * Locates and loads `packages/vgpu/lib/generated/docs-manifest.generated.js`
  * (committed, ~4.7 MB) without turning it into a static import: a bare
  * `import` of a relative path outside the app would be inlined into the bundled
- * `source.config.ts`, and `apps/docs-next` deliberately does not depend on
- * `@vgpu/cli` during the dual-run window (Decision 1′). Resolved lazily, from
+ * `source.config.ts`, and `apps/docs` deliberately does not depend on
+ * `@vgpu/cli` (Decision 1′). Resolved lazily, from
  * the module URL first and `process.cwd()` second, so it works from the app
  * root, from the repo root and from a test.
  *

@@ -5,7 +5,7 @@
  * `fumadocs-mdx` before Next.js ever starts, and they are also exercised by
  * plain `node --test` unit tests and by `scripts/check-mdast-parity.mjs`. To
  * keep all three entry points working without adding a single dependency to
- * `apps/docs-next/package.json` (no `unist-util-visit`, no
+ * `apps/docs/package.json` (no `unist-util-visit`, no
  * `mdast-util-to-string`), the ~40 lines of tree walking / text extraction we
  * need live here.
  *

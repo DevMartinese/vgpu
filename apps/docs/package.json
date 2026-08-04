@@ -1,7 +1,7 @@
 {
   "name": "docs",
   "description": "vgpu documentation site (geistdocs).",
-  "version": "0.0.1",
+  "version": "0.1.2",
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-ort-assets.mjs && node scripts/prepare-depth-models.mjs && node scripts/ingest-examples.mjs",
@@ -10,6 +10,8 @@
     "build": "next build",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
+    "$comment:typecheck": "`typecheck` needs a prior `build` (or at least `prebuild`): Next's generated route types (`.next/types`) and the fumadocs-mdx generated source collections are only written by the build/dev pipeline, and `tsc --noEmit` fails on missing generated modules without them.",
+    "typecheck": "tsc --noEmit",
     "ort:assets": "node scripts/prepare-ort-assets.mjs",
     "ort:assets:check": "node scripts/prepare-ort-assets.mjs --check",
     "depth:models": "node scripts/prepare-depth-models.mjs",
