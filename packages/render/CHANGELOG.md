@@ -5,6 +5,7 @@
 ### Patch Changes
 
 - @vgpu/core@0.3.0
+- @vgpu/core@0.3.0
 
 ## 0.1.7
 

@@ -4,6 +4,8 @@
 
 ### Patch Changes
 
+- Updated dependencies [b86fe6e]
+  - @vgpu/wgsl@0.3.0
 - Updated dependencies [1451232]
 - Updated dependencies [6ea8edf]
 - Updated dependencies [42bffb4]

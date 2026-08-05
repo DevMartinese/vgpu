@@ -12,6 +12,12 @@
 
 ### Patch Changes
 
+- Updated dependencies [b86fe6e]
+  - @vgpu/wgsl@0.3.0
+  - @vgpu/core@0.3.0
+  - @vgpu/adapter-mock@0.3.0
+  - @vgpu/adapter-node@0.3.0
+  - @vgpu/wgsl-std@0.3.0
 - Updated dependencies [1451232]
 - Updated dependencies [6ea8edf]
 - Updated dependencies [12b4efa]
