@@ -75,12 +75,20 @@ function destroyIdleDevice(): void {
 async function acquire(): Promise<GPUDevice> {
   let adapterNode: AdapterNodeModule;
   try {
-    // `@vgpu/adapter-node` is an *optional* peer dependency, imported lazily and through an
-    // indirect specifier on purpose: a static import would form a `wgsl -> adapter-node -> core ->
-    // wgsl` cycle that `tsc -b` rejects, and would pull a native dependency into every bundle that
-    // touches `resolveShader`. Never hoist this to module scope.
-    const specifier = "@vgpu/adapter-node";
-    adapterNode = (await import(specifier)) as AdapterNodeModule;
+    // `@vgpu/adapter-node` is an *optional* peer dependency, imported lazily and never hoisted to
+    // module scope: a static `import ... from` declaration would form a `wgsl -> adapter-node ->
+    // core -> wgsl` project-reference cycle that `tsc -b` rejects, and would pull a native
+    // dependency into every bundle that touches `resolveShader`.
+    //
+    // The specifier is kept a *literal* string (types resolved via the ambient module declared in
+    // `./adapter-node-ambient.d.ts`, which sidesteps the same project-reference cycle) rather than
+    // hidden behind a variable: `tsc`'s `rewriteRelativeImportExtensions` only leaves a dynamic
+    // `import()` argument untouched when it can prove, syntactically, that it's a literal and not a
+    // relative specifier. A variable indirection defeats that proof, so `tsc` wraps the call in its
+    // `__rewriteRelativeImportExtension` helper — which neither webpack nor Next's build-dependency
+    // cache scanner can statically analyse, producing a "Critical dependency"/"cache invalidation"
+    // warning in every consumer's build.
+    adapterNode = (await import("@vgpu/adapter-node")) as AdapterNodeModule;
   } catch (cause) {
     throw wgslErrorWithFix(
       "VGPU-WGSL-VALIDATE-ADAPTER-MISSING",
