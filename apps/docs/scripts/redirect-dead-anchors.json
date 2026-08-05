@@ -146,6 +146,14 @@
       "destination": "/docs/reference/wgsl/loader-vite#wgslviteplugin"
     },
     {
+      "source": "/packages/vgpu-wgsl-reflect-source/EntryPointInfo",
+      "destination": "/docs/reference/wgsl/reflect-source#entrypointinfo"
+    },
+    {
+      "source": "/packages/vgpu-wgsl-reflect-source/Reflection",
+      "destination": "/docs/reference/wgsl/reflect-source#reflection"
+    },
+    {
       "source": "/packages/vgpu-wgsl-runtime/ResolvedShader",
       "destination": "/docs/reference/wgsl/resolve-shader#resolvedshader"
     },
