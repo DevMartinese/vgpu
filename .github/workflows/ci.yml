@@ -142,6 +142,18 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # This suite loads the repo's own vitest.config.ts, which imports @vgpu/wgsl's Vite loader
+      # by *source path* (./packages/wgsl/src/...), not by package name. Vite's config-file
+      # bundler (a separate, alias-unaware esbuild pass that runs before the config it's loading
+      # can supply any resolve.alias) therefore parses that source file's contents directly — and
+      # since @vgpu/wgsl's validation device now imports the optional @vgpu/adapter-node peer dep
+      # via a literal specifier (so bundlers like webpack/Next can see it; see the wgsl-loader
+      # bundler tests and validation-device.ts for why), that literal is statically resolvable and
+      # esbuild tries to. @vgpu/adapter-node's package.json only exports a built dist/, so this
+      # needs it (and its own dependency chain, @vgpu/core <- @vgpu/wgsl) built first. A real
+      # consumer never hits this: they import the loader by package name, which esbuild always
+      # externalizes without reading its contents, so the dynamic import stays opaque to it.
+      - run: pnpm --filter @vgpu/adapter-node build
       - run: pnpm test packages/wgsl/tests/cache-key.test.ts
 
   wgsl-turbopack-smoke:
@@ -390,6 +402,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The vitest run below loads the repo's own vitest.config.ts, which imports @vgpu/wgsl's
+      # Vite loader by source path and therefore needs @vgpu/adapter-node (and its own dependency
+      # chain, @vgpu/core <- @vgpu/wgsl) built first. See the identical comment on
+      # wgsl-cachekey-determinism above for the full explanation.
+      - run: pnpm --filter @vgpu/adapter-node build
       - name: Validate authored controlled vocabulary
         run: node apps/docs/scripts/validate-example-vocabulary.mjs
       - name: Synchronize frozen embedded schemas
