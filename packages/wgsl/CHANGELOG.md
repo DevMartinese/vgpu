@@ -41,6 +41,16 @@
 
 ### Patch Changes
 
+- b86fe6e: Fix the lazy `@vgpu/adapter-node` import in the validation device loader so bundlers can see it's an
+  ordinary package specifier: it now uses a literal specifier (typed via a local ambient module
+  declaration) instead of a variable, so `tsc` no longer wraps it in its
+  `__rewriteRelativeImportExtension` helper. That wrapper was invisible to both webpack's module
+  parser and Next.js's build-dependency cache scanner, so every consumer that bundles the loader saw
+  two spurious warnings per build ("Critical dependency: the request of a dependency is an
+  expression" during the webpack ESM build-dependency scan, plus "Build dependencies behind this
+  expression are ignored and might cause incorrect cache invalidation"). The dynamic import still
+  only runs in Node and behaves identically at runtime.
+  - @vgpu/wgsl-std@0.3.0
 - 6ea8edf: Document that `@vgpu/wgsl/runtime` is ESM-only in the `resolveShader` reference. The `./runtime` subpath declares only an `import` condition, so calling it from a CommonJS entry point fails with Node's `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than a `VGPU-*` code — name the script `.mjs`/`.mts` or set `"type": "module"`.
 - 42bffb4: `resolveShader` no longer deletes a module-scope declaration when an unrelated function-scope local reuses its name. Import mangling tracked shadowing in a flat `Set<string>` of every local name seen so far, and that set was never scoped and never cleared: the first `let helper` in a nested block — or a parameter named `helper` on a completely different function, or a `for` loop variable — permanently stopped _every later_ `helper` token in the module from being rewritten. The declaration itself, emitted before the shadow, was still rewritten to `_vgsl_<hash>__helper`, so the real call site kept the bare name, declaration DCE correctly saw the mangled declaration as unreferenced and dropped it, and the shader failed to compile with `unresolved call target 'helper'`. Shadowing is now resolved lexically per token, so a local only hides a module symbol inside the block that introduced it.
 
