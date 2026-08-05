@@ -171,10 +171,20 @@ The cleanup function matters in development: React's strict mode mounts effects 
 
 ## Validate before you run the app
 
-Do not use `next dev` as your shader compiler. Check every `.wgsl` file — including pure helper modules — with the CLI, which resolves the same import graph the loader does and prints the reflection:
+**`next build`/`next dev` never validate WGSL — neither the webpack loader nor the Turbopack path, for
+leaf `.wgsl` files or for import graphs.** The loader/plugin call `resolveShader({ validate: false })`
+for import graphs (parsing, purity checks, DCE, mangling, and minification still run, but the
+device-backed check does not), and a leaf `.wgsl` file with no imports never calls `resolveShader()`
+at all. There is no loader/plugin option to opt into validation — `next build --webpack` and
+`next build` (Turbopack) both exit `0` and ship invalid WGSL unchanged. Do not use `next dev`/
+`next build` as your shader compiler.
+
+The validation gate is `vgpu check --require-validation`, run in CI or as a pre-commit hook. Check
+every `.wgsl` file — including pure helper modules — with the CLI, which resolves the same import
+graph the loader does, prints the reflection, and actually validates against a WebGPU device:
 
 ```sh
-npx vgpu check src/app/plasma.wgsl
+npx vgpu check src/app/plasma.wgsl --require-validation
 ```
 
 Then prove the pixels in Node instead of squinting at a browser tab: [Getting started](getting-started.docs.md) shows the headless render-and-read-pixels loop, and [The default workflow for developing shaders with vgpu](shader-workflow.docs.md) is the full playbook.

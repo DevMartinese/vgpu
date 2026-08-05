@@ -6,8 +6,8 @@ description: >-
   and /perf only as slim tooling subpaths. Bundles performance guides and the API
   reference; load one doc at a time.
 vgpuVersion: 0.3.0-rc.0
-gitSha: b3d118e262950d01437b7048ab32a0cd3c89f7b4
-generatedAt: 2026-08-04T22:43:37.534Z
+gitSha: 5070d7cdc17fce91ad898e674afff5eab327d47f
+generatedAt: 2026-08-05T02:36:44.654Z
 ---
 
 # vgpu
@@ -68,7 +68,7 @@ Writing or optimizing a shader? Read **performance-model** first, then the rest 
 
 ## API reference
 
-255 symbols across 19 packages — open `references/<package>/<file>` or `npx -y vgpu docs cat <symbol>`:
+258 symbols across 20 packages — open `references/<package>/<file>` or `npx -y vgpu docs cat <symbol>`:
 
 - `@vgpu/adapter-node` — createNodeAdapter, createNodeDevice
 - `@vgpu/render/edit` — bevel, bridge, dissolveEdges, dissolveFaces, dissolveVertices, EdgeView, EditableMesh, EditableMeshValue, ElementDomain, ElementSelection, ElementSet, extrude, FaceView, fillHole, gridFill, healManifold, inset, KernelHandle, loopCut, mergeByDistance, MeshEditError, MeshEditWarning, recomputeNormals, ScoredSelection, subdivideEdges, subdivideFaces, toEditable, toEditableWithDiagnostics, VertexView
@@ -84,6 +84,7 @@ Writing or optimizing a shader? Read **performance-model** first, then the rest 
 - `@vgpu/wgsl-std/noise/simplex` — fbmSimplex2d, fbmSimplex3d, simplex2d, simplex3d
 - `@vgpu/wgsl/loader-vite` — transformWgsl, ViteLoadResult, wgslVitePlugin
 - `@vgpu/wgsl/loader-webpack` — wgslWebpackLoader
+- `@vgpu/wgsl/reflect-source` — EntryPointInfo, Reflection, reflectSource
 - `@vgpu/wgsl/runtime` — ResolvedShader, ResolveOptions, resolveShader, SourceMap, WGSLAst, WGSLModule
 - `vgpu` — Bundle, BundleOptions, BundleRecorder, clock, Clock, Compute, ComputeOptions, Draw, DrawCallOptions, DrawLayoutOptions, DrawOptions, Effect, EffectOptions, Frame, FrameLoopHandle, FramePass, FramePassOptions, FrameRunner, Geometry, GeometryLike, Gpu, init, InitOptions, PingPongStorage, PingPongTargets, SharedUniforms, StorageAccess, StorageBuffer, Surface, SurfaceOptions, SurfaceResizeEvent, Target, TargetOptions, TargetTextureOptions, Timer, TimerSpan, Uniform, UniformOptions, Visibility, VisibilityOptions, VisibilityQuery
 - `vgpu/core` — bind, Buffer, BufferOptions, createBindGroup, createBindGroupLayout, CreateDeviceOptions, createPipelineLayout, createRenderBundle, createSampler, Device, DeviceOptions, Queue, RenderBundleOptions, RenderBundleRecorder, ScalarUniformType, StorageBuffer, StorageBufferOptions, StructuredUniform, StructuredUniformOptions, Texture, TextureOptions, Uniform, UniformField, UniformLayout, UniformLayoutInfo, UniformOptions, UniformPool, UniformPoolOptions, UniformSlot, UniformValues, ValidationError, VectorUniformInput, VGPUAdapter, VGPUError, WgslUniformType
