@@ -120,7 +120,7 @@ Not using a bundler at all — plain Node, a script, or a test runner? Resolve
 `.wgsl` files and their imports yourself:
 
 ```sh
-vgpu docs cat no-bundler.md   # resolveShader(), headless Node rendering, the ESM-only gotcha
+vgpu docs cat no-bundler.md   # resolveShader(), headless Node rendering, ESM + CommonJS usage
 ```
 
 Rendering an actual 3D scene rather than a fullscreen effect? Depth lives on an

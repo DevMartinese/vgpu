@@ -215,9 +215,9 @@ test("routes the dogfood queries to the page that answers them", () => {
     ["shader in separate file", "/guides/no-bundler.docs.md"],
     ["shader in its own file", "/guides/no-bundler.docs.md"],
     ["headless node script", "/guides/no-bundler.docs.md"],
-    // The ESM-only friction: the fix was renaming the script to .mts, found only by guessing.
-    ["esm only", "/guides/no-bundler.docs.md"],
-    ["ERR_PACKAGE_PATH_NOT_EXPORTED", "/guides/no-bundler.docs.md"],
+    // require() from CJS works for @vgpu/wgsl/runtime; the guide documents both module systems.
+    ["commonjs", "/guides/no-bundler.docs.md"],
+    ["cjs", "/guides/no-bundler.docs.md"],
     // resolveShader keeps resolving to its own reference page, not the new guide.
     ["resolveShader", "/@vgpu/wgsl/runtime/resolve-shader.docs.md"],
     // A 3D scene needs an offscreen depth target composited to the canvas; that recipe used to be
@@ -319,8 +319,8 @@ test("the no-bundler and two-pass guides are reachable by cat and from getting-s
   expect(gettingStarted).toContain("vgpu docs cat two-pass-rendering.md");
   expect(gettingStarted).toContain("[Using vgpu without a bundler](no-bundler.docs.md)");
 
-  // The ESM-only gotcha cost the dogfood run ~10 minutes; it belongs on the symbol page too.
-  expect(success(["docs", "cat", "resolveShader"])).toContain("ERR_PACKAGE_PATH_NOT_EXPORTED");
+  // require() reachability was a dogfood surprise; it belongs on the symbol page too.
+  expect(success(["docs", "cat", "resolveShader"])).toContain("Works from ESM and CommonJS");
 });
 
 // `docs find` stops at the first non-empty step (symbol -> keyword/title -> body), so a guide that
