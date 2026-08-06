@@ -12,5 +12,5 @@ Usage:
 
 Canonical agent invocation: npx vgpu examples ...
 
-macOS uses a per-invocation memory cache; --offline is unavailable.
+macOS and Windows use a per-invocation memory cache; --offline is unavailable.
 `;

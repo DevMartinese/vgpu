@@ -14,7 +14,7 @@ const safe=s=>{if(!/^[a-z0-9.-]+$/.test(s))throw integrity('Invalid cache key');
 export function cacheRoot(env=process.env){return join(env.VGPU_CACHE_DIR||env.XDG_CACHE_HOME||join(homedir(),'.cache'),'vgpu','examples');}
 
 export class ExamplesCache{
- constructor(root=cacheRoot(),{platform=process.platform,persistent=platform==='linux'}={}){this.root=resolve(root);this.platform=platform;this.persistent=persistent;this.memory=!persistent&&platform==='darwin'?new Map():undefined;}
+ constructor(root=cacheRoot(),{platform=process.platform,persistent=platform==='linux'}={}){this.root=resolve(root);this.platform=platform;this.persistent=persistent;this.memory=!persistent&&['darwin','win32'].includes(platform)?new Map():undefined;}
  discoveryPath(){return join(this.root,'discovery.json');}
  metaPath(){return join(this.root,'discovery.meta.json');}
  revisionDir(rev){return join(this.root,'v1',safe(rev));}

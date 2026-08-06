@@ -56,6 +56,16 @@ test("selects v1 beside v2, searches without source fetch, cats verified bytes, 
   else{expect(offline.code).toBe(4);expect(JSON.parse(offline.stderr!).error.code).toBe("VGPU-EXAMPLES-NETWORK")}
 });
 
+test.each(['darwin','win32'])("runs online commands with a per-invocation cache on %s",async platform=>{
+  const f=await fixture(),env=await testEnv();
+  const cat=await runExamples(["cat","raymarched-fractal","example.ts","--base-url",f.origin],{version:"0.1.6",env,platform});
+  expect(cat).toMatchObject({code:0,stdout:source});
+  expect(await runExamples(["cache","path"],{env,platform})).toEqual({code:0,stdout:"memory\n"});
+  expect(await runExamples(["cache","clear"],{env,platform})).toEqual({code:0,stdout:'{"cleared":true,"path":"memory"}\n'});
+  const offline=await runExamples(["show","raymarched-fractal","--offline"],{version:"0.1.6",env,platform,fetchImpl:()=>{throw new Error("socket opened")}});
+  expect(offline.code).toBe(4);expect(JSON.parse(offline.stderr!).error.message).toContain(platform==='win32'?'Windows':'macOS');
+});
+
 test("conditionally revalidates with 304 and rejects a 304 when the pointer hash changes", async()=>{
   const f=await fixture({etag:true}),env=await testEnv();
   expect((await runExamples(["search","raymarching","--base-url",f.origin],{version:"0.1.6",env})).code).toBe(0);

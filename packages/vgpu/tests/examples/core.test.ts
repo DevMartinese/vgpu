@@ -76,3 +76,14 @@ test("portable pull fallback publishes nested files", async () => {
   await pullExample(client, manifest, destination, { platform: "darwin" } as any);
   expect(await readFile(join(destination, "nested/a.ts"), "utf8")).toBe("new\n");
 });
+
+test("Windows pull remains unsupported without downloading files", async () => {
+  let downloaded = false;
+  const manifest = { revision: hash, files: [{ path: "a.ts", size: 1, sha256: hash }] } as any;
+  const client = { getFile: async () => { downloaded = true; return Buffer.from("x"); } } as any;
+  await expect(pullExample(client, manifest, "unused", { platform: "win32" } as any)).rejects.toMatchObject({
+    code: "VGPU-EXAMPLES-FILESYSTEM",
+    message: expect.stringContaining("unsupported on win32"),
+  });
+  expect(downloaded).toBe(false);
+});
