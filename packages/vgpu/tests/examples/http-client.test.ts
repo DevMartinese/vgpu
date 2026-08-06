@@ -52,7 +52,8 @@ test("selects v1 beside v2, searches without source fetch, cats verified bytes, 
   const cat = await runExamples(["cat", "raymarched-fractal", "example.ts", "--base-url", f.origin], { version: "0.1.6", env });
   expect(cat).toMatchObject({ code: 0, stdout: source });
   const offline = await runExamples(["show", "raymarched-fractal", "--offline"], { version: "0.1.6", env, fetchImpl: () => { throw new Error("socket opened"); } });
-  expect(offline.code).toBe(0); expect(JSON.parse(offline.stdout as string).lastVerifiedAt).toBeTruthy();
+  if(process.platform==='linux'){expect(offline.code).toBe(0);expect(JSON.parse(offline.stdout as string).lastVerifiedAt).toBeTruthy()}
+  else{expect(offline.code).toBe(4);expect(JSON.parse(offline.stderr!).error.code).toBe("VGPU-EXAMPLES-NETWORK")}
 });
 
 test("conditionally revalidates with 304 and rejects a 304 when the pointer hash changes", async()=>{

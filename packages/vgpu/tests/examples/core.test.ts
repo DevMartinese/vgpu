@@ -67,3 +67,12 @@ test("pull rejects a symlink destination", async () => {
   const manifest = { revision: hash, files: [{ path: "a.ts", size: 1, sha256: hash }] } as any;
   await expect(pullExample({ getFile: async () => Buffer.from("x") } as any, manifest, join(root, "out"), { force: true })).rejects.toMatchObject({ exitCode: 7 });
 });
+
+test("portable pull fallback publishes nested files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "examples-pull-portable-"));
+  const destination = join(root, "example");
+  const manifest = { revision: hash, files: [{ path: "nested/a.ts", size: 4, sha256: hash }] } as any;
+  const client = { getFile: async () => Buffer.from("new\n") } as any;
+  await pullExample(client, manifest, destination, { platform: "darwin" } as any);
+  expect(await readFile(join(destination, "nested/a.ts"), "utf8")).toBe("new\n");
+});

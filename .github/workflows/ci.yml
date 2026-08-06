@@ -154,6 +154,8 @@ jobs:
       # consumer never hits this: they import the loader by package name, which esbuild always
       # externalizes without reading its contents, so the dynamic import stays opaque to it.
       - run: pnpm --filter @vgpu/adapter-node build
+      - name: Test examples CLI filesystem portability
+        run: pnpm exec vitest run packages/vgpu/tests/examples
       - run: pnpm test packages/wgsl/tests/cache-key.test.ts
 
   wgsl-turbopack-smoke:
