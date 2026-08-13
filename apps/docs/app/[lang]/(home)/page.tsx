@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { AgentCommandSection } from "./components/agent-command-section";
 import { DocsLinksSection } from "./components/docs-links-section";
 import { ExamplesSection } from "./components/examples-section";
 import { Hero } from "./components/hero";
-import { PillarsSection } from "./components/pillars-section";
+import { OneShaderEverySurfaceSection } from "./components/one-shader-every-surface-section";
+import { ShaderCodeScalesSection } from "./components/shader-code-scales-section";
 import "./hero-solo.css";
 
 // Landing metadata + body copy carried over unchanged from the old
@@ -22,8 +24,10 @@ const HomePage = () => (
   <div>
     <Hero />
     <main className="mx-auto max-w-6xl px-6 pb-16 lg:px-12 lg:pb-20">
+      <OneShaderEverySurfaceSection />
+      <ShaderCodeScalesSection />
+      <AgentCommandSection />
       <ExamplesSection />
-      <PillarsSection />
       <DocsLinksSection />
     </main>
   </div>

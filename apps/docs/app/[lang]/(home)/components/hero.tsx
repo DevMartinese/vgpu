@@ -66,7 +66,7 @@ export function Hero() {
         className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-10 px-6 lg:gap-12"
       >
         <h1
-          className="pointer-events-auto max-w-[798px] text-center font-light leading-[1.25] text-white"
+          className="pointer-events-auto max-w-[798px] text-pretty text-center font-light leading-[1.25] text-white"
           /* Sized off the viewport HEIGHT, not the width: the tagline has
              to stay inside the black hole's shadow, and the shadow is a
              circle scaled by the shorter axis. 2.4svh = 21.6px at 900px

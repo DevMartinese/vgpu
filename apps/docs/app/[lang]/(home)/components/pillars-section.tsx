@@ -30,16 +30,16 @@ const pillars = [
 
 export function PillarsSection() {
   return (
-    <section className="mb-24">
-      <h2 className="mb-10 text-2xl text-gray-1000 md:text-3xl">Why vgpu</h2>
+    <section className="mb-36">
+      <h2 className="mb-10 text-pretty text-2xl text-gray-1000 md:text-3xl">Why vgpu</h2>
       <div className="grid gap-4 md:grid-cols-3">
         {pillars.map((pillar) => (
           <Card key={pillar.title} className="overflow-hidden rounded-lg py-0">
             <CardHeader className="border-b px-5 py-4">
-              <CardTitle className="text-sm font-normal text-gray-1000">{pillar.title}</CardTitle>
+              <CardTitle className="text-pretty text-sm font-normal text-gray-1000">{pillar.title}</CardTitle>
             </CardHeader>
             <CardContent className="p-5">
-              <p className="text-sm leading-relaxed text-gray-900">{pillar.description}</p>
+              <p className="text-pretty text-sm leading-relaxed text-gray-900">{pillar.description}</p>
               <div className="mt-5 whitespace-normal break-words rounded-md border border-gray-200 bg-gray-100 px-3 py-2 font-mono text-sm text-gray-900">
                 {pillar.code}
               </div>

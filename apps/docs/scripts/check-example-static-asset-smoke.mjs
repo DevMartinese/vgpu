@@ -13,7 +13,7 @@
  * proxy while `/examples/[slug]` itself (a real, localized page) rendered fine.
  *
  * This is the 4th sibling of this exact class in this proxy (TGEIST-06 `.well-known`, TGEIST-08
- * `/preview/**`, TGEIST-ML-ASSETS `models/`/`ort/`, this one `examples/**.{png,jpg,...}`) -- see
+ * `/preview/**`, TGEIST-ML-ASSETS `models/`/`ort/`, this one `examples/**.{png,jpg,mp4,...}`) -- see
  * the ANCHOR TGEIST-EXAMPLES-STATIC comment in `proxy.ts` for the fix itself.
  *
  * Starts `next start` on the production build (same pattern as `check-ml-asset-smoke.mjs`) and
@@ -65,7 +65,8 @@ function parseArgs(argv) {
   const options = { baseUrl: null };
   for (const arg of argv) {
     const eq = arg.indexOf("=");
-    const [key, value] = eq === -1 ? [arg, ""] : [arg.slice(0, eq), arg.slice(eq + 1)];
+    const [key, value] =
+      eq === -1 ? [arg, ""] : [arg.slice(0, eq), arg.slice(eq + 1)];
     if (key === "--base-url") options.baseUrl = value.replace(/\/$/u, "");
     else {
       console.error(`unknown argument: ${arg}`);
@@ -96,7 +97,12 @@ function walkExamplesDir(dir) {
 
 function exampleStaticAssets() {
   if (!existsSync(EXAMPLES_DIR)) {
-    throw new Error(`${relative(APP_ROOT, EXAMPLES_DIR)} is missing -- expected committed example assets.`);
+    throw new Error(
+      `${relative(
+        APP_ROOT,
+        EXAMPLES_DIR
+      )} is missing -- expected committed example assets.`
+    );
   }
   return walkExamplesDir(EXAMPLES_DIR).map((diskPath) => ({
     // `relative()` returns OS-native separators; normalize to `/` for URL paths (this gate only
@@ -131,7 +137,9 @@ async function waitForServer(baseUrl, child) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (child && child.exitCode !== null) {
-      throw new Error(`\`next start\` exited with code ${child.exitCode} before becoming ready`);
+      throw new Error(
+        `\`next start\` exited with code ${child.exitCode} before becoming ready`
+      );
     }
     try {
       const response = await fetch(`${baseUrl}/docs`, { redirect: "manual" });
@@ -141,15 +149,23 @@ async function waitForServer(baseUrl, child) {
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`server at ${baseUrl} did not become ready within ${READY_TIMEOUT_MS}ms`);
+  throw new Error(
+    `server at ${baseUrl} did not become ready within ${READY_TIMEOUT_MS}ms`
+  );
 }
 
 async function startServer() {
   const bin = join(APP_ROOT, "node_modules/.bin/next");
-  if (!existsSync(bin)) throw new Error(`cannot find the next binary at ${bin} -- run pnpm install`);
+  if (!existsSync(bin))
+    throw new Error(
+      `cannot find the next binary at ${bin} -- run pnpm install`
+    );
   if (!existsSync(join(APP_ROOT, ".next"))) {
     throw new Error(
-      `no production build at ${join(APP_ROOT, ".next")} -- this gate smokes a real server, run \`pnpm --filter docs build\` first`,
+      `no production build at ${join(
+        APP_ROOT,
+        ".next"
+      )} -- this gate smokes a real server, run \`pnpm --filter docs build\` first`
     );
   }
   const port = await freePort();
@@ -173,31 +189,44 @@ async function startServer() {
 }
 
 async function checkAsset(baseUrl, asset) {
-  const response = await fetch(`${baseUrl}${asset.urlPath}`, { redirect: "manual" });
+  const response = await fetch(`${baseUrl}${asset.urlPath}`, {
+    redirect: "manual",
+  });
   const rewrite = response.headers.get("x-middleware-rewrite");
   const body = new Uint8Array(await response.arrayBuffer());
   const expected = readFileSync(asset.diskPath);
 
   const problems = [];
-  if (response.status !== 200) problems.push(`status ${response.status} (expected 200)`);
-  if (rewrite) problems.push(`x-middleware-rewrite: ${rewrite} (i18n proxy rewrote this asset)`);
+  if (response.status !== 200)
+    problems.push(`status ${response.status} (expected 200)`);
+  if (rewrite)
+    problems.push(
+      `x-middleware-rewrite: ${rewrite} (i18n proxy rewrote this asset)`
+    );
   if (body.length !== expected.length || sha256(body) !== sha256(expected)) {
     problems.push(
-      `body mismatch (got ${body.length} bytes / sha256 ${sha256(body)}, expected ${expected.length} bytes / sha256 ${sha256(expected)})`,
+      `body mismatch (got ${body.length} bytes / sha256 ${sha256(
+        body
+      )}, expected ${expected.length} bytes / sha256 ${sha256(expected)})`
     );
   }
   return problems;
 }
 
 async function checkPageStillProxied(baseUrl, slug) {
-  const response = await fetch(`${baseUrl}/examples/${slug}`, { redirect: "manual" });
+  const response = await fetch(`${baseUrl}/examples/${slug}`, {
+    redirect: "manual",
+  });
   const rewrite = response.headers.get("x-middleware-rewrite");
   const problems = [];
-  if (response.status !== 200) problems.push(`status ${response.status} (expected 200)`);
+  if (response.status !== 200)
+    problems.push(`status ${response.status} (expected 200)`);
   if (!rewrite || !rewrite.startsWith(`/en/examples/${slug}`)) {
     problems.push(
-      `x-middleware-rewrite: ${rewrite ?? "(none)"} (expected /en/examples/${slug} -- the exclusion pattern for ` +
-        "static example assets must not swallow the [slug] page route itself)",
+      `x-middleware-rewrite: ${
+        rewrite ?? "(none)"
+      } (expected /en/examples/${slug} -- the exclusion pattern for ` +
+        "static example assets must not swallow the [slug] page route itself)"
     );
   }
   return problems;
@@ -243,11 +272,13 @@ async function main() {
       `\n${failures.length}/${total} example static asset check(s) failed the non-localized smoke check.\n` +
         "If this is `x-middleware-rewrite` on an asset, the i18n proxy matcher in proxy.ts regressed the " +
         "`examples/**.{png,jpg,...}` exclusion (TGEIST-EXAMPLES-STATIC). If it's a missing rewrite on a " +
-        "page route, the exclusion pattern became too broad and started swallowing pages.",
+        "page route, the exclusion pattern became too broad and started swallowing pages."
     );
     process.exitCode = 1;
   } else {
-    console.log(`\nExample static asset smoke check passed: ${total} check(s), all correct.`);
+    console.log(
+      `\nExample static asset smoke check passed: ${total} check(s), all correct.`
+    );
   }
 }
 
