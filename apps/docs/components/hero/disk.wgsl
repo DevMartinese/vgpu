@@ -35,6 +35,12 @@ export struct DiskLook {
   density: f32,
   /** Relativistic beaming strength. */
   doppler: f32,
+  /** Scale of the slow, low-frequency cloud layer. */
+  cloudScale: f32,
+  /** Cloud rotation rate relative to the disk's rigid reference rotation. */
+  cloudSpeed: f32,
+  /** Multiplicative contrast of the cloud layer; 0 disables it. */
+  cloudStrength: f32,
   /** spare0: lensed-arc lift. Extra emission for face-on (lensed) disk pixels. Offset around +0. */
   spare0: f32,
   /** spare1: spiral pitch offset. Logarithmic winding of the filaments. Offset around +0. */
@@ -446,8 +452,9 @@ export fn shadeDisk(
 
   // Where the code's own criterion says the lobes ARE the same field, the second
   // one is pure waste: the cross-dissolve is blending a field with itself, so
-  // evaluating the dominant lobe alone gives the same image for half the noise
-  // fetches. Measured on the shipped look at 1280x720: `rho > 0.98` on 40.2% of
+  // evaluating one field at their continuously merged coordinate gives the
+  // same image for half the noise fetches. Measured on the shipped look at
+  // 1280x720: `rho > 0.98` on 40.2% of
   // disk pixels, and 14.37 -> 11.51 executed noise fetches per disk pixel,
   // i.e. -19.9% of the disk's noise work (3.045 -> 2.439 per frame pixel).
   // This is per-pixel DATA divergence in screen-coherent radial bands around
@@ -461,10 +468,14 @@ export fn shadeDisk(
   // single-lobe path, where `blended` still carries the field's full deviation.
   var lobeVariance = 1.0;
   if (rho > 0.98) {
-    // The lower-weight lobe contributes a scaled copy of the same field, and at
-    // the reset it contributes nothing at all: take the dominant one.
-    let angleDominant = select(angle1, angle0, w0 >= w1);
-    blended = smokeField(noiseTex, noiseSampler, lattice, angleDominant, radius, params);
+    // These two coordinates sample the same local field, so one evaluation is
+    // enough — but the coordinate itself must follow the crossfade. Selecting
+    // the dominant lobe used to switch abruptly at w0 == 0.5 (twice per shear
+    // period), producing a visible pop even though the samples were highly
+    // correlated. Interpolating the coordinate is continuous; each sawtooth
+    // reset still happens only while that lobe's weight is exactly zero.
+    let angleMerged = mix(angle1, angle0, w0);
+    blended = smokeField(noiseTex, noiseSampler, lattice, angleMerged, radius, params);
   } else {
     let lobe0 = smokeField(noiseTex, noiseSampler, lattice, angle0, radius, params);
     let lobe1 = smokeField(noiseTex, noiseSampler, lattice, angle1, radius, params);
@@ -476,6 +487,40 @@ export fn shadeDisk(
     lobeVariance = sqrt(max(w0 * w0 + w1 * w1 + 2.0 * rho * w0 * w1, 0.25));
   }
   var field = FIELD_MEAN + (blended.x - FIELD_MEAN) / lobeVariance;
+
+  // --- slow cloud layer ---------------------------------------------------
+  // A second, low-frequency field moves rigidly at a different rate and
+  // MULTIPLIES the filament field. Addition would merely brighten or darken
+  // the whole disk; multiplication makes large cloud masses reveal and erase
+  // different groups of threads as the two patterns slide through each other.
+  //
+  // The cloud clock is only a rigid angular rotation, so wrapping it by 2*pi
+  // is exact in the cylindrical cos/sin embedding and needs no recycled shear
+  // or crossfade. Two octaves are enough at this scale and add only two noise
+  // fetches per shaded disk layer.
+  let cloudRate = omegaRef * look.cloudSpeed;
+  let cloudRigid = fract(time * cloudRate / TWO_PI) * TWO_PI;
+  let cloudAngle = azimuth - cloudRigid + 0.32 * log(radius / ISCO);
+  let cloudScale = max(look.cloudScale, 0.05);
+  let cloudRaw = streakFbm(
+    noiseTex,
+    noiseSampler,
+    lattice,
+    cloudAngle,
+    radius,
+    cloudScale,
+    cloudScale * 0.34,
+    2,
+    dAngle,
+    dRadius,
+    1.72,
+    1.86,
+    211.7,
+  );
+  let cloud = smoothstep(0.28, 0.72, cloudRaw);
+  let cloudStrength = clamp(look.cloudStrength, 0.0, 0.95);
+  let cloudMultiplier = mix(1.0 - cloudStrength, 1.0 + cloudStrength, cloud);
+  field *= cloudMultiplier;
 
   // --- density / emissivity split ------------------------------------------
   let rimNoise = blended.y;

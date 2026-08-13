@@ -1,1 +1,50 @@
 @import "./styles/geistdocs.css";
+
+:root {
+  --card-radius: 0.5rem;
+  --header-control-radius: 0.375rem;
+  --interactive-tab-hover: rgb(0 0 0 / 3%);
+  --interactive-tab-active: rgb(0 0 0 / 6%);
+  --interactive-card-hover: rgb(0 0 0 / 5%);
+  --interactive-card-hover-border: rgb(0 0 0 / 20%);
+}
+
+.dark {
+  --interactive-tab-hover: rgb(255 255 255 / 4%);
+  --interactive-tab-active: rgb(255 255 255 / 8%);
+  --interactive-card-hover: rgb(255 255 255 / 5%);
+  --interactive-card-hover-border: rgb(255 255 255 / 40%);
+}
+
+@layer components {
+  .interactive-card {
+    @apply border border-gray-200 bg-transparent transition-colors;
+    border-radius: var(--card-radius);
+  }
+
+  .interactive-card:hover {
+    border-color: var(--interactive-card-hover-border);
+    background-color: var(--interactive-card-hover);
+  }
+
+  .interactive-tab:hover {
+    background-color: var(--interactive-tab-hover);
+  }
+
+  .interactive-tab[aria-selected="true"] {
+    background-color: var(--interactive-tab-active);
+  }
+}
+
+@layer utilities {
+  .rounded-card {
+    border-radius: var(--card-radius);
+  }
+}
+
+/* Search and Ask AI stay one step tighter than content cards. This is
+   unlayered so it overrides the package's `rounded-md` utility without forking
+   the navbar; `shadow-none` is the class shared only by those header controls. */
+header [data-slot="button"].shadow-none {
+  border-radius: var(--header-control-radius);
+}

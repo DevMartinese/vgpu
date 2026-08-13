@@ -91,7 +91,9 @@ export fn cameraRay(
   pitch: f32,
   orbitRadius: f32,
   fov: f32,
+  centerX: f32,
   centerY: f32,
+  roll: f32,
 ) -> CameraRay {
   let aspect = resolution.x / max(resolution.y, 1.0);
   // ORIENTATION — vgpu's generated fullscreen vertex shader emits uv (0,0) at the
@@ -102,9 +104,18 @@ export fn cameraRay(
   // is the single place the convention is converted, and it fixes the browser
   // and the node harness at once. See gbuffer.md.
   let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-  // centerY shifts the image vertically, in NDC units: positive moves the black
-  // hole UP on screen. Kept at 0 now that the canvas covers the whole hero.
-  let screen = (ndc - vec2f(0.0, centerY)) * vec2f(aspect, 1.0);
+  // Shift first so the roll pivots around the black hole rather than the centre
+  // of the viewport. This makes off-axis close-ups behave like a real camera.
+  // Correct horizontal screen distance before rotating. A roll in raw NDC
+  // would rotate a 16:9 rectangle as though it were square and turn the
+  // circular shadow into an ellipse.
+  let screenPlane = (ndc - vec2f(centerX, centerY)) * vec2f(aspect, 1.0);
+  let cosine = cos(roll);
+  let sine = sin(roll);
+  let screen = vec2f(
+    screenPlane.x * cosine - screenPlane.y * sine,
+    screenPlane.x * sine + screenPlane.y * cosine,
+  );
 
   let clampedPitch = clamp(pitch, -1.319, 1.319);
   let cameraPosition = vec3f(

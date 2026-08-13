@@ -52,7 +52,9 @@ struct Refine {
   orbitRadius: f32,
   diskOuter: f32,
   fov: f32,
+  centerX: f32,
   centerY: f32,
+  roll: f32,
 }
 
 @group(0) @binding(0) var<uniform> refine: Refine;
@@ -180,7 +182,17 @@ struct RefineOut {
 
   // The pixel's own centre ray. Traced nowhere — only its conserved impact
   // parameter `b = |r x v|` is wanted, for the near-critical test below.
-  let centerRay = cameraRay(uv, refine.resolution, refine.yaw, refine.pitch, refine.orbitRadius, refine.fov, refine.centerY);
+  let centerRay = cameraRay(
+    uv,
+    refine.resolution,
+    refine.yaw,
+    refine.pitch,
+    refine.orbitRadius,
+    refine.fov,
+    refine.centerX,
+    refine.centerY,
+    refine.roll,
+  );
   let impactParameter = length(cross(centerRay.position, centerRay.velocity));
 
   // --- band detection ---------------------------------------------------------
@@ -258,7 +270,17 @@ struct RefineOut {
     for (var sx = 0; sx < SUB_STEPS; sx++) {
       let offset = (vec2f(f32(sx), f32(sy)) + vec2f(0.5)) / f32(SUB_STEPS);
       let subUv = (vec2f(texel) + offset) / refine.resolution;
-      let ray = cameraRay(subUv, refine.resolution, refine.yaw, refine.pitch, refine.orbitRadius, refine.fov, refine.centerY);
+      let ray = cameraRay(
+        subUv,
+        refine.resolution,
+        refine.yaw,
+        refine.pitch,
+        refine.orbitRadius,
+        refine.fov,
+        refine.centerX,
+        refine.centerY,
+        refine.roll,
+      );
       let traced = traceRay(ray.position, ray.velocity, refine.diskOuter, escapeRadius);
       if (traced.hitCount > 0) {
         let radius = length(traced.hit1Plane);

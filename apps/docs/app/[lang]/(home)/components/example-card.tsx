@@ -1,6 +1,7 @@
-import Image from 'next/image';
-import DynamicLink from 'fumadocs-core/dynamic-link';
-import type { ExampleMeta } from '@/lib/example-meta';
+import Image from "next/image";
+import DynamicLink from "fumadocs-core/dynamic-link";
+import type { ExampleMeta } from "@/lib/example-meta";
+import { cn } from "@/lib/utils";
 
 interface ExampleCardProps {
   example: ExampleMeta;
@@ -17,7 +18,7 @@ export function ExampleCard({ example }: ExampleCardProps) {
   return (
     <DynamicLink
       href={`/[lang]/examples/${example.slug}`}
-      className="group block overflow-hidden rounded-lg border border-gray-200 bg-gray-100 transition-all hover:border-gray-300 hover:bg-gray-200"
+      className={cn("interactive-card block overflow-hidden")}
     >
       <div className="relative aspect-video bg-black">
         {example.thumbnail ? (
@@ -34,10 +35,12 @@ export function ExampleCard({ example }: ExampleCardProps) {
         )}
       </div>
       <div className="p-4">
-        <h3 className="mb-2 text-lg font-semibold text-gray-1000 transition-colors group-hover:text-blue-900">
+        <h3 className="mb-2 text-pretty text-lg font-semibold text-gray-1000">
           {example.title}
         </h3>
-        <p className="line-clamp-2 text-sm leading-relaxed text-gray-900">{example.description}</p>
+        <p className="line-clamp-2 text-pretty text-sm leading-relaxed text-gray-900">
+          {example.description}
+        </p>
       </div>
     </DynamicLink>
   );

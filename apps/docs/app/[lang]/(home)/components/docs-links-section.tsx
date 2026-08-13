@@ -1,29 +1,44 @@
-import DynamicLink from 'fumadocs-core/dynamic-link';
-import { InlineCode } from './inline-code';
+import DynamicLink from "fumadocs-core/dynamic-link";
+import { cn } from "@/lib/utils";
+import { InlineCode } from "./inline-code";
 
 // Same copy as the old landing (apps/docs/app/page.tsx:docLinks).
 const docLinks: [href: string, title: string, description: string][] = [
-  ['/docs/get-started', 'Getting Started', 'Install `vgpu` and render with `init()`.'],
-  ['/docs/concepts', 'Core Concepts', 'Learn Gpu, set(), targets, frames, bundles, and adapters.'],
-  ['/docs/reference', 'API Reference', 'Package map and generated topic pages.'],
-  ['/examples', 'Examples', 'Live WebGPU demos with read-only source views.'],
+  [
+    "/docs/get-started",
+    "Getting Started",
+    "Install `vgpu` and render with `init()`.",
+  ],
+  [
+    "/docs/concepts",
+    "Core Concepts",
+    "Learn Gpu, set(), targets, frames, bundles, and adapters.",
+  ],
+  [
+    "/docs/reference",
+    "API Reference",
+    "Package map and generated topic pages.",
+  ],
+  ["/examples", "Examples", "Live WebGPU demos with read-only source views."],
 ];
 
 export function DocsLinksSection() {
   return (
     <section className="mb-24">
-      <h2 className="mb-10 text-2xl text-gray-1000 md:text-3xl">Explore the Docs</h2>
+      <h2 className="mb-10 text-pretty text-2xl text-gray-1000 md:text-3xl">
+        Explore the Docs
+      </h2>
       <div className="grid gap-4 md:grid-cols-2">
         {docLinks.map(([href, title, description]) => (
           <DynamicLink
             key={href}
             href={`/[lang]${href}`}
-            className="group rounded-lg border border-gray-200 bg-gray-100 p-6 transition-all hover:border-gray-300"
+            className={cn("interactive-card p-6")}
           >
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-gray-1000 transition-colors group-hover:text-blue-900">{title} →</h3>
+              <h3 className="text-pretty text-gray-1000">{title} →</h3>
             </div>
-            <p className="text-sm text-gray-900">
+            <p className="text-pretty text-sm text-gray-900">
               <InlineCode text={description} />
             </p>
           </DynamicLink>
