@@ -4,7 +4,7 @@ import { HeroTabs } from './hero-tabs';
 import '../hero-light-invert.css';
 
 const geistSerif = localFont({
-  src: './GeistSerifV0.2-Regular.otf',
+  src: './geist-serif-v0.2-regular.otf',
   weight: '400',
   style: 'normal',
 });
