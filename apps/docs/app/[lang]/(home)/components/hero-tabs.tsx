@@ -92,7 +92,7 @@ export function HeroTabs() {
       <div
         role="tablist"
         aria-label="Setup option"
-        className="flex items-center justify-center text-[15px] leading-none lg:text-[16px]"
+        className="flex items-center justify-start text-[15px] leading-none lg:text-[16px]"
       >
         {tabs.map((tab, index) => (
           <Fragment key={tab}>
@@ -138,14 +138,14 @@ export function HeroTabs() {
       */}
       <div
         aria-hidden
-        className="mb-2 mt-5 h-px w-full bg-[linear-gradient(to_right,transparent,#4D4D4D,transparent)]"
+        className="mb-2 mt-5 h-px w-full bg-[linear-gradient(to_right,transparent,#4D4D4D_10%,transparent)]"
       />
 
       <button
         type="button"
         onClick={copy}
         aria-label={copied ? 'Copied' : `Copy: ${stripBackticks(content)}`}
-        className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
+        className="group relative w-full pr-7 text-left text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
       >
         {/*
           Every snippet is rendered, stacked in one grid cell, and crossfaded.

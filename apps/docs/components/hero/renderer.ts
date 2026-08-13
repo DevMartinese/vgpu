@@ -9,6 +9,8 @@ import type { Effect, Frame, Gpu, Surface, Target, Timer, TimerSpan } from 'vgpu
 type VgpuApi = typeof import('vgpu');
 
 import bakeWgsl from './bake.wgsl';
+import bloomWgsl from './bloom.wgsl';
+import compositeWgsl from './composite.wgsl';
 import { createNoiseVolume, NOISE_VOLUME_SIZE, noiseVolumeSampler } from './noise-volume.mjs';
 import refineWgsl from './refine.wgsl';
 import shadeWgsl from './shade.wgsl';
@@ -32,6 +34,12 @@ export interface DiskLook {
   density: number;
   /** Relativistic beaming strength. */
   doppler: number;
+  /** Scale of the slow, low-frequency cloud layer. */
+  cloudScale: number;
+  /** Cloud rotation rate relative to the disk's rigid reference rotation. */
+  cloudSpeed: number;
+  /** Multiplicative contrast of the cloud layer; 0 disables it. */
+  cloudStrength: number;
   /** Free knobs for prototyping without touching the renderer (default 0). */
   spare0: number;
   spare1: number;
@@ -59,6 +67,17 @@ export interface StarLook {
   twinkle: number;
 }
 
+export interface BloomLook {
+  /** Additive bloom energy after the three scales are combined. */
+  strength: number;
+  /** Linear-HDR luminance where highlights begin contributing. */
+  threshold: number;
+  /** Width of the threshold transition. */
+  knee: number;
+  /** Gaussian radius multiplier at every scale. */
+  radius: number;
+}
+
 export interface HeroSettings {
   // --- Geometry / camera. Changing any of these needs a re-bake. ---
   /** Camera pitch, in radians. Positive = camera above the disk plane. */
@@ -69,8 +88,12 @@ export interface HeroSettings {
   diskRadius: number;
   /** Focal length; higher = narrower field of view (zooms in). */
   fov: number;
+  /** Horizontal image shift in NDC units; positive moves the hole RIGHT. */
+  centerX: number;
   /** Vertical image shift in NDC units; positive moves the hole UP on screen. */
   centerY: number;
+  /** Camera roll, in radians. Negative tilts the disk upward to the right. */
+  cameraRoll: number;
 
   // --- Frame-only settings. No re-bake. ---
   /** 0 = final image, 1..9 = G-buffer debug views. */
@@ -100,6 +123,8 @@ export interface HeroSettings {
    * shade.wgsl for the sign convention and the symmetry precondition.
    */
   mouseYaw: number;
+  /** Multi-resolution HDR bloom, composited before tone mapping. */
+  bloom: BloomLook;
   /** Owned by disk.wgsl. */
   disk: DiskLook;
   /** Owned by stars.wgsl. */
@@ -113,26 +138,40 @@ export interface HeroSettings {
  */
 export function defaultHeroSettings(): HeroSettings {
   return {
-    cameraY: 0.085,
+    cameraY: 0.16,
     distance: 13.5,
-    diskRadius: 6.9,
-    fov: 2.67,
-    // Canvas covers the whole hero now, so the hole sits dead center.
-    centerY: 0,
+    diskRadius: 9,
+    // Interstellar-like close-up: the horizon dominates the right side while
+    // the tilted accretion disk sweeps across the frame behind the title.
+    fov: 3,
+    centerX: 0.8,
+    centerY: 0.3,
+    cameraRoll: -0.27,
     debugView: 0,
     diskLayers: 2,
     aa: 1,
     // ~8.6 degrees each way: enough to read as a living, turnable scene without
     // ever swinging the disk far enough to look like a camera cut.
     mouseYaw: 0.15,
+    bloom: {
+      strength: 1.,
+      threshold: 0.,
+      knee: 0.18,
+      radius: 1.5,
+    },
     disk: {
-      brightness: 0.098,
+      // Calibrated against the Node/Dawn HDR readback: peaks just over 1.0,
+      // giving bloom real emissive headroom without wasting range behind ACES.
+      brightness: 0.75,
       speed: 0.75,
       stretch: 5.75,
       detail: 3.44,
       turbulence: 4.46,
       density: 1.38,
       doppler: 1.21,
+      cloudScale: 20,
+      cloudSpeed: 0.3,
+      cloudStrength: 0.2,
       spare0: 0.43,
       spare1: -0.25,
       spare2: -0.67,
@@ -160,7 +199,15 @@ export function defaultHeroSettings(): HeroSettings {
 }
 
 /** Settings that invalidate the baked G-buffer. */
-export const BAKE_KEYS = ['cameraY', 'distance', 'diskRadius', 'fov', 'centerY'] as const;
+export const BAKE_KEYS = [
+  'cameraY',
+  'distance',
+  'diskRadius',
+  'fov',
+  'centerX',
+  'centerY',
+  'cameraRoll',
+] as const;
 
 /**
  * Minimum spacing between throttled re-bakes, in milliseconds.
@@ -386,6 +433,17 @@ interface Effects {
   refine: Effect;
   /** Compiled and warmed at init, so the first measured frame never pays for it. */
   shade: Effect;
+  bloomExtract: Effect;
+  bloomBlurH0: Effect;
+  bloomBlurV0: Effect;
+  bloomDown1: Effect;
+  bloomBlurH1: Effect;
+  bloomBlurV1: Effect;
+  bloomDown2: Effect;
+  bloomBlurH2: Effect;
+  bloomBlurV2: Effect;
+  composite: Effect;
+  postSampler: GPUSampler;
   /**
    * Tiled 3D value-noise lattice for disk.wgsl, plus its sampler.
    *
@@ -416,6 +474,15 @@ interface Targets {
    * the G-buffer — it is indexed 1:1 by the same texel.
    */
   aa: Target;
+  /** Full-resolution linear HDR scene before bloom and tone mapping. */
+  scene: Target;
+  /** Half-, quarter- and eighth-resolution bloom levels plus blur ping targets. */
+  bloom0: Target;
+  bloomPing0: Target;
+  bloom1: Target;
+  bloomPing1: Target;
+  bloom2: Target;
+  bloomPing2: Target;
 }
 
 /**
@@ -687,6 +754,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     // The mouse rotation is a uniform, never a bake: the scene is axisymmetric
     // so the baked G-buffer is still exact in the rotated frame.
     setShadeUniforms(effects, targets, settings, advanceAnimationTime(now), advanceSceneYaw(now));
+    setPostUniforms(effects, targets, settings);
     renderChain(frame, effects, targets, surface, settings, runBake, sampling ? timer?.span(MEASURE_SPAN) : undefined);
     if (measurement) recordMeasurementFrame(measurement, now, sampling);
   };
@@ -914,6 +982,7 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
     effects = createEffects(vgpu, gpu, 'black-hole-live');
     targets = createTargets(vgpu, gpu, surface.size, 'black-hole-live');
     setBindings(effects, targets);
+    setPostUniforms(effects, targets, settings);
     await prewarm(effects, targets, surface);
     if (disposed) return;
     // The ONLY resize input: with the dpr pinned to RENDER_DPR, physical size is
@@ -971,6 +1040,20 @@ function createEffects(vgpu: VgpuApi, gpu: Gpu, label: string): Effects {
     bake: vgpu.effect(gpu, bakeWgsl, { label: `${label}-bake` }),
     refine: vgpu.effect(gpu, refineWgsl, { label: `${label}-refine` }),
     shade: vgpu.effect(gpu, shadeWgsl, { label: `${label}-shade` }),
+    bloomExtract: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-extract` }),
+    bloomBlurH0: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-blur-h0` }),
+    bloomBlurV0: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-blur-v0` }),
+    bloomDown1: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-down-1` }),
+    bloomBlurH1: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-blur-h1` }),
+    bloomBlurV1: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-blur-v1` }),
+    bloomDown2: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-down-2` }),
+    bloomBlurH2: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-blur-h2` }),
+    bloomBlurV2: vgpu.effect(gpu, bloomWgsl, { label: `${label}-bloom-blur-v2` }),
+    composite: vgpu.effect(gpu, compositeWgsl, { label: `${label}-composite` }),
+    postSampler: vgpu.sampler(gpu, {
+      minFilter: 'linear',
+      magFilter: 'linear',
+    }),
     // Built and uploaded here, synchronously, before the first bind: the
     // lattice is a pure function of its size, so there is nothing to await and
     // nothing that can change later.
@@ -981,6 +1064,15 @@ function createEffects(vgpu: VgpuApi, gpu: Gpu, label: string): Effects {
 
 function createTargets(vgpu: VgpuApi, gpu: Gpu, size: readonly [number, number], label: string): Targets {
   const full = normalizeSize(size);
+  const half = scaleSize(full, 2);
+  const quarter = scaleSize(full, 4);
+  const eighth = scaleSize(full, 8);
+  const postTarget = (targetSize: readonly [number, number], suffix: string) =>
+    vgpu.target(gpu, {
+      size: targetSize,
+      colors: [{ format: 'rgba16float' }],
+      label: `${label}-${suffix}`,
+    });
   return {
     gbuffer: vgpu.target(gpu, {
       size: full,
@@ -992,12 +1084,26 @@ function createTargets(vgpu: VgpuApi, gpu: Gpu, size: readonly [number, number],
       colors: AA_FORMATS.map((format) => ({ format })),
       label: `${label}-aa`,
     }),
+    scene: postTarget(full, 'scene-hdr'),
+    bloom0: postTarget(half, 'bloom-0'),
+    bloomPing0: postTarget(half, 'bloom-ping-0'),
+    bloom1: postTarget(quarter, 'bloom-1'),
+    bloomPing1: postTarget(quarter, 'bloom-ping-1'),
+    bloom2: postTarget(eighth, 'bloom-2'),
+    bloomPing2: postTarget(eighth, 'bloom-ping-2'),
   };
 }
 
 function destroyTargets(targets: Targets): void {
   destroyTarget(targets.gbuffer);
   destroyTarget(targets.aa);
+  destroyTarget(targets.scene);
+  destroyTarget(targets.bloom0);
+  destroyTarget(targets.bloomPing0);
+  destroyTarget(targets.bloom1);
+  destroyTarget(targets.bloomPing1);
+  destroyTarget(targets.bloom2);
+  destroyTarget(targets.bloomPing2);
 }
 
 function destroyTarget(target: Target | undefined): void {
@@ -1038,6 +1144,31 @@ function setBindings(effects: Effects, targets: Targets): void {
       shade: { resolution: targets.gbuffer.size },
     });
   }
+
+  const scene = targets.scene.colors[0]!;
+  const bloom0 = targets.bloom0.colors[0]!;
+  const bloomPing0 = targets.bloomPing0.colors[0]!;
+  const bloom1 = targets.bloom1.colors[0]!;
+  const bloomPing1 = targets.bloomPing1.colors[0]!;
+  const bloom2 = targets.bloom2.colors[0]!;
+  const bloomPing2 = targets.bloomPing2.colors[0]!;
+
+  effects.bloomExtract.set({ source: scene, linearSampler: effects.postSampler });
+  effects.bloomBlurH0.set({ source: bloom0, linearSampler: effects.postSampler });
+  effects.bloomBlurV0.set({ source: bloomPing0, linearSampler: effects.postSampler });
+  effects.bloomDown1.set({ source: bloom0, linearSampler: effects.postSampler });
+  effects.bloomBlurH1.set({ source: bloom1, linearSampler: effects.postSampler });
+  effects.bloomBlurV1.set({ source: bloomPing1, linearSampler: effects.postSampler });
+  effects.bloomDown2.set({ source: bloom1, linearSampler: effects.postSampler });
+  effects.bloomBlurH2.set({ source: bloom2, linearSampler: effects.postSampler });
+  effects.bloomBlurV2.set({ source: bloomPing2, linearSampler: effects.postSampler });
+  effects.composite.set({
+    scene,
+    bloomNear: bloom0,
+    bloomMedium: bloom1,
+    bloomFar: bloom2,
+    linearSampler: effects.postSampler,
+  });
 }
 
 function setBakeUniforms(effects: Effects, targets: Targets, settings: HeroSettings): void {
@@ -1048,7 +1179,9 @@ function setBakeUniforms(effects: Effects, targets: Targets, settings: HeroSetti
     orbitRadius: settings.distance,
     diskOuter: settings.diskRadius,
     fov: settings.fov,
+    centerX: settings.centerX,
     centerY: settings.centerY,
+    roll: settings.cameraRoll,
   };
   effects.bake.set({ bake: geometry });
   // ONE geometry description, uploaded to both one-shot passes: `Refine` mirrors
@@ -1082,8 +1215,37 @@ function setShadeUniforms(
     disk: settings.disk,
     stars: settings.stars,
   });
-  // No composite uniform to update: shade.wgsl tone maps in place and returns
-  // early (raw) for every debug view, so the bypass is a branch in the shader.
+}
+
+function setPostUniforms(effects: Effects, targets: Targets, settings: HeroSettings): void {
+  const threshold = Math.max(0, settings.bloom.threshold);
+  const knee = Math.max(0.0001, settings.bloom.knee);
+  const radius = Math.max(0.1, settings.bloom.radius);
+  const downsample = (sourceSize: readonly [number, number], applyThreshold: boolean) => ({
+    sourceSize,
+    direction: [0, 0],
+    params: [applyThreshold ? threshold : -1, knee, radius, 0],
+  });
+  const blur = (sourceSize: readonly [number, number], x: number, y: number) => ({
+    sourceSize,
+    direction: [x, y],
+    params: [-1, knee, radius, 1],
+  });
+
+  effects.bloomExtract.set({ bloom: downsample(targets.scene.size, true) });
+  effects.bloomBlurH0.set({ bloom: blur(targets.bloom0.size, 1, 0) });
+  effects.bloomBlurV0.set({ bloom: blur(targets.bloomPing0.size, 0, 1) });
+  effects.bloomDown1.set({ bloom: downsample(targets.bloom0.size, false) });
+  effects.bloomBlurH1.set({ bloom: blur(targets.bloom1.size, 1, 0) });
+  effects.bloomBlurV1.set({ bloom: blur(targets.bloomPing1.size, 0, 1) });
+  effects.bloomDown2.set({ bloom: downsample(targets.bloom1.size, false) });
+  effects.bloomBlurH2.set({ bloom: blur(targets.bloom2.size, 1, 0) });
+  effects.bloomBlurV2.set({ bloom: blur(targets.bloomPing2.size, 0, 1) });
+  effects.composite.set({
+    composite: {
+      params: [Math.max(0, settings.bloom.strength), settings.debugView, 0, 0],
+    },
+  });
 }
 
 /** Median of an unsorted sample set; `NaN` for an empty one. */
@@ -1136,12 +1298,21 @@ function summarizeMeasurement(m: Measurement, resolution: readonly [number, numb
 }
 
 async function prewarm(effects: Effects, targets: Targets, output: Output): Promise<void> {
+  const bloomOutput = { colors: [targets.bloom0.format] };
   await Promise.all([
     effects.bake.compile(targets.gbuffer),
     effects.refine.compile(targets.aa),
-    // Compiled against the OUTPUT format (the swap chain), not an HDR target:
-    // shade is the last pass and writes display-referred unorm.
-    effects.shade.compile({ colors: [output.format] }),
+    effects.shade.compile(targets.scene),
+    effects.bloomExtract.compile(bloomOutput),
+    effects.bloomBlurH0.compile(bloomOutput),
+    effects.bloomBlurV0.compile(bloomOutput),
+    effects.bloomDown1.compile(bloomOutput),
+    effects.bloomBlurH1.compile(bloomOutput),
+    effects.bloomBlurV1.compile(bloomOutput),
+    effects.bloomDown2.compile(bloomOutput),
+    effects.bloomBlurH2.compile(bloomOutput),
+    effects.bloomBlurV2.compile(bloomOutput),
+    effects.composite.compile({ colors: [output.format] }),
   ]);
 }
 
@@ -1163,9 +1334,20 @@ function renderChain(
     // guarantee that none of its cost is attributed to the shade pass.
     frame.pass({ target: targets.aa, clear: CLEAR }, (pass) => pass.draw(effects.refine));
   }
-  // Two passes per frame, still: shade reads the G-buffer plus 10 B/px of AA data
-  // and writes the swap chain. The two above are one-shot.
-  frame.pass({ target: output, clear: CLEAR, timer }, (pass) => pass.draw(effects.shade));
+  // Linear HDR scene, then an Unreal-style three-level bloom pyramid. All blur
+  // work happens at half resolution or below; only shade and composite are full
+  // size. The two geometry passes above remain one-shot.
+  frame.pass({ target: targets.scene, clear: CLEAR, timer }, (pass) => pass.draw(effects.shade));
+  frame.pass({ target: targets.bloom0, clear: CLEAR }, (pass) => pass.draw(effects.bloomExtract));
+  frame.pass({ target: targets.bloomPing0, clear: CLEAR }, (pass) => pass.draw(effects.bloomBlurH0));
+  frame.pass({ target: targets.bloom0, clear: CLEAR }, (pass) => pass.draw(effects.bloomBlurV0));
+  frame.pass({ target: targets.bloom1, clear: CLEAR }, (pass) => pass.draw(effects.bloomDown1));
+  frame.pass({ target: targets.bloomPing1, clear: CLEAR }, (pass) => pass.draw(effects.bloomBlurH1));
+  frame.pass({ target: targets.bloom1, clear: CLEAR }, (pass) => pass.draw(effects.bloomBlurV1));
+  frame.pass({ target: targets.bloom2, clear: CLEAR }, (pass) => pass.draw(effects.bloomDown2));
+  frame.pass({ target: targets.bloomPing2, clear: CLEAR }, (pass) => pass.draw(effects.bloomBlurH2));
+  frame.pass({ target: targets.bloom2, clear: CLEAR }, (pass) => pass.draw(effects.bloomBlurV2));
+  frame.pass({ target: output, clear: CLEAR }, (pass) => pass.draw(effects.composite));
 }
 
 /** Wall clock for the bake throttle; independent of the animation clock. */
@@ -1175,4 +1357,11 @@ function clockMs(): number {
 
 function normalizeSize(size: readonly [number, number]): [number, number] {
   return [Math.max(1, Math.floor(size[0])), Math.max(1, Math.floor(size[1]))];
+}
+
+function scaleSize(size: readonly [number, number], divisor: number): [number, number] {
+  return [
+    Math.max(1, Math.floor(size[0] / divisor)),
+    Math.max(1, Math.floor(size[1] / divisor)),
+  ];
 }

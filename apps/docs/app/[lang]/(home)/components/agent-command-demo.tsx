@@ -524,13 +524,8 @@ function TerminalTimeline({
         );
       })}
 
-      {entries.length === 0 || complete ? (
-        <p
-          aria-hidden="true"
-          className={`${terminalPromptClass} ${
-            entries.length === 0 ? "" : "mt-5"
-          }`}
-        >
+      {entries.length === 0 ? (
+        <p aria-hidden="true" className={terminalPromptClass}>
           <span className="text-gray-700">$</span> <TerminalCursor />
         </p>
       ) : null}
@@ -562,16 +557,13 @@ function ProofPending() {
 function DocsProof() {
   return (
     <div className="flex h-full flex-col p-5 sm:p-7" data-proof>
-      <div className="flex items-start justify-between gap-4 border-b border-gray-alpha-400 pb-5">
+      <div className="border-b border-gray-alpha-400 pb-5">
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-800 dark:text-[#29b6f6]">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-800">
             /vgpu/surface.docs.md
           </p>
           <h3 className="mt-2 text-pretty text-xl text-gray-1000">Surface</h3>
         </div>
-        <span className="rounded-full border border-gray-alpha-400 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-gray-800">
-          installed
-        </span>
       </div>
 
       <p className="mt-5 max-w-lg text-pretty text-sm leading-relaxed text-gray-900">

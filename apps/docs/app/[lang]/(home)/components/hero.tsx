@@ -1,6 +1,13 @@
 import { HeroBlackHole } from '@/components/hero/hero-black-hole';
+import localFont from 'next/font/local';
 import { HeroTabs } from './hero-tabs';
 import '../hero-light-invert.css';
+
+const geistSerif = localFont({
+  src: './GeistSerifV0.2-Regular.otf',
+  weight: '400',
+  style: 'normal',
+});
 
 /**
  * Landing hero.
@@ -18,19 +25,6 @@ export function Hero() {
       className="relative min-h-svh overflow-hidden bg-black"
     >
       <HeroBlackHole />
-
-      {/* Legibility scrim. Matches the Figma ellipse: a band centred on the
-          hero, opaque black through the core and fully transparent at the
-          edges, so the disk still burns through at the left and right. */}
-      <div
-        data-hero-overlay
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-1/2 z-[1] h-[62%] -translate-y-1/2"
-        style={{
-          background:
-            'radial-gradient(ellipse 50% 50% at 50% 50%, #000 31%, rgba(0,0,0,0) 60%)',
-        }}
-      />
 
       {/* Foot fade. This was a tall, near-opaque band back when the setup
           snippet was pinned to the bottom and needed contrast; the snippet
@@ -54,8 +48,7 @@ export function Hero() {
         }}
       />
 
-      {/* Tagline + setup snippet, one block centred on the hero — it sits
-          inside the shadow.
+      {/* Tagline + setup snippet, one block aligned to the left of the hero.
 
           The band is pointer-events-none so it never eats clicks over the
           rest of the hero, but the children opt back IN: without that the
@@ -63,27 +56,24 @@ export function Hero() {
           pointer-events is inherited. */}
       <div
         data-hero-overlay
-        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-10 px-6 lg:gap-12"
+        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 mx-auto flex w-full max-w-[1448px] -translate-y-1/2 flex-col items-start gap-10 px-6 lg:gap-12"
       >
-        <h1
-          className="pointer-events-auto max-w-[798px] text-pretty text-center font-light leading-[1.25] text-white"
-          /* Sized off the viewport HEIGHT, not the width: the tagline has
-             to stay inside the black hole's shadow, and the shadow is a
-             circle scaled by the shorter axis. 2.4svh = 21.6px at 900px
-             tall. The clamp floor keeps it readable on short landscape
-             phones and the ceiling stops it ballooning on tall monitors. */
-          style={{ fontSize: 'clamp(1rem, 4svh, 10.75rem)' }}
-        >
-          The WebGPU library,
-          {/* Forces the two-line break of the design on wide viewports; on
-              narrow ones it collapses and the line wraps on its own. */}
-          <br className="hidden sm:block" /> designed for agents.
-        </h1>
+        <div className="pointer-events-auto">
+          <h1
+            className={`${geistSerif.className} text-[clamp(4rem,8vw,8rem)] font-thin tracking-[-0.03em] text-black leading-[0.5] mb-[0.6em]`}
+            style={{ WebkitTextStroke: '0.01em #999' }}
+          >
+            <span className="tracking-[-0.05em]">v</span>gpu
+          </h1>
+          <p
+            className="max-w-[10em] text-balance text-left font-light leading-tight text-white"
+            style={{ fontSize: 'clamp(1rem, 4svh, 10.75rem)' }}
+          >
+            The WebGPU library, designed for agents.
+          </p>
+        </div>
 
-        {/* Setup snippet, reading as one unit with the tagline above it.
-            Part of the centred flex column rather than pinned to the foot
-            of the hero, so the pair stays together and stays inside the
-            shadow at any viewport height. */}
+        {/* Setup snippet, reading as one unit with the tagline above it. */}
         <div className="pointer-events-auto w-[450px] max-w-full">
           <HeroTabs />
         </div>
