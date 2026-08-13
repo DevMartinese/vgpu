@@ -17,3 +17,4 @@ coverage/
 .*.swp
 .*.swo
 .tmp-doc-snippets-*/
+.codex/runtime/

@@ -90,9 +90,10 @@ export function HeroTabs() {
     // below), and a gap would add to both sides equally.
     <div className="flex w-full flex-col">
       <div
+        data-hero-tabs-list
         role="tablist"
         aria-label="Setup option"
-        className="flex items-center justify-start text-[15px] leading-none lg:text-[16px]"
+        className="flex items-center justify-center text-[15px] leading-none lg:text-[16px]"
       >
         {tabs.map((tab, index) => (
           <Fragment key={tab}>
@@ -142,10 +143,11 @@ export function HeroTabs() {
       />
 
       <button
+        data-hero-tabs-copy
         type="button"
         onClick={copy}
         aria-label={copied ? 'Copied' : `Copy: ${stripBackticks(content)}`}
-        className="group relative w-full pr-7 text-left text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
+        className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
       >
         {/*
           Every snippet is rendered, stacked in one grid cell, and crossfaded.

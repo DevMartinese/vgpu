@@ -56,17 +56,17 @@ export function Hero() {
           pointer-events is inherited. */}
       <div
         data-hero-overlay
-        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 mx-auto flex w-full max-w-[1448px] -translate-y-1/2 flex-col items-start gap-10 px-6 lg:gap-12"
+        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 mx-auto flex w-full max-w-[1448px] -translate-y-1/2 flex-col items-center gap-10 px-6 min-[768px]:items-start lg:gap-12"
       >
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto flex flex-col items-center min-[768px]:items-start">
           <h1
-            className={`${geistSerif.className} text-[clamp(4rem,8vw,8rem)] font-thin tracking-[-0.03em] text-black leading-[0.5] mb-[0.6em]`}
+            className={`${geistSerif.className} mb-[0.6em] text-center text-[clamp(4rem,8vw,8rem)] font-thin leading-[0.5] tracking-[-0.03em] text-black min-[768px]:text-left`}
             style={{ WebkitTextStroke: '0.01em #999' }}
           >
             <span className="tracking-[-0.05em]">v</span>gpu
           </h1>
           <p
-            className="max-w-[10em] text-balance text-left font-light leading-tight text-white"
+            className="max-w-[10em] text-balance text-center font-light leading-tight text-white min-[768px]:text-left"
             style={{ fontSize: 'clamp(1rem, 4svh, 10.75rem)' }}
           >
             The WebGPU library, designed for agents.

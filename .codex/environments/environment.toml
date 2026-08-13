@@ -1,0 +1,10 @@
+version = 1
+name = "vgpu"
+
+[setup]
+script = "./.codex/scripts/setup.sh"
+
+[[actions]]
+name = "Docs dev server"
+icon = "run"
+command = "./.codex/scripts/docs-dev.sh"

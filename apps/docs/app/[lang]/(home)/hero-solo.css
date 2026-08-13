@@ -12,3 +12,18 @@
 html.hero-solo [data-hero-overlay] {
   visibility: hidden;
 }
+
+/* This hero switches at a literal tablet boundary rather than the docs theme's
+   custom `md` breakpoint (601px). Keep the tabs aligned with the shader's
+   `(max-width: 767px)` media query. */
+@media (min-width: 768px) {
+  [data-hero-tabs-list] {
+    justify-content: flex-start;
+  }
+
+  [data-hero-tabs-copy] {
+    padding-left: 0;
+    padding-right: 1.75rem;
+    text-align: left;
+  }
+}

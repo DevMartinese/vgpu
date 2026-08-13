@@ -22,10 +22,11 @@
 //   --size <WxH>         render size in pixels (default 1280x720)
 //   --time <seconds>     animation clock handed to the shaders (default 2.5)
 //   --views <list>       comma list of: final,normals,diskuv,flags,raydir,density,
-//                        skylod,hit2,aa,aageom,all
+//                        skylod,hit2,aa,aageom,gradient,all
 //   --aa <0|1>           1 = consume the refine pass's ring coverage/span (default),
 //                        0 = ignore it, i.e. exactly the pre-AA image. The A/B.
-//   --<key> <value>      any geometry setting: cameraY, distance, diskRadius, fov, centerY
+//   --<key> <value>      any geometry setting: cameraY, distance, diskRadius, fov,
+//                        centerX, centerY, cameraRoll
 //   --diskLayers <1|2>   1 = front disk hit only, 2 = also the hidden second hit (A/B)
 //   --yaw <radians>      SCENE yaw applied by the frame pass (default 0). This is the
 //                        instantaneous rotation, not the mouse amplitude: the harness
@@ -87,11 +88,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Keep in sync with `defaultHeroSettings()` in renderer.ts. */
 const DEFAULT_SETTINGS = {
-  cameraY: 0.085,
+  cameraY: 0.16,
   distance: 13.5,
-  diskRadius: 6.9,
-  fov: 2.67,
-  centerY: 0,
+  diskRadius: 9,
+  fov: 3,
+  centerX: 0.8,
+  centerY: 0.3,
+  cameraRoll: -0.27,
   debugView: 0,
   diskLayers: 2,
   // Photon-ring antialiasing A/B: `--aa 0` reproduces the pre-AA image exactly
@@ -100,14 +103,19 @@ const DEFAULT_SETTINGS = {
   // Mouse amplitude in the browser. The harness has no pointer: use --yaw to set
   // an instantaneous scene rotation instead.
   mouseYaw: 0.15,
+  sideFade: 1,
+  centerFade: 0,
   disk: {
-    brightness: 0.098,
+    brightness: 0.75,
     speed: 0.75,
     stretch: 5.75,
     detail: 3.44,
     turbulence: 4.46,
     density: 1.38,
     doppler: 1.21,
+    cloudScale: 20,
+    cloudSpeed: 0.3,
+    cloudStrength: 0.2,
     spare0: 0.43,
     spare1: -0.25,
     spare2: -0.67,
@@ -136,6 +144,7 @@ const VIEWS = {
   hit2: 7,
   aa: 8,
   aageom: 9,
+  gradient: 10,
 };
 
 /** hit1, hit2, sky, view. Must match GBUFFER_FORMATS in renderer.ts. */
@@ -493,7 +502,9 @@ async function renderViews(gpu, options, settings, names, shaders, cleanups) {
     orbitRadius: settings.distance,
     diskOuter: settings.diskRadius,
     fov: settings.fov,
+    centerX: settings.centerX,
     centerY: settings.centerY,
+    roll: settings.cameraRoll,
   };
   // One geometry description for both one-shot passes, exactly like renderer.ts:
   // the sub-rays must come from the same camera as the centre rays.
@@ -532,6 +543,8 @@ async function renderViews(gpu, options, settings, names, shaders, cleanups) {
       aa: settings.aa,
       // Instantaneous scene rotation; the browser smooths it from the pointer.
       sceneYaw: options.yaw,
+      sideFade: settings.sideFade,
+      centerFade: settings.centerFade,
     } });
     // No composite uniform: the debug bypass is an early return inside
     // shade.wgsl, so `debugView` alone decides whether the tone map runs.

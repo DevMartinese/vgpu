@@ -96,7 +96,7 @@ export interface HeroSettings {
   cameraRoll: number;
 
   // --- Frame-only settings. No re-bake. ---
-  /** 0 = final image, 1..9 = G-buffer debug views. */
+  /** 0 = final image, 1..9 = G-buffer debug views, 10 = content fade mask. */
   debugView: number;
   /**
    * Photon-ring antialiasing: 1 consumes the one-shot refine pass's
@@ -123,6 +123,10 @@ export interface HeroSettings {
    * shade.wgsl for the sign convention and the symmetry precondition.
    */
   mouseYaw: number;
+  /** 1 applies the desktop horizontal content fade; 0 disables it. */
+  sideFade: number;
+  /** 1 applies the mobile vertical fade around the centered copy; 0 disables it. */
+  centerFade: number;
   /** Multi-resolution HDR bloom, composited before tone mapping. */
   bloom: BloomLook;
   /** Owned by disk.wgsl. */
@@ -153,6 +157,8 @@ export function defaultHeroSettings(): HeroSettings {
     // ~8.6 degrees each way: enough to read as a living, turnable scene without
     // ever swinging the disk far enough to look like a camera cut.
     mouseYaw: 0.15,
+    sideFade: 1,
+    centerFade: 0,
     bloom: {
       strength: 1.,
       threshold: 0.,
@@ -867,6 +873,11 @@ export function createRenderer(options: HeroRendererOptions): HeroRenderer {
    * never pop into place on load.
    */
   const advanceSceneYaw = (now: number): number => {
+    if (settings.mouseYaw <= 0) {
+      currentSceneYaw = 0;
+      lastYawAt = now;
+      return 0;
+    }
     const dt = lastYawAt === undefined ? 0 : Math.min(Math.max((now - lastYawAt) / 1000, 0), MAX_FRAME_DT_S);
     lastYawAt = now;
     const target = pointerXNormalized * Math.max(0, settings.mouseYaw);
@@ -1209,6 +1220,8 @@ function setShadeUniforms(
       // Active rotation of the SCENE (camera yaw would be -sceneYaw). Smoothed
       // from the pointer by the render loop; the bake never sees it.
       sceneYaw,
+      sideFade: settings.sideFade,
+      centerFade: settings.centerFade,
     },
     // Look uniforms are passed straight through: the WGSL structs in disk.wgsl /
     // stars.wgsl are the source of truth for their fields.
