@@ -11,4 +11,6 @@ Usage:
   vgpu examples cache clear
 
 Canonical agent invocation: npx vgpu examples ...
+
+macOS and Windows use a per-invocation memory cache; --offline is unavailable.
 `;
