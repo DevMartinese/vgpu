@@ -36,7 +36,6 @@ const HERO_FRACTAL_GLASS = {
   // remains fixed at its authored scale.
   fractalScale: 1 / 1.08,
   ior: 1.183,
-  maxRayDistance: 1.35,
   reflectionStrength: 0.57,
   backOpacity: 0.63,
   absorption: [20 / 255, 140 / 255, 215 / 255],

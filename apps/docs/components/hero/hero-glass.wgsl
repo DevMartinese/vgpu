@@ -1,15 +1,7 @@
-import {
-  heroFractalNormal,
-  traceHeroFractal,
-} from "./hero-fractal-sdf.wgsl";
-import {
-  CeramicMaterial,
-  presentCeramic,
-  shadeCeramic,
-} from "./hero-fractal-ceramic.wgsl";
+import { presentCeramic } from "./hero-fractal-ceramic.wgsl";
 import { sampleHeroEnvironment } from "./hero-glass-environment.wgsl";
 
-override ENABLE_RAYMARCH: bool = false;
+override FRONT_GLASS: bool = false;
 
 struct GlassParams {
   viewProjection: mat4x4f,
@@ -18,12 +10,9 @@ struct GlassParams {
   meshMin: vec3f,
   meshMax: vec3f,
   ior: f32,
-  maxRayDistance: f32,
-  fractalScale: f32,
   reflectionStrength: f32,
   backOpacity: f32,
   absorption: vec3f,
-  material: CeramicMaterial,
 }
 @group(0) @binding(0) var<uniform> params: GlassParams;
 @group(0) @binding(1) var environmentTexture: texture_2d_array<f32>;
@@ -75,7 +64,7 @@ fn premultiplied(color: vec3f, alpha: f32) -> vec4f {
   let fresnel = dielectricFresnel(params.ior, facing);
   let reflected = studio(reflect(incident, normal));
 
-  if (!ENABLE_RAYMARCH) {
+  if (!FRONT_GLASS) {
     let alpha = clamp(
       params.backOpacity * (0.22 + 0.78 * pow(1.0 - facing, 1.5)),
       0.0,
@@ -84,38 +73,9 @@ fn premultiplied(color: vec3f, alpha: f32) -> vec4f {
     return premultiplied(presentCeramic(reflected).rgb, alpha);
   }
 
-  let refracted = refract(incident, normal, 1.0 / max(params.ior, 1.0001));
-  if (dot(refracted, refracted) > 0.000001) {
-    let rayDirection = normalize(refracted);
-    let rayOrigin = in.worldPosition + rayDirection * 0.0015;
-    let fractalScale = max(params.fractalScale, 0.0001);
-    let localRayOrigin = rayOrigin / fractalScale;
-    let localDepth = traceHeroFractal(
-      localRayOrigin,
-      rayDirection,
-      params.maxRayDistance / fractalScale,
-    );
-    if (localDepth > 0.0) {
-      let depth = localDepth * fractalScale;
-      let localHitPoint = localRayOrigin + rayDirection * localDepth;
-      let hitPoint = localHitPoint * fractalScale;
-      var fractalNormal = heroFractalNormal(localHitPoint);
-      if (dot(fractalNormal, -rayDirection) < 0.0) {
-        fractalNormal = -fractalNormal;
-      }
-      let ceramic = shadeCeramic(
-        hitPoint,
-        -rayDirection,
-        fractalNormal,
-        params.material,
-      );
-      let transmission = ceramic * exp(-params.absorption * depth);
-      return presentCeramic(mix(transmission, reflected, fresnel));
-    }
-  }
-
-  // A miss is transparent apart from the front Fresnel lobe. The back-face draw
-  // and white studio floor are already underneath this fragment.
+  // The ceramic mesh is rendered behind this shell. Until screen-space
+  // refraction is added, the front face contributes only its tinted Fresnel lobe.
+  let tint = exp(-params.absorption * 0.08);
   let alpha = clamp(fresnel + 0.018, 0.0, 0.42);
-  return premultiplied(presentCeramic(reflected).rgb, alpha);
+  return premultiplied(presentCeramic(reflected * tint).rgb, alpha);
 }

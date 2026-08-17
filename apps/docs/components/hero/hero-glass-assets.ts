@@ -3,7 +3,8 @@ import { geometry } from "vgpu";
 import type { Texture } from "vgpu/core";
 import { cubeView } from "vgpu/core";
 
-const MESH_URL = "/hero/rounded-tetrahedron.mesh?v=bevel-2";
+const GLASS_MESH_URL = "/hero/rounded-tetrahedron.mesh?v=bevel-3";
+const FRACTAL_MESH_URL = "/hero/fractal-tetrahedron-l7.mesh?v=mesh-3";
 const ENVIRONMENT_URL = "/hero/studio-cubemap.png";
 const MESH_HEADER_SIZE = 40;
 const CUBEMAP_COLUMNS = 3;
@@ -14,6 +15,10 @@ export interface HeroGlassAssets {
   readonly wireframeGeometry: Geometry;
   readonly meshMin: readonly [number, number, number];
   readonly meshMax: readonly [number, number, number];
+  readonly fractalGeometry: Geometry;
+  readonly fractalWireframeGeometry: Geometry;
+  readonly fractalMeshMin: readonly [number, number, number];
+  readonly fractalMeshMax: readonly [number, number, number];
   readonly environment: Texture;
   readonly environmentView: GPUTextureView;
   dispose(): void;
@@ -21,24 +26,43 @@ export interface HeroGlassAssets {
 
 /** Loads only after the desktop light hero mounts; neither asset enters JS. */
 export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
-  const [meshResponse, environmentResponse] = await Promise.all([
-    fetch(MESH_URL),
-    fetch(ENVIRONMENT_URL),
-  ]);
-  if (!meshResponse.ok) {
-    throw new Error(`Failed to load ${MESH_URL}: HTTP ${meshResponse.status}`);
+  const [glassMeshResponse, fractalMeshResponse, environmentResponse] =
+    await Promise.all([
+      fetch(GLASS_MESH_URL),
+      fetch(FRACTAL_MESH_URL),
+      fetch(ENVIRONMENT_URL),
+    ]);
+  if (!glassMeshResponse.ok) {
+    throw new Error(
+      `Failed to load ${GLASS_MESH_URL}: HTTP ${glassMeshResponse.status}`
+    );
+  }
+  if (!fractalMeshResponse.ok) {
+    throw new Error(
+      `Failed to load ${FRACTAL_MESH_URL}: HTTP ${fractalMeshResponse.status}`
+    );
   }
   if (!environmentResponse.ok) {
     throw new Error(
-      `Failed to load ${ENVIRONMENT_URL}: HTTP ${environmentResponse.status}`,
+      `Failed to load ${ENVIRONMENT_URL}: HTTP ${environmentResponse.status}`
     );
   }
 
-  const [meshBuffer, environmentBlob] = await Promise.all([
-    meshResponse.arrayBuffer(),
-    environmentResponse.blob(),
-  ]);
-  const mesh = decodeMesh(gpu, meshBuffer);
+  const [glassMeshBuffer, fractalMeshBuffer, environmentBlob] =
+    await Promise.all([
+      glassMeshResponse.arrayBuffer(),
+      fractalMeshResponse.arrayBuffer(),
+      environmentResponse.blob(),
+    ]);
+  const glassMesh = decodeMesh(gpu, glassMeshBuffer, "glass-pyramid");
+  let fractalMesh: ReturnType<typeof decodeMesh>;
+  try {
+    fractalMesh = decodeMesh(gpu, fractalMeshBuffer, "fractal-pyramid-l7");
+  } catch (error) {
+    glassMesh.geometry.destroy();
+    glassMesh.wireframeGeometry.destroy();
+    throw error;
+  }
   let environment: Texture | undefined;
   try {
     const bitmap = await createImageBitmap(environmentBlob);
@@ -48,7 +72,9 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
         bitmap.height % CUBEMAP_ROWS !== 0 ||
         bitmap.width / CUBEMAP_COLUMNS !== bitmap.height / CUBEMAP_ROWS
       ) {
-        throw new Error("Hero cubemap atlas must contain six square 3x2 faces.");
+        throw new Error(
+          "Hero cubemap atlas must contain six square 3x2 faces."
+        );
       }
       const faceSize = bitmap.width / CUBEMAP_COLUMNS;
       environment = gpu.device.createTexture({
@@ -62,16 +88,20 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
       bitmap.close();
     }
   } catch (error) {
-    mesh.geometry.destroy();
-    mesh.wireframeGeometry.destroy();
+    glassMesh.geometry.destroy();
+    glassMesh.wireframeGeometry.destroy();
+    fractalMesh.geometry.destroy();
+    fractalMesh.wireframeGeometry.destroy();
     environment?.destroy();
     throw error;
   }
 
   const loadedEnvironment = environment;
   if (!loadedEnvironment) {
-    mesh.geometry.destroy();
-    mesh.wireframeGeometry.destroy();
+    glassMesh.geometry.destroy();
+    glassMesh.wireframeGeometry.destroy();
+    fractalMesh.geometry.destroy();
+    fractalMesh.wireframeGeometry.destroy();
     throw new Error("Hero cubemap texture was not created.");
   }
   const environmentView = cubeView(loadedEnvironment, {
@@ -83,14 +113,20 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
   });
   let disposed = false;
   return {
-    ...mesh,
+    ...glassMesh,
+    fractalGeometry: fractalMesh.geometry,
+    fractalWireframeGeometry: fractalMesh.wireframeGeometry,
+    fractalMeshMin: fractalMesh.meshMin,
+    fractalMeshMax: fractalMesh.meshMax,
     environment: loadedEnvironment,
     environmentView,
     dispose() {
       if (disposed) return;
       disposed = true;
-      mesh.geometry.destroy();
-      mesh.wireframeGeometry.destroy();
+      glassMesh.geometry.destroy();
+      glassMesh.wireframeGeometry.destroy();
+      fractalMesh.geometry.destroy();
+      fractalMesh.wireframeGeometry.destroy();
       loadedEnvironment.destroy();
     },
   };
@@ -100,13 +136,16 @@ function uploadCubemapAtlas(
   gpu: Gpu,
   environment: Texture,
   bitmap: ImageBitmap,
-  faceSize: number,
+  faceSize: number
 ): void {
   // Cropped copyExternalImageToTexture calls into non-zero array layers produce
   // zero-filled faces in some browser WebGPU implementations. Read each atlas
   // tile once and upload tightly packed bytes instead; 256 * RGBA is already
   // aligned to WebGPU's 256-byte row requirement.
-  let context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  let context:
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
   if (typeof OffscreenCanvas === "undefined") {
     const canvas = document.createElement("canvas");
     canvas.width = faceSize;
@@ -129,14 +168,14 @@ function uploadCubemapAtlas(
       0,
       0,
       faceSize,
-      faceSize,
+      faceSize
     );
     const pixels = context.getImageData(0, 0, faceSize, faceSize).data;
     gpu.gpu.queue.writeTexture(
       { texture: environment.gpu, origin: [0, 0, face] },
       pixels,
       { bytesPerRow: faceSize * 4, rowsPerImage: faceSize },
-      [faceSize, faceSize, 1],
+      [faceSize, faceSize, 1]
     );
   }
 }
@@ -144,6 +183,7 @@ function uploadCubemapAtlas(
 function decodeMesh(
   gpu: Gpu,
   buffer: ArrayBuffer,
+  label: string
 ): Pick<
   HeroGlassAssets,
   "geometry" | "wireframeGeometry" | "meshMin" | "meshMax"
@@ -156,7 +196,7 @@ function decodeMesh(
     view.getUint8(0),
     view.getUint8(1),
     view.getUint8(2),
-    view.getUint8(3),
+    view.getUint8(3)
   );
   if (magic !== "HGP1") throw new Error("Unsupported hero glass mesh format.");
   const vertexCount = view.getUint32(4, true);
@@ -182,26 +222,28 @@ function decodeMesh(
     throw new Error("Hero glass mesh payload length is invalid.");
   }
   const vertexData = new Uint8Array(
-    buffer.slice(MESH_HEADER_SIZE, indexOffset),
+    buffer.slice(MESH_HEADER_SIZE, indexOffset)
   );
   const indices = new Uint16Array(buffer.slice(indexOffset));
   const wireframeIndices = triangleEdges(indices);
-  const buffers = [{
-    data: vertexData,
-    stride: vertexStride,
-    attributes: {
-      packed_position: "unorm16x4" as const,
-      packed_normal: "snorm16x4" as const,
+  const buffers = [
+    {
+      data: vertexData,
+      stride: vertexStride,
+      attributes: {
+        packed_position: "unorm16x4" as const,
+        packed_normal: "snorm16x4" as const,
+      },
     },
-  }];
+  ];
   return {
     geometry: geometry(gpu, {
-      label: "homepage-light-glass-pyramid",
+      label: `homepage-light-${label}`,
       buffers,
       indices,
     }),
     wireframeGeometry: geometry(gpu, {
-      label: "homepage-light-glass-pyramid-wireframe",
+      label: `homepage-light-${label}-wireframe`,
       topology: "line-list",
       buffers,
       indices: wireframeIndices,

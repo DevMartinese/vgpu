@@ -9,6 +9,8 @@ import heroGlassWireframeWgsl from "./hero-glass-wireframe.wgsl";
 import heroGlassWgsl from "./hero-glass.wgsl";
 import heroFractalBackgroundWgsl from "./hero-fractal-background.wgsl";
 import heroFractalFloorBakeWgsl from "./hero-fractal-floor-bake.wgsl";
+import heroFractalMeshWgsl from "./hero-fractal-mesh.wgsl";
+import heroFractalPresentWgsl from "./hero-fractal-present.wgsl";
 
 const FLOOR_BAKE_SIZE = 512;
 const ENVIRONMENT_SPHERE_MODEL = scaleTranslationMatrix(1, [0, 0, 0]);
@@ -48,12 +50,10 @@ export interface HeroFractalMaterial {
 }
 
 export interface HeroFractalGlass {
-  /** Uniform scale of the raymarched fractal inside the fixed glass shell. */
+  /** Uniform scale of the fractal mesh inside the fixed glass shell. */
   readonly fractalScale: number;
-  /** Air-to-glass index of refraction. */
+  /** Fresnel IOR for the shell; inner refraction is not simulated. */
   readonly ior: number;
-  /** Maximum distance marched after entering the front glass surface. */
-  readonly maxRayDistance: number;
   /** Multiplier for the static studio cubemap. */
   readonly reflectionStrength: number;
   /** Visibility of the directly rendered rear glass surfaces. */
@@ -80,12 +80,15 @@ type DebugView = "final" | "environment";
 interface HeroFractalEffects {
   readonly floorBake: Effect;
   readonly background: Effect;
+  readonly present: Effect;
 }
 
 interface HeroFractalDraws {
   readonly glassBack: Draw;
+  readonly fractal: Draw;
   readonly glassFront: Draw;
   readonly glassWireframe: Draw;
+  readonly fractalWireframe: Draw;
   readonly environmentSphere: Draw;
   readonly worldAxes: Draw;
   readonly cameraTargetAxes: Draw;
@@ -93,6 +96,7 @@ interface HeroFractalDraws {
 
 interface HeroFractalTargets {
   readonly floorBake: Target;
+  readonly composite: Target;
 }
 
 interface CameraState {
@@ -129,7 +133,6 @@ function createMaterialDebugGui(
   glass: {
     fractalScale: number;
     ior: number;
-    maxRayDistance: number;
     reflectionStrength: number;
     backOpacity: number;
     absorption: [number, number, number];
@@ -179,10 +182,7 @@ function createMaterialDebugGui(
     .add(glass, "fractalScale", 0.5, 0.99, 0.005)
     .name("fractal scale")
     .onChange(requestFloorBake);
-  glassFolder.add(glass, "ior", 1.001, 2.2, 0.001).name("IOR");
-  glassFolder
-    .add(glass, "maxRayDistance", 0.5, 6, 0.05)
-    .name("max ray distance");
+  glassFolder.add(glass, "ior", 1.001, 2.2, 0.001).name("Fresnel IOR");
   glassFolder.add(glass, "reflectionStrength", 0, 4, 0.01).name("reflection");
   glassFolder.add(glass, "backOpacity", 0, 1, 0.01).name("back opacity");
   glassFolder.addColor(glass, "absorption", 1).name("absorption");
@@ -244,7 +244,6 @@ export function createHeroFractalRenderer(
   const glass = {
     fractalScale: options.glass.fractalScale,
     ior: options.glass.ior,
-    maxRayDistance: options.glass.maxRayDistance,
     reflectionStrength: options.glass.reflectionStrength,
     backOpacity: options.glass.backOpacity,
     absorption: [...options.glass.absorption] as [number, number, number],
@@ -338,13 +337,11 @@ export function createHeroFractalRenderer(
       meshMin: assets.meshMin,
       meshMax: assets.meshMax,
       ior: glass.ior,
-      maxRayDistance: glass.maxRayDistance,
-      fractalScale: glass.fractalScale,
       reflectionStrength: glass.reflectionStrength,
       backOpacity: glass.backOpacity,
       absorption: glass.absorption,
-      material,
     };
+    const fractalModel = scaleTranslationMatrix(glass.fractalScale, [0, 0, 0]);
     draws.glassBack.set({
       params: glassParams,
       environmentTexture: assets.environmentView,
@@ -355,6 +352,16 @@ export function createHeroFractalRenderer(
       environmentTexture: assets.environmentView,
       environmentSampler,
     });
+    draws.fractal.set({
+      params: {
+        viewProjection: camera.viewProjection,
+        model: fractalModel,
+        cameraPosition: camera.position,
+        meshMin: assets.fractalMeshMin,
+        meshMax: assets.fractalMeshMax,
+        material,
+      },
+    });
     draws.glassWireframe.set({
       params: {
         viewProjection: camera.viewProjection,
@@ -363,6 +370,15 @@ export function createHeroFractalRenderer(
         meshMax: assets.meshMax,
       },
     });
+    draws.fractalWireframe.set({
+      params: {
+        viewProjection: camera.viewProjection,
+        model: fractalModel,
+        meshMin: assets.fractalMeshMin,
+        meshMax: assets.fractalMeshMax,
+      },
+    });
+    effects.present.set({ sceneTexture: targets.composite });
     draws.environmentSphere.set({
       params: {
         viewProjection: environmentCamera.viewProjectionMatrix,
@@ -409,20 +425,33 @@ export function createHeroFractalRenderer(
           (pass) => pass.draw(currentEffects.floorBake)
         );
       }
+      if (debug.view === "environment") {
+        currentFrame.pass(
+          { target: currentSurface, clear: [1, 1, 1, 1] },
+          (pass) => pass.draw(currentDraws.environmentSphere)
+        );
+        return;
+      }
       currentFrame.pass(
         { target: currentSurface, clear: [1, 1, 1, 1] },
+        (pass) => pass.draw(currentEffects.background)
+      );
+      currentFrame.pass(
+        { target: currentTargets.composite, clear: [0, 0, 0, 0] },
         (pass) => {
-          if (debug.view === "environment") {
-            pass.draw(currentDraws.environmentSphere);
-          } else {
-            pass.draw(currentEffects.background);
-            pass.draw(currentDraws.glassBack);
-            pass.draw(currentDraws.glassFront);
-            if (debug.wireframe) pass.draw(currentDraws.glassWireframe);
-            if (debug.coloredAxes) pass.draw(currentDraws.worldAxes);
-            if (debug.cameraTarget) pass.draw(currentDraws.cameraTargetAxes);
+          pass.draw(currentDraws.glassBack);
+          pass.draw(currentDraws.fractal);
+          pass.draw(currentDraws.glassFront);
+          if (debug.wireframe) {
+            pass.draw(currentDraws.glassWireframe);
+            pass.draw(currentDraws.fractalWireframe);
           }
+          if (debug.coloredAxes) pass.draw(currentDraws.worldAxes);
+          if (debug.cameraTarget) pass.draw(currentDraws.cameraTargetAxes);
         }
+      );
+      currentFrame.pass({ target: currentSurface, clear: false }, (pass) =>
+        pass.draw(currentEffects.present)
       );
     });
     floorBakeReady = true;
@@ -494,6 +523,7 @@ export function createHeroFractalRenderer(
       Math.max(1, Math.round(rect.width * dpr)),
       Math.max(1, Math.round(rect.height * dpr)),
     ]);
+    targets?.composite.resize(canvasSurface.size);
     drawHero();
   };
 
@@ -526,9 +556,11 @@ export function createHeroFractalRenderer(
     debugGui = undefined;
     draws = undefined;
     effects = undefined;
-    (
-      targets?.floorBake as (Target & { destroy?: () => void }) | undefined
-    )?.destroy?.();
+    for (const renderTarget of [targets?.floorBake, targets?.composite]) {
+      (
+        renderTarget as (Target & { destroy?: () => void }) | undefined
+      )?.destroy?.();
+    }
     targets = undefined;
     environmentSphereGeometry?.destroy();
     environmentSphereGeometry = undefined;
@@ -579,25 +611,35 @@ export function createHeroFractalRenderer(
       background: effect(gpu, heroFractalBackgroundWgsl, {
         label: "homepage-light-fractal-background",
       }),
+      present: effect(gpu, heroFractalPresentWgsl, {
+        blend: "premultiplied",
+        label: "homepage-light-fractal-present",
+      }),
     };
     draws = {
       glassBack: draw(gpu, {
         shader: heroGlassWgsl,
         geometry: assets.geometry,
         cull: "front",
-        depth: false,
+        depth: { write: false },
         blend: "premultiplied",
-        constants: { ENABLE_RAYMARCH: false },
+        constants: { FRONT_GLASS: false },
         label: "homepage-light-glass-back",
+      }),
+      fractal: draw(gpu, {
+        shader: heroFractalMeshWgsl,
+        geometry: assets.fractalGeometry,
+        cull: "back",
+        label: "homepage-light-fractal-mesh-l7",
       }),
       glassFront: draw(gpu, {
         shader: heroGlassWgsl,
         geometry: assets.geometry,
         cull: "back",
-        depth: false,
+        depth: { write: false },
         blend: "premultiplied",
-        constants: { ENABLE_RAYMARCH: true },
-        label: "homepage-light-glass-front-fractal",
+        constants: { FRONT_GLASS: true },
+        label: "homepage-light-glass-front",
       }),
       glassWireframe: draw(gpu, {
         shader: heroGlassWireframeWgsl,
@@ -606,6 +648,14 @@ export function createHeroFractalRenderer(
         depth: false,
         blend: "premultiplied",
         label: "homepage-light-glass-wireframe",
+      }),
+      fractalWireframe: draw(gpu, {
+        shader: heroGlassWireframeWgsl,
+        geometry: assets.fractalWireframeGeometry,
+        cull: "none",
+        depth: false,
+        blend: "premultiplied",
+        label: "homepage-light-fractal-mesh-wireframe",
       }),
       environmentSphere: draw(gpu, {
         shader: heroGlassEnvironmentDebugWgsl,
@@ -637,6 +687,12 @@ export function createHeroFractalRenderer(
         format: "rgba8unorm",
         label: "homepage-light-fractal-floor-bake",
       }),
+      composite: target(gpu, {
+        size: canvasSurface.size,
+        format: canvasSurface.format,
+        depth: true,
+        label: "homepage-light-fractal-glass-composite",
+      }),
     };
     floorBakeSampler = sampler(gpu, {
       minFilter: "linear",
@@ -662,15 +718,23 @@ export function createHeroFractalRenderer(
       ),
       compileWithLabel(
         "glass back",
-        draws.glassBack.compile({ colors: [canvasSurface.format] })
+        draws.glassBack.compile(targets.composite)
+      ),
+      compileWithLabel(
+        "fractal mesh",
+        draws.fractal.compile(targets.composite)
       ),
       compileWithLabel(
         "glass front",
-        draws.glassFront.compile({ colors: [canvasSurface.format] })
+        draws.glassFront.compile(targets.composite)
       ),
       compileWithLabel(
         "glass wireframe",
-        draws.glassWireframe.compile({ colors: [canvasSurface.format] })
+        draws.glassWireframe.compile(targets.composite)
+      ),
+      compileWithLabel(
+        "fractal wireframe",
+        draws.fractalWireframe.compile(targets.composite)
       ),
       compileWithLabel(
         "environment sphere",
@@ -678,11 +742,15 @@ export function createHeroFractalRenderer(
       ),
       compileWithLabel(
         "world axes",
-        draws.worldAxes.compile({ colors: [canvasSurface.format] })
+        draws.worldAxes.compile(targets.composite)
       ),
       compileWithLabel(
         "camera target axes",
-        draws.cameraTargetAxes.compile({ colors: [canvasSurface.format] })
+        draws.cameraTargetAxes.compile(targets.composite)
+      ),
+      compileWithLabel(
+        "fractal present",
+        effects.present.compile({ colors: [canvasSurface.format] })
       ),
     ]);
     if (disposed) return;
