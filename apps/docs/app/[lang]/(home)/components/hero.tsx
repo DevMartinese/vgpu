@@ -1,4 +1,4 @@
-import { HeroBlackHole } from '@/components/hero/hero-black-hole';
+import { HeroVisual } from '@/components/hero/hero-visual';
 import localFont from 'next/font/local';
 import { HeroTabs } from './hero-tabs';
 import '../hero-light-invert.css';
@@ -24,7 +24,7 @@ export function Hero() {
       data-hero-invert
       className="relative min-h-svh overflow-hidden bg-black"
     >
-      <HeroBlackHole />
+      <HeroVisual />
 
       {/* Foot fade. This was a tall, near-opaque band back when the setup
           snippet was pinned to the bottom and needed contrast; the snippet

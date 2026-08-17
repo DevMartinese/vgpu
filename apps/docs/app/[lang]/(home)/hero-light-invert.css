@@ -1,13 +1,17 @@
 /* Hero light-mode treatment.
-   Minimal, per owner directive: invert the whole composited hero section
-   (shader canvas + gradient scrims + white copy) as one unit in light mode.
-   Because a CSS `filter` rasterizes the element's rendered subtree before
-   compositing, relative contrast inside the section is preserved
-   automatically — no shader/WebGPU changes and no edits to hero-tabs.tsx or
-   hero-black-hole.tsx are needed.
+   Invert the dark-first hero chrome and copy as one unit. The light fractal
+   cancels this transform locally below because its studio palette is authored
+   directly in WGSL.
 
    Scoped to this file per the hero-solo.css convention (only imported by the
    landing page) rather than added to the shared app/styles/geistdocs.css. */
 html.light [data-hero-invert] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* The light fractal is authored directly in its final ivory palette. Applying
+   the same transform once inside the section cancels the outer transform for
+   this layer, while the dark-first hero copy keeps its existing treatment. */
+html.light [data-hero-invert] [data-hero-native-light] {
   filter: invert(1) hue-rotate(180deg);
 }
