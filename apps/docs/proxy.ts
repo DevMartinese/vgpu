@@ -70,9 +70,12 @@ const proxy = createProxy({
 // pins this for every file actually committed under `public/examples/**`, the same way
 // `check:ml-asset-smoke` pins `models/`/`ort/`, so this class of bug fails CI instead of shipping
 // silently a fifth time.
+// HERO-ASSETS: `/hero/**` contains the non-localized mesh and cubemap fetched by the homepage
+// WebGPU renderer. There is no localized page route under this prefix, so keep these binaries out
+// of the geistdocs rewrite just like `/models/**` and `/ort/**` above.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 

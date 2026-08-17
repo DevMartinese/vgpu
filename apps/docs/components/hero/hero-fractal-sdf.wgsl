@@ -175,14 +175,13 @@ fn outerInterval(ro: vec3f, rd: vec3f) -> vec2f {
 
 // Returns ray distance, or zero for a miss. This is the only primary camera
 // raymarch in the optimized hero pipeline.
-export fn traceHeroFractal(ro: vec3f, rd: vec3f) -> f32 {
+export fn traceHeroFractal(ro: vec3f, rd: vec3f, maxDistance: f32) -> f32 {
   let bound = outerInterval(ro, rd);
   var t = max(bound.x, 0.0);
-  if (bound.x > bound.y || bound.y < 0.0) { return 0.0; }
+  let traceEnd = min(bound.y, maxDistance);
+  if (bound.x > traceEnd || traceEnd < 0.0) { return 0.0; }
 
-  // This pass is baked until the camera or viewport changes. A tighter hit
-  // tolerance costs a little more once, but keeps depth-derived normals stable
-  // on the planar cavity walls.
+  // Keep one predictable quality path for both static and interactive frames.
   for (var step = 0; step < 160; step++) {
     let samplePoint = ro + rd * t;
     let outerDistance = solidTetrahedronDistance(samplePoint);
@@ -190,10 +189,10 @@ export fn traceHeroFractal(ro: vec3f, rd: vec3f) -> f32 {
     let distance = max(outerDistance, -cavitiesDistance);
     let eps = max(0.00005, 0.00002 * t);
     if (distance < eps && cavitiesDistance >= 0.0) {
-      return select(0.0, t, t <= bound.y + eps && t <= 6.0);
+      return select(0.0, t, t <= traceEnd + eps);
     }
     t += max(distance * 0.8, eps * 0.35);
-    if (t > bound.y || t > 6.0) { break; }
+    if (t > traceEnd) { break; }
   }
   return 0.0;
 }

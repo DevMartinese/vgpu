@@ -67,7 +67,7 @@ struct GeometryBake {
     params.cameraRotation,
   );
   let rd = cameraRay(uv);
-  let depth = traceHeroFractal(ro, rd);
+  let depth = traceHeroFractal(ro, rd, 6.0);
   if (depth <= 0.0) {
     return GeometryBake(0.0, vec4f(0.5, 0.5, 1.0, 1.0));
   }
