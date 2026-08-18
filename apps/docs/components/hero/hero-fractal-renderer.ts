@@ -9,12 +9,10 @@ import heroGlassTransmissionWgsl from "./hero-glass-transmission.wgsl";
 import heroGlassWireframeWgsl from "./hero-glass-wireframe.wgsl";
 import heroGlassWgsl from "./hero-glass.wgsl";
 import heroFractalBackgroundDrawWgsl from "./hero-fractal-background-draw.wgsl";
-import heroFractalFloorBakeWgsl from "./hero-fractal-floor-bake.wgsl";
 import heroFractalMeshWgsl from "./hero-fractal-mesh.wgsl";
 import heroFractalPresentWgsl from "./hero-fractal-present.wgsl";
 import heroFractalWireframeWgsl from "./hero-fractal-wireframe.wgsl";
 
-const FLOOR_BAKE_SIZE = 512;
 const HERO_LIGHT_CLEAR = 250 / 255;
 const ENVIRONMENT_SPHERE_MODEL = scaleTranslationMatrix(1, [0, 0, 0]);
 const GLASS_MODEL_MATRIX = scaleTranslationMatrix(1, [0, 0, 0]);
@@ -22,6 +20,17 @@ const ENVIRONMENT_DEBUG_CAMERA_POSITION = [0, 0, 3] as const;
 const WORLD_AXES_MODEL_MATRIX = scaleTranslationMatrix(1.45, [0, 0, 0]);
 const CAMERA_TARGET_AXES_SCALE = 0.22;
 const SPHERE_MORPH_DURATION_MS = 1040;
+const HERO_FLOOR_AO_DEFAULTS = {
+  glassAoScale: 1,
+  glassAoAmplitude: 0.47,
+  glassAoOpacity: 0.41,
+  fractalAoScale: 0.88,
+  fractalAoAmplitude: 0.18,
+  fractalAoOpacity: 0.57,
+  orbAoScale: 0.58,
+  orbAoAmplitude: 0.59,
+  orbAoOpacity: 0.73,
+};
 
 export interface HeroFractalCamera {
   /** XYZ Euler rotation, in radians. */
@@ -98,7 +107,6 @@ export interface HeroFractalRenderer {
 type DebugView = "final" | "environment" | "reflection";
 
 interface HeroFractalEffects {
-  readonly floorBake: Effect;
   readonly present: Effect;
 }
 
@@ -115,7 +123,6 @@ interface HeroFractalDraws {
 }
 
 interface HeroFractalTargets {
-  readonly floorBake: Target;
   readonly interior: Target;
 }
 
@@ -130,6 +137,18 @@ interface MutableHeroFractalMaterial {
   diffuseStrength: number;
   specularStrength: number;
   ambientStrength: number;
+}
+
+interface MutableHeroFloorAo {
+  glassAoScale: number;
+  glassAoAmplitude: number;
+  glassAoOpacity: number;
+  fractalAoScale: number;
+  fractalAoAmplitude: number;
+  fractalAoOpacity: number;
+  orbAoScale: number;
+  orbAoAmplitude: number;
+  orbAoOpacity: number;
 }
 
 interface CameraState {
@@ -172,6 +191,7 @@ function createMaterialDebugGui(
     environmentRotation: [number, number, number];
     environmentExposure: number;
   },
+  floorAo: MutableHeroFloorAo,
   debug: {
     view: DebugView;
     wireframe: boolean;
@@ -180,7 +200,6 @@ function createMaterialDebugGui(
     cameraTarget: boolean;
   },
   requestDraw: () => void,
-  requestFloorBake: () => void,
   onSphereMixChange: (value: number) => void
 ): MaterialDebugGui {
   const gui = new GuiConstructor({
@@ -212,8 +231,7 @@ function createMaterialDebugGui(
   addMaterialControllers(fractalFolder, fractalMaterial);
   fractalFolder
     .add(glass, "fractalScale", 0.35, 0.99, 0.005)
-    .name("scale")
-    .onChange(requestFloorBake);
+    .name("scale");
 
   const orbFolder = gui.addFolder("Orb material");
   addMaterialControllers(orbFolder, orbMaterial);
@@ -236,6 +254,35 @@ function createMaterialDebugGui(
   glassFolder
     .add(glass, "iridescenceFrequency", 0.25, 6, 0.05)
     .name("iridescence frequency");
+
+  const floorAoFolder = gui.addFolder("Floor AO");
+  floorAoFolder
+    .add(floorAo, "glassAoScale", 0.25, 2, 0.01)
+    .name("glass scale");
+  floorAoFolder
+    .add(floorAo, "glassAoAmplitude", 0, 2, 0.01)
+    .name("glass amplitude");
+  floorAoFolder
+    .add(floorAo, "glassAoOpacity", 0, 1, 0.01)
+    .name("glass opacity");
+  floorAoFolder
+    .add(floorAo, "fractalAoScale", 0.25, 2, 0.01)
+    .name("fractal scale");
+  floorAoFolder
+    .add(floorAo, "fractalAoAmplitude", 0, 2, 0.01)
+    .name("fractal amplitude");
+  floorAoFolder
+    .add(floorAo, "fractalAoOpacity", 0, 1, 0.01)
+    .name("fractal opacity");
+  floorAoFolder
+    .add(floorAo, "orbAoScale", 0.25, 2, 0.01)
+    .name("orb scale");
+  floorAoFolder
+    .add(floorAo, "orbAoAmplitude", 0, 2, 0.01)
+    .name("orb amplitude");
+  floorAoFolder
+    .add(floorAo, "orbAoOpacity", 0, 1, 0.01)
+    .name("orb opacity");
 
   const environmentFolder = gui.addFolder("Environment");
   addVector3Controllers(
@@ -306,7 +353,7 @@ export function createHeroFractalRenderer(
   let assets: HeroGlassAssets | undefined;
   let environmentSphereGeometry: Geometry | undefined;
   let debugAxesGeometry: Geometry | undefined;
-  let floorBakeSampler: GPUSampler | undefined;
+  let sceneSampler: GPUSampler | undefined;
   let environmentSampler: GPUSampler | undefined;
   let debugGui: GUI | undefined;
   let sphereMixController: ReturnType<GUI["add"]> | undefined;
@@ -322,7 +369,6 @@ export function createHeroFractalRenderer(
   let morphDirection = 1;
   const orbEpoch = performance.now();
   let orbTime = 0;
-  let floorBakeReady = false;
   let isCanvasVisible = true;
   let visibilityObserver: IntersectionObserver | undefined;
   let pointerTargetX = 0;
@@ -333,6 +379,7 @@ export function createHeroFractalRenderer(
   const fractalMaterial = copyMaterial(options.fractalMaterial);
   const orbMaterial = copyMaterial(options.orbMaterial);
   const material = copyMaterial(options.fractalMaterial);
+  const floorAo: MutableHeroFloorAo = { ...HERO_FLOOR_AO_DEFAULTS };
   const glass = {
     fractalScale: options.glass.fractalScale,
     orbScale: options.glass.orbScale,
@@ -417,7 +464,7 @@ export function createHeroFractalRenderer(
       !draws ||
       !targets ||
       !assets ||
-      !floorBakeSampler ||
+      !sceneSampler ||
       !environmentSampler
     )
       return;
@@ -452,11 +499,14 @@ export function createHeroFractalRenderer(
       position: ENVIRONMENT_DEBUG_CAMERA_POSITION,
       target: [0, 0, 0],
     });
-    effects.floorBake.set({ params: { fractalScale: glass.fractalScale } });
     draws.background.set({
-      params: camera.background,
-      floorBakeTexture: targets.floorBake,
-      floorSampler: floorBakeSampler,
+      params: {
+        ...camera.background,
+        fractalScale: glass.fractalScale,
+        orbScale: glass.orbScale,
+        sphereMix: materialMix,
+        ...floorAo,
+      },
     });
     const environmentRotation = environmentRotationMatrix(
       glass.environmentRotation
@@ -495,7 +545,7 @@ export function createHeroFractalRenderer(
       environmentTexture: assets.environmentView,
       environmentSampler,
       sceneTexture: targets.interior,
-      sceneSampler: floorBakeSampler,
+      sceneSampler,
     });
     draws.fractal.set({
       params: {
@@ -566,19 +616,12 @@ export function createHeroFractalRenderer(
       },
     });
 
-    const shouldBakeFloor = !floorBakeReady;
     const currentGpu = gpu;
     const currentSurface = canvasSurface;
     const currentEffects = effects;
     const currentDraws = draws;
     const currentTargets = targets;
     frame(currentGpu, (currentFrame) => {
-      if (shouldBakeFloor) {
-        currentFrame.pass(
-          { target: currentTargets.floorBake, clear: [1, 1, 0, 1] },
-          (pass) => pass.draw(currentEffects.floorBake)
-        );
-      }
       if (debug.view === "environment") {
         currentFrame.pass(
           {
@@ -617,7 +660,6 @@ export function createHeroFractalRenderer(
         }
       );
     });
-    floorBakeReady = true;
   };
 
   const requestMaterialDraw = () => {
@@ -626,11 +668,6 @@ export function createHeroFractalRenderer(
       materialFrame = 0;
       drawHero();
     });
-  };
-
-  const requestFloorBake = () => {
-    floorBakeReady = false;
-    requestMaterialDraw();
   };
 
   const stopOrbAnimation = () => {
@@ -819,11 +856,8 @@ export function createHeroFractalRenderer(
     sphereMixController = undefined;
     draws = undefined;
     effects = undefined;
-    for (const renderTarget of [targets?.floorBake, targets?.interior]) {
-      (
-        renderTarget as (Target & { destroy?: () => void }) | undefined
-      )?.destroy?.();
-    }
+    (targets?.interior as (Target & { destroy?: () => void }) | undefined)
+      ?.destroy?.();
     targets = undefined;
     environmentSphereGeometry?.destroy();
     environmentSphereGeometry = undefined;
@@ -831,7 +865,7 @@ export function createHeroFractalRenderer(
     debugAxesGeometry = undefined;
     assets?.dispose();
     assets = undefined;
-    floorBakeSampler = undefined;
+    sceneSampler = undefined;
     environmentSampler = undefined;
     canvasSurface?.dispose();
     canvasSurface = undefined;
@@ -868,9 +902,6 @@ export function createHeroFractalRenderer(
     );
     debugAxesGeometry = createDebugAxesGeometry(gpu);
     effects = {
-      floorBake: effect(gpu, heroFractalFloorBakeWgsl, {
-        label: "homepage-light-fractal-floor-bake",
-      }),
       present: effect(gpu, heroFractalPresentWgsl, {
         blend: "premultiplied",
         label: "homepage-light-fractal-present",
@@ -947,11 +978,6 @@ export function createHeroFractalRenderer(
       }),
     };
     targets = {
-      floorBake: target(gpu, {
-        size: [FLOOR_BAKE_SIZE, FLOOR_BAKE_SIZE],
-        format: "rgba8unorm",
-        label: "homepage-light-fractal-floor-bake",
-      }),
       interior: target(gpu, {
         size: canvasSurface.size,
         format: canvasSurface.format,
@@ -959,7 +985,7 @@ export function createHeroFractalRenderer(
         label: "homepage-light-fractal-glass-interior",
       }),
     };
-    floorBakeSampler = sampler(gpu, {
+    sceneSampler = sampler(gpu, {
       minFilter: "linear",
       magFilter: "linear",
       addressModeU: "clamp-to-edge",
@@ -974,10 +1000,6 @@ export function createHeroFractalRenderer(
       addressModeW: "clamp-to-edge",
     });
     await Promise.all([
-      compileWithLabel(
-        "floor bake",
-        effects.floorBake.compile(targets.floorBake)
-      ),
       compileWithLabel(
         "background",
         draws.background.compile(targets.interior)
@@ -1038,9 +1060,9 @@ export function createHeroFractalRenderer(
         fractalMaterial,
         orbMaterial,
         glass,
+        floorAo,
         debug,
         requestMaterialDraw,
-        requestFloorBake,
         setSphereMixFromGui
       );
       debugGui = materialDebugGui.gui;

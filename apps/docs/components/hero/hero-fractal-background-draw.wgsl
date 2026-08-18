@@ -1,7 +1,8 @@
 import {
-  HERO_FLOOR_BAKE_EXTENT,
-  HERO_FLOOR_Y,
-} from "./hero-fractal-sdf.wgsl";
+  HeroFloorAoSettings,
+  heroFloorAo,
+} from "./hero-fractal-floor-ao.wgsl";
+import { HERO_FLOOR_Y } from "./hero-fractal-sdf.wgsl";
 import { presentCeramic } from "./hero-fractal-ceramic.wgsl";
 
 struct Params {
@@ -11,10 +12,20 @@ struct Params {
   cameraTarget: vec3f,
   cameraUp: vec3f,
   floorGrid: f32,
+  fractalScale: f32,
+  orbScale: f32,
+  sphereMix: f32,
+  glassAoScale: f32,
+  glassAoAmplitude: f32,
+  glassAoOpacity: f32,
+  fractalAoScale: f32,
+  fractalAoAmplitude: f32,
+  fractalAoOpacity: f32,
+  orbAoScale: f32,
+  orbAoAmplitude: f32,
+  orbAoOpacity: f32,
 }
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var floorBakeTexture: texture_2d<f32>;
-@group(0) @binding(2) var floorSampler: sampler;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
@@ -46,14 +57,6 @@ fn cameraRay(uv: vec2f) -> vec3f {
   return normalize(mat3x3f(right, up, -forward) * localRay);
 }
 
-fn floorLighting(point: vec3f) -> vec2f {
-  let uv = point.xz / (2.0 * HERO_FLOOR_BAKE_EXTENT) + vec2f(0.5);
-  if (any(uv < vec2f(0.0)) || any(uv > vec2f(1.0))) {
-    return vec2f(1.0);
-  }
-  return textureSampleLevel(floorBakeTexture, floorSampler, uv, 0.0).rg;
-}
-
 fn gridLine(coordinate: vec2f, spacing: f32, pixelFootprint: f32) -> f32 {
   let gridCoordinate = coordinate / spacing;
   let distanceToLine = abs(fract(gridCoordinate - 0.5) - 0.5);
@@ -80,9 +83,25 @@ fn gridLine(coordinate: vec2f, spacing: f32, pixelFootprint: f32) -> f32 {
     let floorT = (HERO_FLOOR_Y - ro.y) / rd.y;
     if (floorT > 0.0) {
       let floorPoint = ro + rd * floorT;
-      let baked = floorLighting(floorPoint);
-      let shadowTone = mix(0.16, 1.0, smoothstep(0.0, 1.0, baked.x));
-      var floorColor = backdrop * shadowTone * baked.y;
+      let floorAoSettings = HeroFloorAoSettings(
+        params.glassAoScale,
+        params.glassAoAmplitude,
+        params.glassAoOpacity,
+        params.fractalAoScale,
+        params.fractalAoAmplitude,
+        params.fractalAoOpacity,
+        params.orbAoScale,
+        params.orbAoAmplitude,
+        params.orbAoOpacity,
+      );
+      let floorAo = heroFloorAo(
+        floorPoint.xz,
+        params.fractalScale,
+        params.orbScale,
+        params.sphereMix,
+        floorAoSettings,
+      );
+      var floorColor = backdrop;
       if (params.floorGrid > 0.5) {
         let pixelFootprint = max(
           floorT * params.tanHalfFov * 3.2 / max(params.resolution.y, 1.0),
@@ -93,7 +112,8 @@ fn gridLine(coordinate: vec2f, spacing: f32, pixelFootprint: f32) -> f32 {
         let grid = max(minor, major);
         floorColor = mix(floorColor, vec3f(0.035), grid);
       }
-      return presentCeramic(floorColor);
+      let presentedFloor = presentCeramic(floorColor);
+      return vec4f(presentedFloor.rgb * floorAo, presentedFloor.a);
     }
   }
   return presentCeramic(backdrop);
