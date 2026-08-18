@@ -17,6 +17,7 @@ export const exampleSlugs = [
   'clipping',
   'radiance-cascades',
   'agent-radiance-cascades',
+  'prism-rainbow',
   'nextjs-flare',
   'depth-estimation',
   'mnist-classifier',
