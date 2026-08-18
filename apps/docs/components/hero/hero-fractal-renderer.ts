@@ -5,14 +5,17 @@ import { perspectiveCamera, sphere } from "vgpu/scene";
 import { loadHeroGlassAssets, type HeroGlassAssets } from "./hero-glass-assets";
 import heroDebugAxesWgsl from "./hero-debug-axes.wgsl";
 import heroGlassEnvironmentDebugWgsl from "./hero-glass-environment-debug.wgsl";
+import heroGlassTransmissionWgsl from "./hero-glass-transmission.wgsl";
 import heroGlassWireframeWgsl from "./hero-glass-wireframe.wgsl";
 import heroGlassWgsl from "./hero-glass.wgsl";
-import heroFractalBackgroundWgsl from "./hero-fractal-background.wgsl";
+import heroFractalBackgroundDrawWgsl from "./hero-fractal-background-draw.wgsl";
 import heroFractalFloorBakeWgsl from "./hero-fractal-floor-bake.wgsl";
 import heroFractalMeshWgsl from "./hero-fractal-mesh.wgsl";
 import heroFractalPresentWgsl from "./hero-fractal-present.wgsl";
+import heroFractalWireframeWgsl from "./hero-fractal-wireframe.wgsl";
 
 const FLOOR_BAKE_SIZE = 512;
+const HERO_LIGHT_CLEAR = 250 / 255;
 const ENVIRONMENT_SPHERE_MODEL = scaleTranslationMatrix(1, [0, 0, 0]);
 const GLASS_MODEL_MATRIX = scaleTranslationMatrix(1, [0, 0, 0]);
 const ENVIRONMENT_DEBUG_CAMERA_POSITION = [0, 0, 3] as const;
@@ -35,24 +38,22 @@ export interface HeroFractalCamera {
 }
 
 export interface HeroFractalMaterial {
-  /** Linear RGB ceramic body color. */
+  /** Linear RGB rubber body color. */
   readonly baseColor: readonly [number, number, number];
-  /** Microsurface roughness used by the ceramic GGX lobe. */
+  /** Microsurface roughness used to select the prefiltered environment level. */
   readonly roughness: number;
-  /** Strength of the ceramic diffuse lobe. */
+  /** Strength of the rubber diffuse lobe. */
   readonly diffuseStrength: number;
-  /** Strength of the ceramic specular lobe. */
+  /** Strength of the rubber specular lobe. */
   readonly specularStrength: number;
-  /** Strength of the neutral room fill. */
+  /** Strength of the broad diffuse contribution from the studio environment. */
   readonly ambientStrength: number;
-  /** Intensity of the key light shared with the floor shadow. */
-  readonly lightIntensity: number;
 }
 
 export interface HeroFractalGlass {
   /** Uniform scale of the fractal mesh inside the fixed glass shell. */
   readonly fractalScale: number;
-  /** Fresnel IOR for the shell; inner refraction is not simulated. */
+  /** Index of refraction used by front-surface transmission and Fresnel. */
   readonly ior: number;
   /** Multiplier for the static studio cubemap. */
   readonly reflectionStrength: number;
@@ -60,6 +61,18 @@ export interface HeroFractalGlass {
   readonly backOpacity: number;
   /** Beer-Lambert absorption coefficients in linear RGB. */
   readonly absorption: readonly [number, number, number];
+  /** Stable screen-space blur radius for the front glass, in pixels. */
+  readonly frostRadius: number;
+  /** Subtle red/blue separation derived from the shared frost samples. */
+  readonly dispersion: number;
+  /** Strength of the angle-dependent spectral tint on reflections. */
+  readonly iridescenceStrength: number;
+  /** Number of spectral tint cycles across the front-glass Fresnel range. */
+  readonly iridescenceFrequency: number;
+  /** XYZ rotation of the studio environment, in degrees. */
+  readonly environmentRotation: readonly [number, number, number];
+  /** Exposure applied to the studio environment before material response. */
+  readonly environmentExposure: number;
 }
 
 interface HeroFractalRendererOptions {
@@ -75,15 +88,15 @@ export interface HeroFractalRenderer {
   dispose(): void;
 }
 
-type DebugView = "final" | "environment";
+type DebugView = "final" | "environment" | "reflection";
 
 interface HeroFractalEffects {
   readonly floorBake: Effect;
-  readonly background: Effect;
   readonly present: Effect;
 }
 
 interface HeroFractalDraws {
+  readonly background: Draw;
   readonly glassBack: Draw;
   readonly fractal: Draw;
   readonly glassFront: Draw;
@@ -96,7 +109,7 @@ interface HeroFractalDraws {
 
 interface HeroFractalTargets {
   readonly floorBake: Target;
-  readonly composite: Target;
+  readonly interior: Target;
 }
 
 interface CameraState {
@@ -128,7 +141,6 @@ function createMaterialDebugGui(
     diffuseStrength: number;
     specularStrength: number;
     ambientStrength: number;
-    lightIntensity: number;
   },
   glass: {
     fractalScale: number;
@@ -136,6 +148,12 @@ function createMaterialDebugGui(
     reflectionStrength: number;
     backOpacity: number;
     absorption: [number, number, number];
+    frostRadius: number;
+    dispersion: number;
+    iridescenceStrength: number;
+    iridescenceFrequency: number;
+    environmentRotation: [number, number, number];
+    environmentExposure: number;
   },
   debug: {
     view: DebugView;
@@ -153,9 +171,13 @@ function createMaterialDebugGui(
   });
   gui.domElement.dataset.heroFractalMaterialGui = "";
   gui.domElement.style.zIndex = "1000";
+  gui.domElement.style.left = "0";
+  gui.domElement.style.right = "auto";
 
   const debugFolder = gui.addFolder("Debug");
-  debugFolder.add(debug, "view", ["final", "environment"]).name("view");
+  debugFolder
+    .add(debug, "view", ["final", "environment", "reflection"])
+    .name("view");
   debugFolder.add(debug, "wireframe").name("Wireframe");
   debugFolder.add(debug, "floorGrid").name("Floor grid");
   debugFolder.add(debug, "coloredAxes").name("Colored axes");
@@ -168,27 +190,45 @@ function createMaterialDebugGui(
   cameraFolder.add(camera, "maxMouseRotation", 0, 15, 0.1).name("max rotation");
   cameraFolder.add(camera, "mouseLerp", 0.01, 1, 0.01).name("lerp");
 
-  const ceramic = gui.addFolder("Ceramic");
-  ceramic.addColor(material, "baseColor", 1).name("base color");
-  ceramic.add(material, "roughness", 0, 1, 0.01).name("roughness");
-  ceramic.add(material, "diffuseStrength", 0, 2, 0.01).name("diffuse strength");
-  ceramic
+  const rubber = gui.addFolder("Soft rubber");
+  rubber.addColor(material, "baseColor", 1).name("base color");
+  rubber.add(material, "roughness", 0, 1, 0.01).name("roughness");
+  rubber.add(material, "diffuseStrength", 0, 2, 0.01).name("diffuse strength");
+  rubber
     .add(material, "specularStrength", 0, 2, 0.01)
     .name("specular strength");
-  ceramic.add(material, "ambientStrength", 0, 1, 0.01).name("ambient fill");
+  rubber.add(material, "ambientStrength", 0, 1, 0.01).name("ambient fill");
 
   const glassFolder = gui.addFolder("Glass");
   glassFolder
     .add(glass, "fractalScale", 0.5, 0.99, 0.005)
     .name("fractal scale")
     .onChange(requestFloorBake);
-  glassFolder.add(glass, "ior", 1.001, 2.2, 0.001).name("Fresnel IOR");
+  glassFolder.add(glass, "ior", 1.001, 2.2, 0.001).name("IOR");
   glassFolder.add(glass, "reflectionStrength", 0, 4, 0.01).name("reflection");
   glassFolder.add(glass, "backOpacity", 0, 1, 0.01).name("back opacity");
   glassFolder.addColor(glass, "absorption", 1).name("absorption");
+  glassFolder.add(glass, "frostRadius", 0, 3, 0.05).name("frost radius px");
+  glassFolder.add(glass, "dispersion", 0, 0.1, 0.0005).name("RGB shift");
+  glassFolder
+    .add(glass, "iridescenceStrength", 0, 0.25, 0.005)
+    .name("iridescence");
+  glassFolder
+    .add(glass, "iridescenceFrequency", 0.25, 6, 0.05)
+    .name("iridescence frequency");
 
-  const light = gui.addFolder("Shared key light");
-  light.add(material, "lightIntensity", 0, 8, 0.01).name("intensity");
+  const environmentFolder = gui.addFolder("Environment");
+  addVector3Controllers(
+    environmentFolder,
+    glass.environmentRotation,
+    "rotation",
+    -180,
+    180,
+    0.1
+  );
+  environmentFolder
+    .add(glass, "environmentExposure", 0.1, 8, 0.01)
+    .name("exposure");
 
   gui.onChange(requestDraw);
   return gui;
@@ -199,11 +239,12 @@ function addVector3Controllers(
   vector: [number, number, number],
   label: string,
   min: number,
-  max: number
+  max: number,
+  step = 0.01
 ): void {
-  folder.add(vector, "0", min, max, 0.01).name(`${label} x`);
-  folder.add(vector, "1", min, max, 0.01).name(`${label} y`);
-  folder.add(vector, "2", min, max, 0.01).name(`${label} z`);
+  folder.add(vector, "0", min, max, step).name(`${label} x`);
+  folder.add(vector, "1", min, max, step).name(`${label} y`);
+  folder.add(vector, "2", min, max, step).name(`${label} z`);
 }
 
 /** Static, event-driven renderer owned exclusively by the homepage hero. */
@@ -239,7 +280,6 @@ export function createHeroFractalRenderer(
     diffuseStrength: options.material.diffuseStrength,
     specularStrength: options.material.specularStrength,
     ambientStrength: options.material.ambientStrength,
-    lightIntensity: options.material.lightIntensity,
   };
   const glass = {
     fractalScale: options.glass.fractalScale,
@@ -247,6 +287,16 @@ export function createHeroFractalRenderer(
     reflectionStrength: options.glass.reflectionStrength,
     backOpacity: options.glass.backOpacity,
     absorption: [...options.glass.absorption] as [number, number, number],
+    frostRadius: options.glass.frostRadius,
+    dispersion: options.glass.dispersion,
+    iridescenceStrength: options.glass.iridescenceStrength,
+    iridescenceFrequency: options.glass.iridescenceFrequency,
+    environmentRotation: [...options.glass.environmentRotation] as [
+      number,
+      number,
+      number
+    ],
+    environmentExposure: options.glass.environmentExposure,
   };
   const initialPositionOffset = rotateCamera(
     options.camera.cameraDistance,
@@ -260,14 +310,17 @@ export function createHeroFractalRenderer(
     maxMouseRotation: options.camera.maxMouseRotation,
     mouseLerp: options.camera.mouseLerp,
   };
+  const debugQuery = new URLSearchParams(window.location.search);
   const debug = {
-    view: "final" as DebugView,
+    view: (debugQuery.get("debug") === "reflection"
+      ? "reflection"
+      : "final") as DebugView,
     wireframe: false,
     floorGrid: false,
     coloredAxes: false,
     cameraTarget: false,
   };
-  const debugEnabled = new URLSearchParams(window.location.search).has("debug");
+  const debugEnabled = debugQuery.has("debug");
 
   const cameraState = (resolution: readonly [number, number]): CameraState => {
     const fovRadians = (cameraControls.fov * Math.PI) / 180;
@@ -325,21 +378,33 @@ export function createHeroFractalRenderer(
       target: [0, 0, 0],
     });
     effects.floorBake.set({ params: { fractalScale: glass.fractalScale } });
-    effects.background.set({
+    draws.background.set({
       params: camera.background,
       floorBakeTexture: targets.floorBake,
       floorSampler: floorBakeSampler,
     });
+    const environmentRotation = environmentRotationMatrix(
+      glass.environmentRotation
+    );
     const glassParams = {
       viewProjection: camera.viewProjection,
       model: GLASS_MODEL_MATRIX,
       cameraPosition: camera.position,
       meshMin: assets.meshMin,
       meshMax: assets.meshMax,
+      resolution: canvasSurface.size,
+      fractalScale: glass.fractalScale,
       ior: glass.ior,
       reflectionStrength: glass.reflectionStrength,
       backOpacity: glass.backOpacity,
       absorption: glass.absorption,
+      frostRadius: glass.frostRadius,
+      dispersion: glass.dispersion,
+      iridescenceStrength: glass.iridescenceStrength,
+      iridescenceFrequency: glass.iridescenceFrequency,
+      environmentRotation,
+      environmentExposure: glass.environmentExposure,
+      reflectionDebug: debug.view === "reflection" ? 1 : 0,
     };
     const fractalModel = scaleTranslationMatrix(glass.fractalScale, [0, 0, 0]);
     draws.glassBack.set({
@@ -351,6 +416,8 @@ export function createHeroFractalRenderer(
       params: glassParams,
       environmentTexture: assets.environmentView,
       environmentSampler,
+      sceneTexture: targets.interior,
+      sceneSampler: floorBakeSampler,
     });
     draws.fractal.set({
       params: {
@@ -360,7 +427,11 @@ export function createHeroFractalRenderer(
         meshMin: assets.fractalMeshMin,
         meshMax: assets.fractalMeshMax,
         material,
+        environmentRotation,
+        environmentExposure: glass.environmentExposure,
       },
+      environmentTexture: assets.environmentView,
+      environmentSampler,
     });
     draws.glassWireframe.set({
       params: {
@@ -378,13 +449,14 @@ export function createHeroFractalRenderer(
         meshMax: assets.fractalMeshMax,
       },
     });
-    effects.present.set({ sceneTexture: targets.composite });
+    effects.present.set({ sceneTexture: targets.interior });
     draws.environmentSphere.set({
       params: {
         viewProjection: environmentCamera.viewProjectionMatrix,
         model: ENVIRONMENT_SPHERE_MODEL,
         cameraPosition: ENVIRONMENT_DEBUG_CAMERA_POSITION,
-        reflectionStrength: glass.reflectionStrength,
+        environmentRotation,
+        environmentExposure: glass.environmentExposure,
       },
       environmentTexture: assets.environmentView,
       environmentSampler,
@@ -427,20 +499,47 @@ export function createHeroFractalRenderer(
       }
       if (debug.view === "environment") {
         currentFrame.pass(
-          { target: currentSurface, clear: [1, 1, 1, 1] },
+          {
+            target: currentSurface,
+            clear: [
+              HERO_LIGHT_CLEAR,
+              HERO_LIGHT_CLEAR,
+              HERO_LIGHT_CLEAR,
+              1,
+            ],
+          },
           (pass) => pass.draw(currentDraws.environmentSphere)
         );
         return;
       }
       currentFrame.pass(
-        { target: currentSurface, clear: [1, 1, 1, 1] },
-        (pass) => pass.draw(currentEffects.background)
-      );
-      currentFrame.pass(
-        { target: currentTargets.composite, clear: [0, 0, 0, 0] },
+        {
+          target: currentTargets.interior,
+          clear: [
+            HERO_LIGHT_CLEAR,
+            HERO_LIGHT_CLEAR,
+            HERO_LIGHT_CLEAR,
+            1,
+          ],
+        },
         (pass) => {
+          pass.draw(currentDraws.background);
           pass.draw(currentDraws.glassBack);
           pass.draw(currentDraws.fractal);
+        }
+      );
+      currentFrame.pass(
+        {
+          target: currentSurface,
+          clear: [
+            HERO_LIGHT_CLEAR,
+            HERO_LIGHT_CLEAR,
+            HERO_LIGHT_CLEAR,
+            1,
+          ],
+        },
+        (pass) => {
+          pass.draw(currentEffects.present);
           pass.draw(currentDraws.glassFront);
           if (debug.wireframe) {
             pass.draw(currentDraws.glassWireframe);
@@ -449,9 +548,6 @@ export function createHeroFractalRenderer(
           if (debug.coloredAxes) pass.draw(currentDraws.worldAxes);
           if (debug.cameraTarget) pass.draw(currentDraws.cameraTargetAxes);
         }
-      );
-      currentFrame.pass({ target: currentSurface, clear: false }, (pass) =>
-        pass.draw(currentEffects.present)
       );
     });
     floorBakeReady = true;
@@ -523,7 +619,7 @@ export function createHeroFractalRenderer(
       Math.max(1, Math.round(rect.width * dpr)),
       Math.max(1, Math.round(rect.height * dpr)),
     ]);
-    targets?.composite.resize(canvasSurface.size);
+    targets?.interior.resize(canvasSurface.size);
     drawHero();
   };
 
@@ -556,7 +652,7 @@ export function createHeroFractalRenderer(
     debugGui = undefined;
     draws = undefined;
     effects = undefined;
-    for (const renderTarget of [targets?.floorBake, targets?.composite]) {
+    for (const renderTarget of [targets?.floorBake, targets?.interior]) {
       (
         renderTarget as (Target & { destroy?: () => void }) | undefined
       )?.destroy?.();
@@ -608,38 +704,39 @@ export function createHeroFractalRenderer(
       floorBake: effect(gpu, heroFractalFloorBakeWgsl, {
         label: "homepage-light-fractal-floor-bake",
       }),
-      background: effect(gpu, heroFractalBackgroundWgsl, {
-        label: "homepage-light-fractal-background",
-      }),
       present: effect(gpu, heroFractalPresentWgsl, {
         blend: "premultiplied",
         label: "homepage-light-fractal-present",
       }),
     };
     draws = {
+      background: draw(gpu, {
+        shader: heroFractalBackgroundDrawWgsl,
+        vertices: 3,
+        depth: false,
+        label: "homepage-light-fractal-background",
+      }),
       glassBack: draw(gpu, {
         shader: heroGlassWgsl,
         geometry: assets.geometry,
         cull: "front",
         depth: { write: false },
         blend: "premultiplied",
-        constants: { FRONT_GLASS: false },
         label: "homepage-light-glass-back",
       }),
       fractal: draw(gpu, {
         shader: heroFractalMeshWgsl,
         geometry: assets.fractalGeometry,
+        instances: 2,
         cull: "back",
-        label: "homepage-light-fractal-mesh-l7",
+        label: "homepage-light-fractal-face-instances-l7",
       }),
       glassFront: draw(gpu, {
-        shader: heroGlassWgsl,
+        shader: heroGlassTransmissionWgsl,
         geometry: assets.geometry,
         cull: "back",
-        depth: { write: false },
-        blend: "premultiplied",
-        constants: { FRONT_GLASS: true },
-        label: "homepage-light-glass-front",
+        depth: false,
+        label: "homepage-light-glass-front-transmission",
       }),
       glassWireframe: draw(gpu, {
         shader: heroGlassWireframeWgsl,
@@ -650,8 +747,9 @@ export function createHeroFractalRenderer(
         label: "homepage-light-glass-wireframe",
       }),
       fractalWireframe: draw(gpu, {
-        shader: heroGlassWireframeWgsl,
+        shader: heroFractalWireframeWgsl,
         geometry: assets.fractalWireframeGeometry,
+        instances: 2,
         cull: "none",
         depth: false,
         blend: "premultiplied",
@@ -687,11 +785,11 @@ export function createHeroFractalRenderer(
         format: "rgba8unorm",
         label: "homepage-light-fractal-floor-bake",
       }),
-      composite: target(gpu, {
+      interior: target(gpu, {
         size: canvasSurface.size,
         format: canvasSurface.format,
         depth: true,
-        label: "homepage-light-fractal-glass-composite",
+        label: "homepage-light-fractal-glass-interior",
       }),
     };
     floorBakeSampler = sampler(gpu, {
@@ -703,6 +801,7 @@ export function createHeroFractalRenderer(
     environmentSampler = sampler(gpu, {
       minFilter: "linear",
       magFilter: "linear",
+      mipmapFilter: "linear",
       addressModeU: "clamp-to-edge",
       addressModeV: "clamp-to-edge",
       addressModeW: "clamp-to-edge",
@@ -714,27 +813,21 @@ export function createHeroFractalRenderer(
       ),
       compileWithLabel(
         "background",
-        effects.background.compile({ colors: [canvasSurface.format] })
+        draws.background.compile(targets.interior)
       ),
-      compileWithLabel(
-        "glass back",
-        draws.glassBack.compile(targets.composite)
-      ),
-      compileWithLabel(
-        "fractal mesh",
-        draws.fractal.compile(targets.composite)
-      ),
+      compileWithLabel("glass back", draws.glassBack.compile(targets.interior)),
+      compileWithLabel("fractal mesh", draws.fractal.compile(targets.interior)),
       compileWithLabel(
         "glass front",
-        draws.glassFront.compile(targets.composite)
+        draws.glassFront.compile({ colors: [canvasSurface.format] })
       ),
       compileWithLabel(
         "glass wireframe",
-        draws.glassWireframe.compile(targets.composite)
+        draws.glassWireframe.compile({ colors: [canvasSurface.format] })
       ),
       compileWithLabel(
         "fractal wireframe",
-        draws.fractalWireframe.compile(targets.composite)
+        draws.fractalWireframe.compile({ colors: [canvasSurface.format] })
       ),
       compileWithLabel(
         "environment sphere",
@@ -742,11 +835,11 @@ export function createHeroFractalRenderer(
       ),
       compileWithLabel(
         "world axes",
-        draws.worldAxes.compile(targets.composite)
+        draws.worldAxes.compile({ colors: [canvasSurface.format] })
       ),
       compileWithLabel(
         "camera target axes",
-        draws.cameraTargetAxes.compile(targets.composite)
+        draws.cameraTargetAxes.compile({ colors: [canvasSurface.format] })
       ),
       compileWithLabel(
         "fractal present",
@@ -796,7 +889,15 @@ async function compileWithLabel(
   try {
     await compilation;
   } catch (error) {
-    throw new Error(`Hero ${label} pipeline compilation failed.`, {
+    const details: string[] = [];
+    let current: unknown = error;
+    while (current instanceof Error) {
+      details.push(current.message);
+      current = current.cause;
+    }
+    if (current !== undefined) details.push(String(current));
+    const detail = details.join(" Caused by: ");
+    throw new Error(`Hero ${label} pipeline compilation failed: ${detail}`, {
       cause: error,
     });
   }
@@ -975,6 +1076,38 @@ function scaleTranslationMatrix(
     translation[0],
     translation[1],
     translation[2],
+    1,
+  ]);
+}
+
+function environmentRotationMatrix(
+  rotationDegrees: readonly [number, number, number]
+): Float32Array {
+  const toRadians = -Math.PI / 180;
+  const rotation = rotationDegrees.map((value) => value * toRadians);
+  const cx = Math.cos(rotation[0]);
+  const sx = Math.sin(rotation[0]);
+  const cy = Math.cos(rotation[1]);
+  const sy = Math.sin(rotation[1]);
+  const cz = Math.cos(rotation[2]);
+  const sz = Math.sin(rotation[2]);
+
+  return new Float32Array([
+    cz * cy,
+    sz * cy,
+    -sy,
+    0,
+    cz * sy * sx - sz * cx,
+    sz * sy * sx + cz * cx,
+    cy * sx,
+    0,
+    cz * sy * cx + sz * sx,
+    sz * sy * cx - cz * sx,
+    cy * cx,
+    0,
+    0,
+    0,
+    0,
     1,
   ]);
 }

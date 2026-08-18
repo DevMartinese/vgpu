@@ -4,7 +4,7 @@ import type { Texture } from "vgpu/core";
 import { cubeView } from "vgpu/core";
 
 const GLASS_MESH_URL = "/hero/rounded-tetrahedron.mesh?v=bevel-3";
-const FRACTAL_MESH_URL = "/hero/fractal-tetrahedron-l7.mesh?v=mesh-3";
+const FRACTAL_MESH_URL = "/hero/fractal-tetrahedron-l7.mesh?v=face-1";
 const ENVIRONMENT_URL = "/hero/studio-cubemap.png";
 const MESH_HEADER_SIZE = 40;
 const CUBEMAP_COLUMNS = 3;
@@ -57,7 +57,7 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
   const glassMesh = decodeMesh(gpu, glassMeshBuffer, "glass-pyramid");
   let fractalMesh: ReturnType<typeof decodeMesh>;
   try {
-    fractalMesh = decodeMesh(gpu, fractalMeshBuffer, "fractal-pyramid-l7");
+    fractalMesh = decodeMesh(gpu, fractalMeshBuffer, "fractal-pyramid-face-l7");
   } catch (error) {
     glassMesh.geometry.destroy();
     glassMesh.wireframeGeometry.destroy();
@@ -77,13 +77,21 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
         );
       }
       const faceSize = bitmap.width / CUBEMAP_COLUMNS;
+      const mipLevelCount = Math.floor(Math.log2(faceSize)) + 1;
       environment = gpu.device.createTexture({
         size: [faceSize, faceSize, 6],
         format: "rgba8unorm-srgb",
         usage: ["texture_binding", "copy_dst"],
+        mipLevelCount,
         label: "homepage-light-glass-studio-cubemap",
       });
-      uploadCubemapAtlas(gpu, environment, bitmap, faceSize);
+      uploadPrefilteredCubemapAtlas(
+        gpu,
+        environment,
+        bitmap,
+        faceSize,
+        mipLevelCount
+      );
     } finally {
       bitmap.close();
     }
@@ -132,34 +140,21 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
   };
 }
 
-function uploadCubemapAtlas(
+function uploadPrefilteredCubemapAtlas(
   gpu: Gpu,
   environment: Texture,
   bitmap: ImageBitmap,
-  faceSize: number
+  faceSize: number,
+  mipLevelCount: number
 ): void {
   // Cropped copyExternalImageToTexture calls into non-zero array layers produce
   // zero-filled faces in some browser WebGPU implementations. Read each atlas
   // tile once and upload tightly packed bytes instead; 256 * RGBA is already
   // aligned to WebGPU's 256-byte row requirement.
-  let context:
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
-  if (typeof OffscreenCanvas === "undefined") {
-    const canvas = document.createElement("canvas");
-    canvas.width = faceSize;
-    canvas.height = faceSize;
-    context = canvas.getContext("2d", { willReadFrequently: true });
-  } else {
-    const canvas = new OffscreenCanvas(faceSize, faceSize);
-    context = canvas.getContext("2d", { willReadFrequently: true });
-  }
-  if (!context) throw new Error("Could not decode the hero cubemap atlas.");
-
   for (let face = 0; face < 6; face++) {
-    context.clearRect(0, 0, faceSize, faceSize);
-    context.drawImage(
+    let source = createPixelCanvas(faceSize);
+    let sourceContext = pixelCanvasContext(source);
+    sourceContext.drawImage(
       bitmap,
       (face % CUBEMAP_COLUMNS) * faceSize,
       Math.floor(face / CUBEMAP_COLUMNS) * faceSize,
@@ -170,14 +165,74 @@ function uploadCubemapAtlas(
       faceSize,
       faceSize
     );
-    const pixels = context.getImageData(0, 0, faceSize, faceSize).data;
-    gpu.gpu.queue.writeTexture(
-      { texture: environment.gpu, origin: [0, 0, face] },
-      pixels,
-      { bytesPerRow: faceSize * 4, rowsPerImage: faceSize },
-      [faceSize, faceSize, 1]
+
+    for (let mipLevel = 0; mipLevel < mipLevelCount; mipLevel++) {
+      const mipSize = Math.max(1, faceSize >> mipLevel);
+      if (mipLevel > 0) {
+        const next = createPixelCanvas(mipSize);
+        const nextContext = pixelCanvasContext(next);
+        nextContext.imageSmoothingEnabled = true;
+        nextContext.imageSmoothingQuality = "high";
+        nextContext.drawImage(source, 0, 0, mipSize, mipSize);
+        source = next;
+        sourceContext = nextContext;
+      }
+      uploadCubemapMip(
+        gpu,
+        environment,
+        sourceContext.getImageData(0, 0, mipSize, mipSize).data,
+        face,
+        mipLevel,
+        mipSize
+      );
+    }
+  }
+}
+
+type PixelCanvas = HTMLCanvasElement | OffscreenCanvas;
+type PixelCanvasContext =
+  | CanvasRenderingContext2D
+  | OffscreenCanvasRenderingContext2D;
+
+function createPixelCanvas(size: number): PixelCanvas {
+  if (typeof OffscreenCanvas !== "undefined") {
+    return new OffscreenCanvas(size, size);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  return canvas;
+}
+
+function pixelCanvasContext(canvas: PixelCanvas): PixelCanvasContext {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Could not decode the hero cubemap atlas.");
+  return context as PixelCanvasContext;
+}
+
+function uploadCubemapMip(
+  gpu: Gpu,
+  environment: Texture,
+  pixels: Uint8ClampedArray,
+  face: number,
+  mipLevel: number,
+  size: number
+): void {
+  const sourceBytesPerRow = size * 4;
+  const bytesPerRow = Math.ceil(sourceBytesPerRow / 256) * 256;
+  const upload = new Uint8Array(bytesPerRow * size);
+  for (let row = 0; row < size; row++) {
+    upload.set(
+      pixels.subarray(row * sourceBytesPerRow, (row + 1) * sourceBytesPerRow),
+      row * bytesPerRow
     );
   }
+  gpu.gpu.queue.writeTexture(
+    { texture: environment.gpu, mipLevel, origin: [0, 0, face] },
+    upload,
+    { bytesPerRow, rowsPerImage: size },
+    [size, size, 1]
+  );
 }
 
 function decodeMesh(

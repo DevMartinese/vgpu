@@ -12,33 +12,36 @@ import {
 // Edit these values to compose the light-mode hero. Changes update via HMR.
 const HERO_FRACTAL_CAMERA = {
   cameraRotation: [0, 0, 0],
-  cameraDistance: [6.73, 1.33, 0.76],
-  cameraTarget: [-1.07, 0, 0.57],
-  fov: 19.4,
-  maxMouseRotation: 2.5,
-  mouseLerp: 0.08,
+  cameraDistance: [5.44, 1.33, 0.55],
+  cameraTarget: [-0.08, 0.16, 0.74],
+  fov: 17.3,
+  maxMouseRotation: 5,
+  mouseLerp: 0.02,
 } satisfies HeroFractalCamera;
 
 // ── Hero fractal material ───────────────────────────────────────────────────
 // These are also the initial values shown by lil-gui at /?debug.
 const HERO_FRACTAL_MATERIAL = {
-  baseColor: [8 / 255, 8 / 255, 8 / 255],
-  roughness: 0.58,
-  diffuseStrength: 1,
-  specularStrength: 0.65,
-  ambientStrength: 0.26,
-  lightIntensity: 6.49,
+  baseColor: [1, 1, 1],
+  roughness: 0.72,
+  diffuseStrength: 0.72,
+  specularStrength: 0.68,
+  ambientStrength: 0.86,
 } satisfies HeroFractalMaterial;
 
 // ── Hero glass shell ────────────────────────────────────────────────────────
 const HERO_FRACTAL_GLASS = {
-  // Keeps the previous 1:1.08 inner/outer proportion while the glass itself
-  // remains fixed at its authored scale.
-  fractalScale: 1 / 1.08,
-  ior: 1.183,
-  reflectionStrength: 0.57,
-  backOpacity: 0.63,
-  absorption: [20 / 255, 140 / 255, 215 / 255],
+  fractalScale: 0.59,
+  ior: 1.149,
+  reflectionStrength: 0.36,
+  backOpacity: 0.19,
+  absorption: [74 / 255, 74 / 255, 74 / 255],
+  frostRadius: 1.8,
+  dispersion: 0.025,
+  iridescenceStrength: 0.04,
+  iridescenceFrequency: 2,
+  environmentRotation: [0, -36, 0],
+  environmentExposure: 1.58,
 } satisfies HeroFractalGlass;
 
 /** Decorative light-mode hero visual with an isolated renderer and shader. */
@@ -88,7 +91,7 @@ export function HeroFractal() {
     <div
       data-hero-native-light
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden bg-white"
+      className="pointer-events-none absolute inset-0 overflow-hidden bg-[#fafafa]"
     >
       <canvas
         ref={canvasRef}

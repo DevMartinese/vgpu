@@ -1,7 +1,8 @@
 import { presentCeramic } from "./hero-fractal-ceramic.wgsl";
-import { sampleHeroEnvironment } from "./hero-glass-environment.wgsl";
-
-override FRONT_GLASS: bool = false;
+import {
+  rotateHeroEnvironmentDirection,
+  sampleHeroEnvironment,
+} from "./hero-glass-environment.wgsl";
 
 struct GlassParams {
   viewProjection: mat4x4f,
@@ -9,10 +10,19 @@ struct GlassParams {
   cameraPosition: vec3f,
   meshMin: vec3f,
   meshMax: vec3f,
+  resolution: vec2f,
+  fractalScale: f32,
   ior: f32,
   reflectionStrength: f32,
   backOpacity: f32,
   absorption: vec3f,
+  frostRadius: f32,
+  dispersion: f32,
+  iridescenceStrength: f32,
+  iridescenceFrequency: f32,
+  environmentRotation: mat4x4f,
+  environmentExposure: f32,
+  reflectionDebug: f32,
 }
 @group(0) @binding(0) var<uniform> params: GlassParams;
 @group(0) @binding(1) var environmentTexture: texture_2d_array<f32>;
@@ -41,14 +51,8 @@ fn studio(direction: vec3f) -> vec3f {
   return sampleHeroEnvironment(
     environmentTexture,
     environmentSampler,
-    normalize(direction),
-  ) * params.reflectionStrength;
-}
-
-fn dielectricFresnel(ior: f32, facing: f32) -> f32 {
-  let ratio = (ior - 1.0) / (ior + 1.0);
-  let f0 = ratio * ratio;
-  return f0 + (1.0 - f0) * pow(1.0 - clamp(facing, 0.0, 1.0), 5.0);
+    rotateHeroEnvironmentDirection(direction, params.environmentRotation),
+  ) * params.environmentExposure * params.reflectionStrength;
 }
 
 fn premultiplied(color: vec3f, alpha: f32) -> vec4f {
@@ -61,21 +65,11 @@ fn premultiplied(color: vec3f, alpha: f32) -> vec4f {
   let normal = select(-rawNormal, rawNormal, dot(rawNormal, view) >= 0.0);
   let incident = -view;
   let facing = clamp(dot(view, normal), 0.0, 1.0);
-  let fresnel = dielectricFresnel(params.ior, facing);
   let reflected = studio(reflect(incident, normal));
-
-  if (!FRONT_GLASS) {
-    let alpha = clamp(
-      params.backOpacity * (0.22 + 0.78 * pow(1.0 - facing, 1.5)),
-      0.0,
-      0.85,
-    );
-    return premultiplied(presentCeramic(reflected).rgb, alpha);
-  }
-
-  // The ceramic mesh is rendered behind this shell. Until screen-space
-  // refraction is added, the front face contributes only its tinted Fresnel lobe.
-  let tint = exp(-params.absorption * 0.08);
-  let alpha = clamp(fresnel + 0.018, 0.0, 0.42);
-  return premultiplied(presentCeramic(reflected * tint).rgb, alpha);
+  let alpha = clamp(
+    params.backOpacity * (0.22 + 0.78 * pow(1.0 - facing, 1.5)),
+    0.0,
+    0.85,
+  );
+  return premultiplied(presentCeramic(reflected).rgb, alpha);
 }

@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const FRACTAL_LEVELS = 7;
+const CANONICAL_FACE = 2;
 const CAVITY_DEPTH = 0.22;
 const CAVITY_APEX_AO = 0.45;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -29,12 +30,15 @@ const ambientOcclusion = [];
 const indices = [];
 const vertexLookup = new Map();
 
-for (let face = 0; face < 4; face++) {
-  const corners = tetrahedronVertices.filter(
-    (_vertex, index) => index !== face
-  );
-  addFractalFace(tetrahedronVertices[face], ...corners, 0, 1);
-}
+const canonicalCorners = tetrahedronVertices.filter(
+  (_vertex, index) => index !== CANONICAL_FACE
+);
+addFractalFace(
+  tetrahedronVertices[CANONICAL_FACE],
+  ...canonicalCorners,
+  0,
+  1
+);
 
 if (positions.length / 3 > 65535) {
   throw new Error("Hero fractal mesh exceeds the uint16 vertex limit.");
@@ -95,7 +99,8 @@ for (let axis = 0; axis < 3; axis++) {
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, Buffer.concat([header, vertexBytes, indexBytes]));
 console.log(
-  `Wrote ${outputPath}: ${FRACTAL_LEVELS} levels, ${vertexCount} vertices, ` +
+  `Wrote ${outputPath}: face ${CANONICAL_FACE}, ${FRACTAL_LEVELS} levels, ` +
+    `${vertexCount} vertices, ` +
     `${indices.length / 3} triangles, ` +
     `${
       header.byteLength + vertexBytes.byteLength + indexBytes.byteLength

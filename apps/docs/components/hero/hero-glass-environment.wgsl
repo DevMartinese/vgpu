@@ -3,6 +3,13 @@ struct HeroEnvironmentLookup {
   face: i32,
 }
 
+export fn rotateHeroEnvironmentDirection(
+  directionInput: vec3f,
+  rotation: mat4x4f,
+) -> vec3f {
+  return normalize((rotation * vec4f(directionInput, 0.0)).xyz);
+}
+
 fn heroEnvironmentLookup(directionInput: vec3f) -> HeroEnvironmentLookup {
   let direction = normalize(directionInput);
   let magnitude = abs(direction);
@@ -41,12 +48,26 @@ export fn sampleHeroEnvironment(
   environmentSampler: sampler,
   direction: vec3f,
 ) -> vec3f {
+  return sampleHeroEnvironmentLevel(
+    environmentTexture,
+    environmentSampler,
+    direction,
+    0.0,
+  );
+}
+
+export fn sampleHeroEnvironmentLevel(
+  environmentTexture: texture_2d_array<f32>,
+  environmentSampler: sampler,
+  direction: vec3f,
+  level: f32,
+) -> vec3f {
   let lookup = heroEnvironmentLookup(direction);
   return textureSampleLevel(
     environmentTexture,
     environmentSampler,
     lookup.uv,
     lookup.face,
-    0.0,
+    level,
   ).rgb;
 }

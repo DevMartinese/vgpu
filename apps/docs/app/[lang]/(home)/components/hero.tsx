@@ -1,12 +1,12 @@
-import { HeroVisual } from '@/components/hero/hero-visual';
-import localFont from 'next/font/local';
-import { HeroTabs } from './hero-tabs';
-import '../hero-light-invert.css';
+import { HeroVisual } from "@/components/hero/hero-visual";
+import localFont from "next/font/local";
+import { HeroTabs } from "./hero-tabs";
+import "../hero-light-invert.css";
 
 const geistSerif = localFont({
-  src: './geist-serif-v0.2-regular.otf',
-  weight: '400',
-  style: 'normal',
+  src: "./geist-serif-v0.2-regular.otf",
+  weight: "400",
+  style: "normal",
 });
 
 /**
@@ -40,11 +40,12 @@ export function Hero() {
           an ease-out curve, which reads as haze instead of a band. */}
       <div
         data-hero-overlay
+        data-hero-foot-fade
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[16%]"
         style={{
           background:
-            'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.52) 24%, rgba(0,0,0,0.3) 48%, rgba(0,0,0,0.13) 72%, rgba(0,0,0,0) 100%)',
+            "linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.52) 24%, rgba(0,0,0,0.3) 48%, rgba(0,0,0,0.13) 72%, rgba(0,0,0,0) 100%)",
         }}
       />
 
@@ -60,14 +61,14 @@ export function Hero() {
       >
         <div className="pointer-events-auto flex flex-col items-center min-[768px]:items-start">
           <h1
+            data-hero-title
             className={`${geistSerif.className} mb-[0.6em] text-center text-[clamp(4rem,8vw,8rem)] font-thin leading-[0.5] tracking-[-0.03em] text-black min-[768px]:text-left`}
-            style={{ WebkitTextStroke: '0.01em #999' }}
           >
             <span className="tracking-[-0.05em]">v</span>gpu
           </h1>
           <p
             className="max-w-[10em] text-balance text-center font-light leading-tight text-white min-[768px]:text-left"
-            style={{ fontSize: 'clamp(1rem, 4svh, 10.75rem)' }}
+            style={{ fontSize: "clamp(1rem, 4svh, 10.75rem)" }}
           >
             The WebGPU library, designed for agents.
           </p>

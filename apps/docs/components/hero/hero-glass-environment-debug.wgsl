@@ -1,11 +1,15 @@
 import { presentCeramic } from "./hero-fractal-ceramic.wgsl";
-import { sampleHeroEnvironment } from "./hero-glass-environment.wgsl";
+import {
+  rotateHeroEnvironmentDirection,
+  sampleHeroEnvironment,
+} from "./hero-glass-environment.wgsl";
 
 struct Params {
   viewProjection: mat4x4f,
   model: mat4x4f,
   cameraPosition: vec3f,
-  reflectionStrength: f32,
+  environmentRotation: mat4x4f,
+  environmentExposure: f32,
 }
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var environmentTexture: texture_2d_array<f32>;
@@ -35,7 +39,7 @@ struct VertexOut {
   let environment = sampleHeroEnvironment(
     environmentTexture,
     environmentSampler,
-    reflected,
-  ) * params.reflectionStrength;
+    rotateHeroEnvironmentDirection(reflected, params.environmentRotation),
+  ) * params.environmentExposure;
   return presentCeramic(environment);
 }
