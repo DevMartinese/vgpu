@@ -13,11 +13,10 @@ const geistSerif = localFont({
 /**
  * Landing hero.
  *
- * The shader (`components/hero/**`, transplanted verbatim — see TGEIST-10) is
- * the full section; the copy sits on top of it. Structure, overlays and
- * copy are ported unchanged from `apps/docs/app/page.tsx`'s hero section — this
- * is the piece the design decision calls out as "not a design asset", so it is
- * not rebuilt with template chrome the way the sections below it are.
+ * The dark-mode shader is the full section; the copy sits on top of it. Light
+ * mode intentionally keeps the visual layer empty while a replacement is
+ * designed. Structure, overlays and copy are ported unchanged from the old
+ * homepage hero.
  */
 export function Hero() {
   return (

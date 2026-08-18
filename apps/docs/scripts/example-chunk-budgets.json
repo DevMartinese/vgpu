@@ -16,6 +16,7 @@
     "batch-rendering": 60084,
     "fft-ocean": 58540,
     "raymarched-fractal": 52811,
+    "glass-fractal": 75704,
     "radiance-cascades": 61842,
     "agent-radiance-cascades": 60742,
     "depth-estimation": 58868,

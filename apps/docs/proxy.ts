@@ -52,7 +52,7 @@ const proxy = createProxy({
 // ANCHOR TGEIST-EXAMPLES-STATIC (5th instance of this exact class -- TGEIST-06, TGEIST-08 and
 // TGEIST-ML-ASSETS above are the first three): every media file committed under
 // `public/examples/**` -- the gallery/sidebar thumbnails (`public/examples/<slug>.card.png`,
-// `<slug>.hero.png`), videos, and `public/examples/depth-estimation/source.jpg` (the default input image
+// `<slug>.hero.png`), videos, meshes, and `public/examples/depth-estimation/source.jpg` (the default input image
 // `example-canvas` fetches for that demo) -- is excluded from the proxy. None of them has a route
 // under `app/[lang]/`, so while the proxy is active on them the i18n rewrite sends e.g.
 // `/examples/depth-estimation/source.jpg` to `/en/examples/depth-estimation/source.jpg`, which no
@@ -75,7 +75,7 @@ const proxy = createProxy({
 // of the geistdocs rewrite just like `/models/**` and `/ort/**` above.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 

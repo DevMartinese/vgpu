@@ -1,7 +1,5 @@
 /* Hero light-mode treatment.
-   Invert the dark-first hero chrome and copy as one unit. The light fractal
-   cancels this transform locally below because its studio palette is authored
-   directly in WGSL.
+   Invert the dark-first hero chrome and copy as one unit.
 
    Scoped to this file per the hero-solo.css convention (only imported by the
    landing page) rather than added to the shared app/styles/geistdocs.css. */
@@ -9,13 +7,6 @@ html.light [data-hero-invert] {
   filter: invert(1) hue-rotate(180deg);
   /* The parent inversion turns this authored #050505 into #fafafa. */
   background-color: #050505;
-}
-
-/* The light fractal is authored directly in its final ivory palette. Applying
-   the same transform once inside the section cancels the outer transform for
-   this layer, while the dark-first hero copy keeps its existing treatment. */
-html.light [data-hero-invert] [data-hero-native-light] {
-  filter: invert(1) hue-rotate(180deg);
 }
 
 /* The dark-mode foot fade is composited before the section inversion. Match

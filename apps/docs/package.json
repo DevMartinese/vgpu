@@ -39,7 +39,7 @@
     "thumbs:check": "node scripts/render-example-thumbs.mjs --check",
     "render:proof": "node scripts/render-example-thumbs.mjs --proof-dir ../../artifacts/example-renders",
     "debug:agent-radiance": "node scripts/render-agent-radiance-debug.mjs",
-    "debug:hero-fractal": "node --experimental-strip-types components/hero/hero-fractal-preview.mts"
+    "debug:glass-fractal": "node --experimental-strip-types examples/glass-fractal/tools/hero-fractal-preview.mts"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.134",
