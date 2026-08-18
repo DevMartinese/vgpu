@@ -21,6 +21,7 @@ const GLASS_MODEL_MATRIX = scaleTranslationMatrix(1, [0, 0, 0]);
 const ENVIRONMENT_DEBUG_CAMERA_POSITION = [0, 0, 3] as const;
 const WORLD_AXES_MODEL_MATRIX = scaleTranslationMatrix(1.45, [0, 0, 0]);
 const CAMERA_TARGET_AXES_SCALE = 0.22;
+const SPHERE_MORPH_DURATION_MS = 1040;
 
 export interface HeroFractalCamera {
   /** XYZ Euler rotation, in radians. */
@@ -53,6 +54,10 @@ export interface HeroFractalMaterial {
 export interface HeroFractalGlass {
   /** Uniform scale of the fractal mesh inside the fixed glass shell. */
   readonly fractalScale: number;
+  /** Uniform scale of the orb inside the fixed glass shell. */
+  readonly orbScale: number;
+  /** Morph between the tetrahedral fractal and its normalized sphere target. */
+  readonly sphereMix: number;
   /** Index of refraction used by front-surface transmission and Fresnel. */
   readonly ior: number;
   /** Multiplier for the static studio cubemap. */
@@ -78,13 +83,15 @@ export interface HeroFractalGlass {
 interface HeroFractalRendererOptions {
   readonly canvas: HTMLCanvasElement;
   readonly camera: Readonly<HeroFractalCamera>;
-  readonly material: Readonly<HeroFractalMaterial>;
+  readonly fractalMaterial: Readonly<HeroFractalMaterial>;
+  readonly orbMaterial: Readonly<HeroFractalMaterial>;
   readonly glass: Readonly<HeroFractalGlass>;
   readonly onError?: (error: unknown) => void;
 }
 
 export interface HeroFractalRenderer {
   readonly ready: Promise<void>;
+  setSphereMix(value: number): void;
   dispose(): void;
 }
 
@@ -112,6 +119,19 @@ interface HeroFractalTargets {
   readonly interior: Target;
 }
 
+interface MaterialDebugGui {
+  readonly gui: GUI;
+  readonly sphereMixController: ReturnType<GUI["add"]>;
+}
+
+interface MutableHeroFractalMaterial {
+  baseColor: [number, number, number];
+  roughness: number;
+  diffuseStrength: number;
+  specularStrength: number;
+  ambientStrength: number;
+}
+
 interface CameraState {
   readonly background: {
     readonly resolution: readonly [number, number];
@@ -135,15 +155,12 @@ function createMaterialDebugGui(
     maxMouseRotation: number;
     mouseLerp: number;
   },
-  material: {
-    baseColor: [number, number, number];
-    roughness: number;
-    diffuseStrength: number;
-    specularStrength: number;
-    ambientStrength: number;
-  },
+  fractalMaterial: MutableHeroFractalMaterial,
+  orbMaterial: MutableHeroFractalMaterial,
   glass: {
     fractalScale: number;
+    orbScale: number;
+    sphereMix: number;
     ior: number;
     reflectionStrength: number;
     backOpacity: number;
@@ -163,8 +180,9 @@ function createMaterialDebugGui(
     cameraTarget: boolean;
   },
   requestDraw: () => void,
-  requestFloorBake: () => void
-): GUI {
+  requestFloorBake: () => void,
+  onSphereMixChange: (value: number) => void
+): MaterialDebugGui {
   const gui = new GuiConstructor({
     title: "Hero fractal material",
     width: 290,
@@ -190,20 +208,22 @@ function createMaterialDebugGui(
   cameraFolder.add(camera, "maxMouseRotation", 0, 15, 0.1).name("max rotation");
   cameraFolder.add(camera, "mouseLerp", 0.01, 1, 0.01).name("lerp");
 
-  const rubber = gui.addFolder("Soft rubber");
-  rubber.addColor(material, "baseColor", 1).name("base color");
-  rubber.add(material, "roughness", 0, 1, 0.01).name("roughness");
-  rubber.add(material, "diffuseStrength", 0, 2, 0.01).name("diffuse strength");
-  rubber
-    .add(material, "specularStrength", 0, 2, 0.01)
-    .name("specular strength");
-  rubber.add(material, "ambientStrength", 0, 1, 0.01).name("ambient fill");
+  const fractalFolder = gui.addFolder("Fractal material");
+  addMaterialControllers(fractalFolder, fractalMaterial);
+  fractalFolder
+    .add(glass, "fractalScale", 0.35, 0.99, 0.005)
+    .name("scale")
+    .onChange(requestFloorBake);
+
+  const orbFolder = gui.addFolder("Orb material");
+  addMaterialControllers(orbFolder, orbMaterial);
+  orbFolder.add(glass, "orbScale", 0.35, 0.99, 0.005).name("scale");
 
   const glassFolder = gui.addFolder("Glass");
-  glassFolder
-    .add(glass, "fractalScale", 0.5, 0.99, 0.005)
-    .name("fractal scale")
-    .onChange(requestFloorBake);
+  const sphereMixController = glassFolder
+    .add(glass, "sphereMix", 0, 1, 0.001)
+    .name("sphere mix")
+    .onChange(onSphereMixChange);
   glassFolder.add(glass, "ior", 1.001, 2.2, 0.001).name("IOR");
   glassFolder.add(glass, "reflectionStrength", 0, 4, 0.01).name("reflection");
   glassFolder.add(glass, "backOpacity", 0, 1, 0.01).name("back opacity");
@@ -231,7 +251,7 @@ function createMaterialDebugGui(
     .name("exposure");
 
   gui.onChange(requestDraw);
-  return gui;
+  return { gui, sphereMixController };
 }
 
 function addVector3Controllers(
@@ -245,6 +265,31 @@ function addVector3Controllers(
   folder.add(vector, "0", min, max, step).name(`${label} x`);
   folder.add(vector, "1", min, max, step).name(`${label} y`);
   folder.add(vector, "2", min, max, step).name(`${label} z`);
+}
+
+function addMaterialControllers(
+  folder: GUI,
+  material: MutableHeroFractalMaterial
+): void {
+  folder.addColor(material, "baseColor", 1).name("base color");
+  folder.add(material, "roughness", 0, 1, 0.01).name("roughness");
+  folder.add(material, "diffuseStrength", 0, 2, 0.01).name("diffuse strength");
+  folder
+    .add(material, "specularStrength", 0, 2, 0.01)
+    .name("specular strength");
+  folder.add(material, "ambientStrength", 0, 1, 0.01).name("ambient fill");
+}
+
+function copyMaterial(
+  material: Readonly<HeroFractalMaterial>
+): MutableHeroFractalMaterial {
+  return {
+    baseColor: [...material.baseColor],
+    roughness: material.roughness,
+    diffuseStrength: material.diffuseStrength,
+    specularStrength: material.specularStrength,
+    ambientStrength: material.ambientStrength,
+  };
 }
 
 /** Static, event-driven renderer owned exclusively by the homepage hero. */
@@ -264,25 +309,34 @@ export function createHeroFractalRenderer(
   let floorBakeSampler: GPUSampler | undefined;
   let environmentSampler: GPUSampler | undefined;
   let debugGui: GUI | undefined;
+  let sphereMixController: ReturnType<GUI["add"]> | undefined;
   let observer: ResizeObserver | undefined;
   let resizeFrame = 0;
   let materialFrame = 0;
   let cameraFrame = 0;
+  let morphFrame = 0;
+  let orbFrame = 0;
+  let morphStartTime = 0;
+  let morphStartMix = options.glass.sphereMix;
+  let morphTargetMix = options.glass.sphereMix;
+  let morphDirection = 1;
+  const orbEpoch = performance.now();
+  let orbTime = 0;
   let floorBakeReady = false;
+  let isCanvasVisible = true;
+  let visibilityObserver: IntersectionObserver | undefined;
   let pointerTargetX = 0;
   let pointerTargetY = 0;
   let pointerCurrentX = 0;
   let pointerCurrentY = 0;
   let lastDpr = typeof window === "undefined" ? 1 : window.devicePixelRatio;
-  const material = {
-    baseColor: [...options.material.baseColor] as [number, number, number],
-    roughness: options.material.roughness,
-    diffuseStrength: options.material.diffuseStrength,
-    specularStrength: options.material.specularStrength,
-    ambientStrength: options.material.ambientStrength,
-  };
+  const fractalMaterial = copyMaterial(options.fractalMaterial);
+  const orbMaterial = copyMaterial(options.orbMaterial);
+  const material = copyMaterial(options.fractalMaterial);
   const glass = {
     fractalScale: options.glass.fractalScale,
+    orbScale: options.glass.orbScale,
+    sphereMix: options.glass.sphereMix,
     ior: options.glass.ior,
     reflectionStrength: options.glass.reflectionStrength,
     backOpacity: options.glass.backOpacity,
@@ -369,6 +423,27 @@ export function createHeroFractalRenderer(
       return;
 
     const camera = cameraState(canvasSurface.size);
+    const materialMix = Math.min(1, Math.max(0, glass.sphereMix));
+    const shaderSphereMix = glass.sphereMix * morphDirection;
+    const innerScale =
+      glass.fractalScale * (1 - materialMix) + glass.orbScale * materialMix;
+    for (let channel = 0; channel < 3; channel++) {
+      material.baseColor[channel] =
+        fractalMaterial.baseColor[channel] * (1 - materialMix) +
+        orbMaterial.baseColor[channel] * materialMix;
+    }
+    material.roughness =
+      fractalMaterial.roughness * (1 - materialMix) +
+      orbMaterial.roughness * materialMix;
+    material.diffuseStrength =
+      fractalMaterial.diffuseStrength * (1 - materialMix) +
+      orbMaterial.diffuseStrength * materialMix;
+    material.specularStrength =
+      fractalMaterial.specularStrength * (1 - materialMix) +
+      orbMaterial.specularStrength * materialMix;
+    material.ambientStrength =
+      fractalMaterial.ambientStrength * (1 - materialMix) +
+      orbMaterial.ambientStrength * materialMix;
     const environmentCamera = perspectiveCamera({
       fov: 45,
       aspect: canvasSurface.size[0] / Math.max(canvasSurface.size[1], 1),
@@ -393,7 +468,7 @@ export function createHeroFractalRenderer(
       meshMin: assets.meshMin,
       meshMax: assets.meshMax,
       resolution: canvasSurface.size,
-      fractalScale: glass.fractalScale,
+      fractalScale: innerScale,
       ior: glass.ior,
       reflectionStrength: glass.reflectionStrength,
       backOpacity: glass.backOpacity,
@@ -406,7 +481,10 @@ export function createHeroFractalRenderer(
       environmentExposure: glass.environmentExposure,
       reflectionDebug: debug.view === "reflection" ? 1 : 0,
     };
-    const fractalModel = scaleTranslationMatrix(glass.fractalScale, [0, 0, 0]);
+    // The vertex shader owns the staggered 120-degree Skill turn. Keeping the
+    // model matrix scale-only leaves the glass shell fixed and lets each
+    // vertex rotate with its local morph progress.
+    const fractalModel = scaleTranslationMatrix(innerScale, [0, 0, 0]);
     draws.glassBack.set({
       params: glassParams,
       environmentTexture: assets.environmentView,
@@ -426,6 +504,8 @@ export function createHeroFractalRenderer(
         cameraPosition: camera.position,
         meshMin: assets.fractalMeshMin,
         meshMax: assets.fractalMeshMax,
+        sphereMix: shaderSphereMix,
+        time: orbTime,
         material,
         environmentRotation,
         environmentExposure: glass.environmentExposure,
@@ -447,6 +527,8 @@ export function createHeroFractalRenderer(
         model: fractalModel,
         meshMin: assets.fractalMeshMin,
         meshMax: assets.fractalMeshMax,
+        sphereMix: shaderSphereMix,
+        time: orbTime,
       },
     });
     effects.present.set({ sceneTexture: targets.interior });
@@ -501,12 +583,7 @@ export function createHeroFractalRenderer(
         currentFrame.pass(
           {
             target: currentSurface,
-            clear: [
-              HERO_LIGHT_CLEAR,
-              HERO_LIGHT_CLEAR,
-              HERO_LIGHT_CLEAR,
-              1,
-            ],
+            clear: [HERO_LIGHT_CLEAR, HERO_LIGHT_CLEAR, HERO_LIGHT_CLEAR, 1],
           },
           (pass) => pass.draw(currentDraws.environmentSphere)
         );
@@ -515,12 +592,7 @@ export function createHeroFractalRenderer(
       currentFrame.pass(
         {
           target: currentTargets.interior,
-          clear: [
-            HERO_LIGHT_CLEAR,
-            HERO_LIGHT_CLEAR,
-            HERO_LIGHT_CLEAR,
-            1,
-          ],
+          clear: [HERO_LIGHT_CLEAR, HERO_LIGHT_CLEAR, HERO_LIGHT_CLEAR, 1],
         },
         (pass) => {
           pass.draw(currentDraws.background);
@@ -531,12 +603,7 @@ export function createHeroFractalRenderer(
       currentFrame.pass(
         {
           target: currentSurface,
-          clear: [
-            HERO_LIGHT_CLEAR,
-            HERO_LIGHT_CLEAR,
-            HERO_LIGHT_CLEAR,
-            1,
-          ],
+          clear: [HERO_LIGHT_CLEAR, HERO_LIGHT_CLEAR, HERO_LIGHT_CLEAR, 1],
         },
         (pass) => {
           pass.draw(currentEffects.present);
@@ -566,6 +633,90 @@ export function createHeroFractalRenderer(
     requestMaterialDraw();
   };
 
+  const stopOrbAnimation = () => {
+    if (orbFrame) cancelAnimationFrame(orbFrame);
+    orbFrame = 0;
+  };
+
+  const animateOrb = (time: number) => {
+    orbFrame = 0;
+    if (
+      disposed ||
+      morphFrame ||
+      morphTargetMix <= 0 ||
+      !isCanvasVisible ||
+      document.hidden
+    )
+      return;
+    orbTime = (time - orbEpoch) * 0.001;
+    drawHero();
+    orbFrame = requestAnimationFrame(animateOrb);
+  };
+
+  const requestOrbAnimation = () => {
+    if (
+      !orbFrame &&
+      !morphFrame &&
+      morphTargetMix > 0 &&
+      isCanvasVisible &&
+      !document.hidden
+    ) {
+      orbFrame = requestAnimationFrame(animateOrb);
+    }
+  };
+
+  const animateSphereMorph = (time: number) => {
+    morphFrame = 0;
+    if (disposed) return;
+    const progress = Math.min(
+      1,
+      Math.max(0, (time - morphStartTime) / SPHERE_MORPH_DURATION_MS)
+    );
+    const easedProgress = 1 - (1 - progress) ** 4;
+    glass.sphereMix =
+      morphStartMix + (morphTargetMix - morphStartMix) * easedProgress;
+    if (glass.sphereMix > 0) orbTime = (time - orbEpoch) * 0.001;
+    sphereMixController?.updateDisplay();
+    drawHero();
+    if (progress < 1) {
+      morphFrame = requestAnimationFrame(animateSphereMorph);
+    } else {
+      requestOrbAnimation();
+    }
+  };
+
+  const setSphereMix = (value: number) => {
+    const nextMix = Math.min(1, Math.max(0, value));
+    if (nextMix === morphTargetMix && !morphFrame) return;
+    if (morphFrame) cancelAnimationFrame(morphFrame);
+    morphFrame = 0;
+    stopOrbAnimation();
+    morphDirection = nextMix >= glass.sphereMix ? 1 : -1;
+    morphStartMix = glass.sphereMix;
+    morphTargetMix = nextMix;
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      glass.sphereMix = nextMix;
+      sphereMixController?.updateDisplay();
+      requestMaterialDraw();
+      requestOrbAnimation();
+      return;
+    }
+
+    morphStartTime = performance.now();
+    morphFrame = requestAnimationFrame(animateSphereMorph);
+  };
+
+  const setSphereMixFromGui = (value: number) => {
+    if (morphFrame) cancelAnimationFrame(morphFrame);
+    stopOrbAnimation();
+    morphFrame = 0;
+    morphDirection = value >= morphTargetMix ? 1 : -1;
+    morphStartMix = value;
+    morphTargetMix = value;
+    requestOrbAnimation();
+  };
+
   const animateCamera = () => {
     cameraFrame = 0;
     if (disposed) return;
@@ -576,7 +727,7 @@ export function createHeroFractalRenderer(
     const remainingY = Math.abs(pointerTargetY - pointerCurrentY);
     if (remainingX < 0.0001) pointerCurrentX = pointerTargetX;
     if (remainingY < 0.0001) pointerCurrentY = pointerTargetY;
-    drawHero();
+    if (!morphFrame && !orbFrame) drawHero();
     if (remainingX >= 0.0001 || remainingY >= 0.0001) {
       cameraFrame = requestAnimationFrame(animateCamera);
     }
@@ -609,6 +760,11 @@ export function createHeroFractalRenderer(
     if (event.relatedTarget === null) resetPointer();
   };
 
+  const onDocumentVisibilityChange = () => {
+    if (document.hidden) stopOrbAnimation();
+    else requestOrbAnimation();
+  };
+
   const resizeAndDraw = () => {
     resizeFrame = 0;
     if (disposed || !canvasSurface) return;
@@ -639,17 +795,28 @@ export function createHeroFractalRenderer(
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
     if (materialFrame) cancelAnimationFrame(materialFrame);
     if (cameraFrame) cancelAnimationFrame(cameraFrame);
+    if (morphFrame) cancelAnimationFrame(morphFrame);
+    stopOrbAnimation();
     resizeFrame = 0;
     materialFrame = 0;
     cameraFrame = 0;
+    morphFrame = 0;
+    orbFrame = 0;
     observer?.disconnect();
     observer = undefined;
+    visibilityObserver?.disconnect();
+    visibilityObserver = undefined;
     window.removeEventListener("resize", onWindowResize);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerout", onPointerOut);
     window.removeEventListener("blur", resetPointer);
+    document.removeEventListener(
+      "visibilitychange",
+      onDocumentVisibilityChange
+    );
     debugGui?.destroy();
     debugGui = undefined;
+    sphereMixController = undefined;
     draws = undefined;
     effects = undefined;
     for (const renderTarget of [targets?.floorBake, targets?.interior]) {
@@ -727,7 +894,7 @@ export function createHeroFractalRenderer(
       fractal: draw(gpu, {
         shader: heroFractalMeshWgsl,
         geometry: assets.fractalGeometry,
-        instances: 2,
+        instances: 4,
         cull: "back",
         label: "homepage-light-fractal-face-instances-l7",
       }),
@@ -749,7 +916,7 @@ export function createHeroFractalRenderer(
       fractalWireframe: draw(gpu, {
         shader: heroFractalWireframeWgsl,
         geometry: assets.fractalWireframeGeometry,
-        instances: 2,
+        instances: 4,
         cull: "none",
         depth: false,
         blend: "premultiplied",
@@ -849,23 +1016,35 @@ export function createHeroFractalRenderer(
     if (disposed) return;
     observer = new ResizeObserver(requestResize);
     observer.observe(options.canvas);
+    visibilityObserver = new IntersectionObserver(([entry]) => {
+      isCanvasVisible = entry?.isIntersecting ?? false;
+      if (isCanvasVisible) requestOrbAnimation();
+      else stopOrbAnimation();
+    });
+    visibilityObserver.observe(options.canvas);
     window.addEventListener("resize", onWindowResize);
     window.addEventListener("pointermove", onPointerMove, { passive: true });
     window.addEventListener("pointerout", onPointerOut);
     window.addEventListener("blur", resetPointer);
+    document.addEventListener("visibilitychange", onDocumentVisibilityChange);
     resizeAndDraw();
+    requestOrbAnimation();
     if (guiModulePromise) {
       const { default: GuiConstructor } = await guiModulePromise;
       if (disposed) return;
-      debugGui = createMaterialDebugGui(
+      const materialDebugGui = createMaterialDebugGui(
         GuiConstructor,
         cameraControls,
-        material,
+        fractalMaterial,
+        orbMaterial,
         glass,
         debug,
         requestMaterialDraw,
-        requestFloorBake
+        requestFloorBake,
+        setSphereMixFromGui
       );
+      debugGui = materialDebugGui.gui;
+      sphereMixController = materialDebugGui.sphereMixController;
     }
   };
 
@@ -879,7 +1058,7 @@ export function createHeroFractalRenderer(
     throw error;
   });
 
-  return { ready, dispose };
+  return { ready, setSphereMix, dispose };
 }
 
 async function compileWithLabel(

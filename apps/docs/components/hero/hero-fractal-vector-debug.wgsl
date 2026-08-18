@@ -1,6 +1,10 @@
 import {
   heroFractalFaceNormal,
   heroFractalFacePosition,
+  heroFractalSkillRotation,
+  heroFractalSphereMix,
+  heroFractalSphereNormal,
+  heroFractalSpherePosition,
 } from "./hero-fractal-face-instance.wgsl";
 
 struct Params {
@@ -9,6 +13,8 @@ struct Params {
   cameraPosition: vec3f,
   meshMin: vec3f,
   meshMax: vec3f,
+  sphereMix: f32,
+  time: f32,
   environmentRotation: mat4x4f,
   mode: f32,
 }
@@ -23,11 +29,33 @@ struct VertexOut {
 @vertex fn vs_main(
   @location(0) packed_position: vec4f,
   @location(1) packed_normal: vec4f,
+  @location(2) packed_sphere: vec4f,
   @builtin(instance_index) instance: u32,
 ) -> VertexOut {
   let decodedPosition = mix(params.meshMin, params.meshMax, packed_position.xyz);
-  let localPosition = heroFractalFacePosition(decodedPosition, instance);
-  let localNormal = heroFractalFaceNormal(packed_normal.xyz, instance);
+  let sphereMix = heroFractalSphereMix(decodedPosition, params.sphereMix);
+  let fractalPosition = heroFractalFacePosition(decodedPosition, instance);
+  let sphereSourcePosition = heroFractalFacePosition(
+    packed_sphere.xyz,
+    instance,
+  );
+  let spherePosition = heroFractalSpherePosition(
+    sphereSourcePosition,
+    params.time,
+  );
+  let sphereNormal = heroFractalSphereNormal(sphereSourcePosition, params.time);
+  let transitionRotation = heroFractalSkillRotation(sphereMix);
+  let localPosition = transitionRotation * mix(
+    fractalPosition,
+    spherePosition,
+    sphereMix,
+  );
+  let fractalNormal = heroFractalFaceNormal(packed_normal.xyz, instance);
+  let localNormal = transitionRotation * normalize(mix(
+      fractalNormal,
+      sphereNormal,
+      sphereMix,
+    ));
   let world = params.model * vec4f(localPosition, 1.0);
   var out: VertexOut;
   out.position = params.viewProjection * world;

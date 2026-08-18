@@ -3,14 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import dynamic from "next/dynamic";
+import { useHeroTab } from "./hero-tab-state";
 
 const HeroBlackHole = dynamic(
   () => import("./hero-black-hole").then((module) => module.HeroBlackHole),
-  { ssr: false },
+  { ssr: false }
 );
 const HeroFractal = dynamic(
   () => import("./hero-fractal").then((module) => module.HeroFractal),
-  { ssr: false },
+  { ssr: false }
 );
 
 const DESKTOP_HERO_QUERY = "(min-width: 768px)";
@@ -18,6 +19,7 @@ const DESKTOP_HERO_QUERY = "(min-width: 768px)";
 /** Chooses one GPU hero visual; hidden variants are unmounted and disposed. */
 export function HeroVisual() {
   const { resolvedTheme } = useTheme();
+  const { activeTab } = useHeroTab();
   const [mounted, setMounted] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
 
@@ -35,7 +37,9 @@ export function HeroVisual() {
   if (!mounted) return null;
 
   if (resolvedTheme === "light") {
-    return isDesktop ? <HeroFractal /> : null;
+    return isDesktop ? (
+      <HeroFractal sphereMix={activeTab === "Skill" ? 1 : 0} />
+    ) : null;
   }
 
   return <HeroBlackHole />;

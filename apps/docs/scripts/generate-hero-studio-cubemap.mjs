@@ -6,6 +6,71 @@ import { PNG } from 'pngjs';
 const FACE_SIZE = 256;
 const FACE_COLUMNS = 3;
 const FACE_ROWS = 2;
+const STUDIO_PANELS = [
+  {
+    direction: [-0.32, 0.91, 0.27],
+    size: [0.2, 0.055],
+    feather: 0.018,
+    color: [1, 0.95, 0.87],
+    intensity: 8.5,
+  },
+  {
+    direction: [0.08, 0.97, 0.23],
+    size: [0.15, 0.045],
+    feather: 0.015,
+    color: [1, 0.99, 0.96],
+    intensity: 9.5,
+  },
+  {
+    direction: [0.51, 0.83, 0.23],
+    size: [0.18, 0.05],
+    feather: 0.016,
+    color: [0.82, 0.91, 1],
+    intensity: 8,
+  },
+  {
+    direction: [0.86, 0.43, -0.28],
+    size: [0.06, 0.17],
+    feather: 0.018,
+    color: [0.74, 0.86, 1],
+    intensity: 7.25,
+  },
+  {
+    direction: [-0.86, 0.43, -0.28],
+    size: [0.065, 0.16],
+    feather: 0.018,
+    color: [1, 0.79, 0.68],
+    intensity: 6.75,
+  },
+  {
+    direction: [-0.22, 0.81, -0.54],
+    size: [0.16, 0.045],
+    feather: 0.014,
+    color: [0.96, 0.91, 0.86],
+    intensity: 8,
+  },
+  {
+    direction: [0.26, 0.76, -0.6],
+    size: [0.12, 0.04],
+    feather: 0.014,
+    color: [0.78, 0.87, 1],
+    intensity: 7.5,
+  },
+  {
+    direction: [0.3, 0.2, 0.93],
+    size: [0.18, 0.055],
+    feather: 0.016,
+    color: [0.82, 0.91, 1],
+    intensity: 11,
+  },
+  {
+    direction: [-0.97, -0.03, -0.23],
+    size: [0.15, 0.05],
+    feather: 0.016,
+    color: [1, 0.86, 0.76],
+    intensity: 10,
+  },
+];
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const outputPath = resolve(
   process.argv[2] ?? resolve(scriptDirectory, '../public/hero/studio-cubemap.png'),
@@ -63,22 +128,17 @@ function studio(direction) {
   const horizon = Math.exp(-Math.abs(direction[1]) * 14) * 0.12;
   let color = add3(room, [horizon, horizon * 0.95, horizon * 0.9]);
 
-  color = add3(color, scale3(
-    [1.0, 0.95, 0.86],
-    panel(direction, [-0.38, 0.88, 0.28], [0.86, 0.36], 0.07) * 2.8,
-  ));
-  color = add3(color, scale3(
-    [0.76, 0.88, 1.0],
-    panel(direction, [0.72, 0.57, 0.39], [0.34, 0.78], 0.06) * 2.2,
-  ));
-  color = add3(color, scale3(
-    [1.0, 0.77, 0.66],
-    panel(direction, [-0.72, 0.48, -0.49], [0.28, 0.68], 0.055) * 1.8,
-  ));
-  color = add3(color, scale3(
-    [0.78, 0.84, 1.0],
-    panel(direction, [0.08, 0.54, -0.84], [0.68, 0.22], 0.045) * 1.55,
-  ));
+  for (const light of STUDIO_PANELS) {
+    color = add3(color, scale3(
+      light.color,
+      panel(
+        direction,
+        light.direction,
+        light.size,
+        light.feather,
+      ) * light.intensity,
+    ));
+  }
 
   // Filmic compression keeps the asset LDR while preserving distinct panel shapes.
   return color.map((channel) => {

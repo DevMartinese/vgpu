@@ -66,10 +66,16 @@ fn gridLine(coordinate: vec2f, spacing: f32, pixelFootprint: f32) -> f32 {
   let uv = in.position.xy / max(params.resolution, vec2f(1.0));
   let ro = params.cameraPosition;
   let rd = cameraRay(uv);
-  // `presentCeramic` maps this neutral linear value to #fafafa. Keeping the
-  // floor and the empty backdrop on the same tone avoids a canvas edge where
-  // the light hero meets the rest of the page.
-  let backdrop = vec3f(2.93);
+  // `presentCeramic` maps the neutral linear value to #fafafa. A broad,
+  // screen-space top-right vignette gives the glass a little more contrast,
+  // while fading completely before the bottom edge so the hero still meets
+  // the rest of the page without a seam.
+  let cornerDistance = length(vec2f(
+    (uv.x - 0.95) * 0.85,
+    uv.y * 1.15,
+  ));
+  let topRightShade = 1.0 - smoothstep(0.08, 1.0, cornerDistance);
+  let backdrop = vec3f(2.93) * mix(1.0, 0.46, topRightShade);
   if (rd.y < -0.0001) {
     let floorT = (HERO_FLOOR_Y - ro.y) / rd.y;
     if (floorT > 0.0) {

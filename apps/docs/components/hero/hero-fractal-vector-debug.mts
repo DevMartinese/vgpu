@@ -16,6 +16,7 @@ interface DebugOptions {
   readonly outDir: string;
   readonly size: readonly [number, number];
   readonly environmentRotation: readonly [number, number, number];
+  readonly sphereMix: number;
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -57,7 +58,7 @@ try {
   const drawable = draw(gpu, {
     shader: shader.wgsl,
     geometry: mesh.geometry,
-    instances: 2,
+    instances: 4,
     cull: "back",
     label: "hero-fractal-vector-debug",
   });
@@ -84,6 +85,8 @@ try {
         cameraPosition: CAMERA_POSITION,
         meshMin: mesh.meshMin,
         meshMax: mesh.meshMax,
+        sphereMix: options.sphereMix,
+        time: 0,
         environmentRotation: environmentRotationMatrix(
           options.environmentRotation
         ),
@@ -121,6 +124,7 @@ function parseArgs(argv: readonly string[]): DebugOptions {
   let outDir = DEFAULT_OUT_DIR;
   let size: readonly [number, number] = [960, 720];
   let environmentRotation: readonly [number, number, number] = [0, 0, 0];
+  let sphereMix = 0;
 
   for (let index = 0; index < argv.length; index++) {
     const token = argv[index];
@@ -128,21 +132,36 @@ function parseArgs(argv: readonly string[]): DebugOptions {
       outDir = resolve(argv[++index] ?? "");
     } else if (token === "--size") {
       const values = (argv[++index] ?? "").split("x").map(Number);
-      if (values.length !== 2 || values.some((value) => !Number.isFinite(value))) {
+      if (
+        values.length !== 2 ||
+        values.some((value) => !Number.isFinite(value))
+      ) {
         throw new Error("--size expects WIDTHxHEIGHT");
       }
-      size = [Math.max(1, Math.floor(values[0])), Math.max(1, Math.floor(values[1]))];
+      size = [
+        Math.max(1, Math.floor(values[0])),
+        Math.max(1, Math.floor(values[1])),
+      ];
     } else if (token === "--environment-rotation") {
       const values = (argv[++index] ?? "").split(",").map(Number);
-      if (values.length !== 3 || values.some((value) => !Number.isFinite(value))) {
+      if (
+        values.length !== 3 ||
+        values.some((value) => !Number.isFinite(value))
+      ) {
         throw new Error("--environment-rotation expects X,Y,Z in degrees");
       }
       environmentRotation = [values[0], values[1], values[2]];
+    } else if (token === "--sphere-mix") {
+      const value = Number(argv[++index] ?? "");
+      if (!Number.isFinite(value)) {
+        throw new Error("--sphere-mix expects a number from 0 to 1");
+      }
+      sphereMix = Math.min(1, Math.max(0, value));
     } else {
       throw new Error(`Unknown argument: ${token}`);
     }
   }
-  return { outDir, size, environmentRotation };
+  return { outDir, size, environmentRotation, sphereMix };
 }
 
 async function decodeFractalMesh() {
@@ -161,11 +180,12 @@ async function decodeFractalMesh() {
     view.getUint8(2),
     view.getUint8(3)
   );
-  if (magic !== "HGP1") throw new Error("Unsupported hero fractal mesh format.");
+  if (magic !== "HGP2")
+    throw new Error("Unsupported hero fractal mesh format.");
   const vertexCount = view.getUint32(4, true);
   const indexCount = view.getUint32(8, true);
   const stride = view.getUint32(12, true);
-  if (stride !== 16 || vertexCount <= 0 || indexCount <= 0) {
+  if (stride !== 24 || vertexCount <= 0 || indexCount <= 0) {
     throw new Error("Hero fractal mesh layout is invalid.");
   }
   const meshMin = [
@@ -194,6 +214,7 @@ async function decodeFractalMesh() {
           attributes: {
             packed_position: "unorm16x4" as const,
             packed_normal: "snorm16x4" as const,
+            packed_sphere: "snorm16x4" as const,
           },
         },
       ],
@@ -216,10 +237,22 @@ async function writePng(
 
 function scaleMatrix(scale: number): Float32Array {
   return new Float32Array([
-    scale, 0, 0, 0,
-    0, scale, 0, 0,
-    0, 0, scale, 0,
-    0, 0, 0, 1,
+    scale,
+    0,
+    0,
+    0,
+    0,
+    scale,
+    0,
+    0,
+    0,
+    0,
+    scale,
+    0,
+    0,
+    0,
+    0,
+    1,
   ]);
 }
 
@@ -235,9 +268,21 @@ function environmentRotationMatrix(
   const cz = Math.cos(z);
   const sz = Math.sin(z);
   return new Float32Array([
-    cz * cy, sz * cy, -sy, 0,
-    cz * sy * sx - sz * cx, sz * sy * sx + cz * cx, cy * sx, 0,
-    cz * sy * cx + sz * sx, sz * sy * cx - cz * sx, cy * cx, 0,
-    0, 0, 0, 1,
+    cz * cy,
+    sz * cy,
+    -sy,
+    0,
+    cz * sy * sx - sz * cx,
+    sz * sy * sx + cz * cx,
+    cy * sx,
+    0,
+    cz * sy * cx + sz * sx,
+    sz * sy * cx - cz * sx,
+    cy * cx,
+    0,
+    0,
+    0,
+    0,
+    1,
   ]);
 }

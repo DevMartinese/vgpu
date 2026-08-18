@@ -1,11 +1,11 @@
-import type { Geometry, Gpu } from "vgpu";
+import type { Geometry, GeometryBufferOptions, Gpu } from "vgpu";
 import { geometry } from "vgpu";
 import type { Texture } from "vgpu/core";
 import { cubeView } from "vgpu/core";
 
-const GLASS_MESH_URL = "/hero/rounded-tetrahedron.mesh?v=bevel-3";
-const FRACTAL_MESH_URL = "/hero/fractal-tetrahedron-l7.mesh?v=face-1";
-const ENVIRONMENT_URL = "/hero/studio-cubemap.png";
+const GLASS_MESH_URL = "/hero/rounded-tetrahedron.mesh?v=bevel-4";
+const FRACTAL_MESH_URL = "/hero/fractal-tetrahedron-l7.mesh?v=sphere-anchor-2";
+const ENVIRONMENT_URL = "/hero/studio-cubemap-prefiltered.png?v=studio-panels-2";
 const MESH_HEADER_SIZE = 40;
 const CUBEMAP_COLUMNS = 3;
 const CUBEMAP_ROWS = 2;
@@ -67,17 +67,21 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
   try {
     const bitmap = await createImageBitmap(environmentBlob);
     try {
+      const faceSize = bitmap.height / CUBEMAP_ROWS;
+      const mipLevelCount = Math.floor(Math.log2(faceSize)) + 1;
+      let expectedWidth = 0;
+      for (let mipLevel = 0; mipLevel < mipLevelCount; mipLevel++) {
+        expectedWidth += CUBEMAP_COLUMNS * Math.max(1, faceSize >> mipLevel);
+      }
       if (
-        bitmap.width % CUBEMAP_COLUMNS !== 0 ||
-        bitmap.height % CUBEMAP_ROWS !== 0 ||
-        bitmap.width / CUBEMAP_COLUMNS !== bitmap.height / CUBEMAP_ROWS
+        !Number.isInteger(faceSize) ||
+        2 ** (mipLevelCount - 1) !== faceSize ||
+        bitmap.width !== expectedWidth
       ) {
         throw new Error(
-          "Hero cubemap atlas must contain six square 3x2 faces."
+          "Hero cubemap atlas must contain a packed spherical mip chain."
         );
       }
-      const faceSize = bitmap.width / CUBEMAP_COLUMNS;
-      const mipLevelCount = Math.floor(Math.log2(faceSize)) + 1;
       environment = gpu.device.createTexture({
         size: [faceSize, faceSize, 6],
         format: "rgba8unorm-srgb",
@@ -85,7 +89,7 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
         mipLevelCount,
         label: "homepage-light-glass-studio-cubemap",
       });
-      uploadPrefilteredCubemapAtlas(
+      uploadPackedCubemapMipAtlas(
         gpu,
         environment,
         bitmap,
@@ -140,52 +144,43 @@ export async function loadHeroGlassAssets(gpu: Gpu): Promise<HeroGlassAssets> {
   };
 }
 
-function uploadPrefilteredCubemapAtlas(
+function uploadPackedCubemapMipAtlas(
   gpu: Gpu,
   environment: Texture,
   bitmap: ImageBitmap,
   faceSize: number,
   mipLevelCount: number
 ): void {
-  // Cropped copyExternalImageToTexture calls into non-zero array layers produce
-  // zero-filled faces in some browser WebGPU implementations. Read each atlas
-  // tile once and upload tightly packed bytes instead; 256 * RGBA is already
-  // aligned to WebGPU's 256-byte row requirement.
-  for (let face = 0; face < 6; face++) {
-    let source = createPixelCanvas(faceSize);
-    let sourceContext = pixelCanvasContext(source);
-    sourceContext.drawImage(
-      bitmap,
-      (face % CUBEMAP_COLUMNS) * faceSize,
-      Math.floor(face / CUBEMAP_COLUMNS) * faceSize,
-      faceSize,
-      faceSize,
-      0,
-      0,
-      faceSize,
-      faceSize
-    );
-
-    for (let mipLevel = 0; mipLevel < mipLevelCount; mipLevel++) {
-      const mipSize = Math.max(1, faceSize >> mipLevel);
-      if (mipLevel > 0) {
-        const next = createPixelCanvas(mipSize);
-        const nextContext = pixelCanvasContext(next);
-        nextContext.imageSmoothingEnabled = true;
-        nextContext.imageSmoothingQuality = "high";
-        nextContext.drawImage(source, 0, 0, mipSize, mipSize);
-        source = next;
-        sourceContext = nextContext;
+  // The mip chain is baked offline in spherical direction space, so every
+  // border texel agrees with its neighbor on the adjacent cube face. Uploading
+  // the packed pixels directly also avoids the browser's unreliable cropped
+  // copyExternalImageToTexture path for non-zero array layers.
+  const source = createPixelCanvas(bitmap.width, bitmap.height);
+  const sourceContext = pixelCanvasContext(source);
+  sourceContext.drawImage(bitmap, 0, 0);
+  const atlasPixels = sourceContext.getImageData(
+    0,
+    0,
+    bitmap.width,
+    bitmap.height
+  ).data;
+  let levelOffsetX = 0;
+  for (let mipLevel = 0; mipLevel < mipLevelCount; mipLevel++) {
+    const mipSize = Math.max(1, faceSize >> mipLevel);
+    for (let face = 0; face < 6; face++) {
+      const tileX = levelOffsetX + (face % CUBEMAP_COLUMNS) * mipSize;
+      const tileY = Math.floor(face / CUBEMAP_COLUMNS) * mipSize;
+      const pixels = new Uint8ClampedArray(mipSize * mipSize * 4);
+      for (let row = 0; row < mipSize; row++) {
+        const sourceStart = ((tileY + row) * bitmap.width + tileX) * 4;
+        pixels.set(
+          atlasPixels.subarray(sourceStart, sourceStart + mipSize * 4),
+          row * mipSize * 4
+        );
       }
-      uploadCubemapMip(
-        gpu,
-        environment,
-        sourceContext.getImageData(0, 0, mipSize, mipSize).data,
-        face,
-        mipLevel,
-        mipSize
-      );
+      uploadCubemapMip(gpu, environment, pixels, face, mipLevel, mipSize);
     }
+    levelOffsetX += CUBEMAP_COLUMNS * mipSize;
   }
 }
 
@@ -194,13 +189,13 @@ type PixelCanvasContext =
   | CanvasRenderingContext2D
   | OffscreenCanvasRenderingContext2D;
 
-function createPixelCanvas(size: number): PixelCanvas {
+function createPixelCanvas(width: number, height = width): PixelCanvas {
   if (typeof OffscreenCanvas !== "undefined") {
-    return new OffscreenCanvas(size, size);
+    return new OffscreenCanvas(width, height);
   }
   const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   return canvas;
 }
 
@@ -253,11 +248,15 @@ function decodeMesh(
     view.getUint8(2),
     view.getUint8(3)
   );
-  if (magic !== "HGP1") throw new Error("Unsupported hero glass mesh format.");
+  const hasSphereTarget = magic === "HGP2";
+  if (magic !== "HGP1" && !hasSphereTarget) {
+    throw new Error("Unsupported hero glass mesh format.");
+  }
   const vertexCount = view.getUint32(4, true);
   const indexCount = view.getUint32(8, true);
   const vertexStride = view.getUint32(12, true);
-  if (vertexStride !== 16 || vertexCount <= 0 || indexCount <= 0) {
+  const expectedStride = hasSphereTarget ? 24 : 16;
+  if (vertexStride !== expectedStride || vertexCount <= 0 || indexCount <= 0) {
     throw new Error("Hero glass mesh layout is invalid.");
   }
   const meshMin = [
@@ -281,14 +280,20 @@ function decodeMesh(
   );
   const indices = new Uint16Array(buffer.slice(indexOffset));
   const wireframeIndices = triangleEdges(indices);
-  const buffers = [
+  const buffers: GeometryBufferOptions[] = [
     {
       data: vertexData,
       stride: vertexStride,
-      attributes: {
-        packed_position: "unorm16x4" as const,
-        packed_normal: "snorm16x4" as const,
-      },
+      attributes: hasSphereTarget
+        ? {
+            packed_position: "unorm16x4",
+            packed_normal: "snorm16x4",
+            packed_sphere: "snorm16x4",
+          }
+        : {
+            packed_position: "unorm16x4",
+            packed_normal: "snorm16x4",
+          },
     },
   ];
   return {

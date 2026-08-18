@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BEVEL_RADIUS = 0.025 * 0.7;
+const BEVEL_RADIUS = 0.025 * 0.35;
 const BEVEL_SEGMENTS = 6;
 const TETRAHEDRON_PLANE = 1 / 3;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));

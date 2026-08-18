@@ -22,16 +22,26 @@ const HERO_FRACTAL_CAMERA = {
 // ── Hero fractal material ───────────────────────────────────────────────────
 // These are also the initial values shown by lil-gui at /?debug.
 const HERO_FRACTAL_MATERIAL = {
+  baseColor: [71 / 255, 71 / 255, 71 / 255],
+  roughness: 0.24,
+  diffuseStrength: 0.19,
+  specularStrength: 0.06,
+  ambientStrength: 0.34,
+} satisfies HeroFractalMaterial;
+
+const HERO_ORB_MATERIAL = {
   baseColor: [1, 1, 1],
-  roughness: 0.72,
-  diffuseStrength: 0.72,
-  specularStrength: 0.68,
-  ambientStrength: 0.86,
+  roughness: 0.25,
+  diffuseStrength: 0.08,
+  specularStrength: 1.6,
+  ambientStrength: 0,
 } satisfies HeroFractalMaterial;
 
 // ── Hero glass shell ────────────────────────────────────────────────────────
 const HERO_FRACTAL_GLASS = {
-  fractalScale: 0.59,
+  fractalScale: 0.72,
+  orbScale: 0.72,
+  sphereMix: 0,
   ior: 1.149,
   reflectionStrength: 0.36,
   backOpacity: 0.19,
@@ -45,12 +55,15 @@ const HERO_FRACTAL_GLASS = {
 } satisfies HeroFractalGlass;
 
 /** Decorative light-mode hero visual with an isolated renderer and shader. */
-export function HeroFractal() {
+export function HeroFractal({ sphereMix }: { sphereMix: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef =
+    useRef<ReturnType<typeof createHeroFractalRenderer>>(null);
   const [isReady, setIsReady] = useState(false);
   const heroSettingsJson = JSON.stringify({
     camera: HERO_FRACTAL_CAMERA,
-    material: HERO_FRACTAL_MATERIAL,
+    fractalMaterial: HERO_FRACTAL_MATERIAL,
+    orbMaterial: HERO_ORB_MATERIAL,
     glass: HERO_FRACTAL_GLASS,
   });
 
@@ -62,13 +75,15 @@ export function HeroFractal() {
     const renderer = createHeroFractalRenderer({
       canvas,
       camera: HERO_FRACTAL_CAMERA,
-      material: HERO_FRACTAL_MATERIAL,
+      fractalMaterial: HERO_FRACTAL_MATERIAL,
+      orbMaterial: HERO_ORB_MATERIAL,
       glass: HERO_FRACTAL_GLASS,
       onError: (error) => {
         console.warn("[vgpu-hero] fractal renderer failed:", error);
         if (!cancelled) setIsReady(false);
       },
     });
+    rendererRef.current = renderer;
 
     void renderer.ready
       .then(() => {
@@ -80,6 +95,7 @@ export function HeroFractal() {
 
     return () => {
       cancelled = true;
+      if (rendererRef.current === renderer) rendererRef.current = null;
       renderer.dispose();
     };
     // TEMP: keep the serialized settings dependency while tuning the hero. It
@@ -87,11 +103,19 @@ export function HeroFractal() {
     // hero tuning value changes. Remove it once the hero is finalized.
   }, [heroSettingsJson]);
 
+  useEffect(() => {
+    rendererRef.current?.setSphereMix(sphereMix);
+  }, [sphereMix]);
+
   return (
     <div
       data-hero-native-light
       aria-hidden="true"
       className="pointer-events-none absolute inset-0 overflow-hidden bg-[#fafafa]"
+      style={{
+        background:
+          "radial-gradient(ellipse at 95% 0%, #eeeeef 0%, #f6f6f6 45%, #fafafa 78%)",
+      }}
     >
       <canvas
         ref={canvasRef}
