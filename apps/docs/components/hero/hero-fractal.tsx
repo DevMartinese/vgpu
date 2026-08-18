@@ -40,7 +40,7 @@ const HERO_ORB_MATERIAL = {
 // ── Hero glass shell ────────────────────────────────────────────────────────
 const HERO_FRACTAL_GLASS = {
   fractalScale: 0.72,
-  orbScale: 0.72,
+  orbScale: 0.6,
   sphereMix: 0,
   ior: 1.149,
   reflectionStrength: 0.36,
