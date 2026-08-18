@@ -11,6 +11,7 @@ export const exampleSlugs = [
   'fft-ocean',
   'fft-ocean-surface',
   'raymarched-fractal',
+  'glass-fractal',
   'environment-map',
   'transmission',
   'radiance-cascades',

@@ -7,6 +7,8 @@ import {
   type HeroRenderer,
 } from "./renderer";
 
+const MOBILE_HERO_QUERY = "(max-width: 767px)";
+
 /** Full-bleed vGPU homepage shader, without the docs-only tuning controls. */
 export function HeroBlackHole() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -15,6 +17,37 @@ export function HeroBlackHole() {
   useEffect(() => {
     let cancelled = false;
     let renderer: HeroRenderer | undefined;
+    const settings = defaultHeroSettings();
+    const desktopLayout = {
+      centerX: settings.centerX,
+      centerY: settings.centerY,
+      cameraRoll: settings.cameraRoll,
+      mouseYaw: settings.mouseYaw,
+      sideFade: settings.sideFade,
+      centerFade: settings.centerFade,
+    };
+    const mobileQuery = window.matchMedia(MOBILE_HERO_QUERY);
+
+    const applyResponsiveLayout = () => {
+      if (mobileQuery.matches) {
+        settings.centerX = 0;
+        settings.centerY = 0;
+        settings.cameraRoll = 0;
+        settings.mouseYaw = 0;
+        settings.sideFade = 0;
+        settings.centerFade = 1;
+      } else {
+        Object.assign(settings, desktopLayout);
+      }
+    };
+
+    const onLayoutChange = () => {
+      applyResponsiveLayout();
+      renderer?.rebake();
+    };
+
+    applyResponsiveLayout();
+    mobileQuery.addEventListener("change", onLayoutChange);
 
     async function initialize() {
       try {
@@ -22,7 +55,9 @@ export function HeroBlackHole() {
         const canvas = canvasRef.current;
         if (cancelled || !adapter || !canvas) return;
 
-        const settings = defaultHeroSettings();
+        if (new URLSearchParams(window.location.search).get("heroDebug") === "gradient") {
+          settings.debugView = 10;
+        }
         // The tuned bloom looks right at DPR 2. Scale both its radius and its
         // contribution down in lower-density displays: DPR 1 uses half the
         // radius and strength, DPR 2+ keeps the presentation's original values.
@@ -53,6 +88,7 @@ export function HeroBlackHole() {
 
     return () => {
       cancelled = true;
+      mobileQuery.removeEventListener("change", onLayoutChange);
       renderer?.dispose();
     };
   }, []);

@@ -20,6 +20,7 @@ export const exampleComponentLoaders = {
   'fft-ocean': () => import('../examples/fft-ocean/index'),
   'fft-ocean-surface': () => import('../examples/fft-ocean-surface/index'),
   'raymarched-fractal': () => import('../examples/raymarched-fractal/index'),
+  'glass-fractal': () => import('../examples/glass-fractal/index'),
   'environment-map': () => import('../examples/environment-map/index'),
   transmission: () => import('../examples/transmission/index'),
   'radiance-cascades': () => import('../examples/radiance-cascades/index'),

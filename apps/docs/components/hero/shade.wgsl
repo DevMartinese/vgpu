@@ -28,7 +28,7 @@ struct Shade {
   time: f32,
   /** Outer disk radius the G-buffer was baked with. */
   diskOuter: f32,
-  /** 0 = final image, 1..9 = G-buffer debug views (see gbuffer.md). */
+  /** 0 = final image, 1..9 = G-buffer debug views, 10 = content fade mask. */
   debugView: f32,
   /**
    * Photon-ring antialiasing: 1 consumes the refine pass's coverage/span target,
@@ -60,6 +60,10 @@ struct Shade {
    * frame: `R_y(-sceneYaw)`.
    */
   sceneYaw: f32,
+  /** 1 applies the desktop content fade; 0 keeps the full scene visible. */
+  sideFade: f32,
+  /** 1 applies the mobile vertical fade around the centered HTML copy. */
+  centerFade: f32,
 }
 
 /**
@@ -80,6 +84,37 @@ const DISK_GAIN: f32 = 1.35;
 
 /** Matches the shared max width used by the navbar and hero HTML container. */
 const CONTENT_MAX_WIDTH: f32 = 1448.0;
+/** Matches the hero container's `px-6` horizontal padding. */
+const CONTENT_PADDING: f32 = 24.0;
+
+/**
+ * Horizontal mask that lets the HTML copy own the left side of the hero.
+ *
+ * The ramp starts at the copy's actual left edge (centred max-width container
+ * plus its padding), not at the viewport centre, and restores the unmodified
+ * presentation at screen centre. The hero renders at DPR 1, so shader pixels
+ * and CSS pixels share the same coordinate space.
+ */
+fn contentFade(uvX: f32, resolutionX: f32) -> f32 {
+  let safeWidth = max(resolutionX, 1.0);
+  let containerMargin = max((safeWidth - CONTENT_MAX_WIDTH) * 0.5, 0.0);
+  let contentStart = min((containerMargin + CONTENT_PADDING) / safeWidth, 0.5);
+  // The scene is linear HDR, while the layout decision is perceptual. Raising
+  // the smooth ramp keeps more of its span dark instead of making the fade read
+  // as an abrupt dimming only near the copy.
+  return pow(smoothstep(contentStart, 0.5, uvX), 2.2);
+}
+
+/**
+ * Mobile readability mask: black through the centered copy, restoring the
+ * scene toward the top and bottom edges. The gamma-shaped ramp stays dark
+ * across the tabs and snippet instead of recovering while they are still over
+ * the bright accretion disk.
+ */
+fn centeredCopyFade(uvY: f32) -> f32 {
+  let distanceFromCenter = abs(uvY - 0.5);
+  return pow(smoothstep(0.08, 0.38, distanceFromCenter), 2.2);
+}
 
 @group(0) @binding(0) var<uniform> shade: Shade;
 @group(0) @binding(1) var gHit1: texture_2d<f32>;
@@ -456,17 +491,7 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
 
   var background = vec3f(0.0);
   if (!g.isBlackHole && g.escaped) {
-    // Let the copy own the left side of the hero without introducing another
-    // HTML scrim. The attenuation happens on the stars' linear-HDR radiance,
-    // before bloom, so their glow fades with them instead of remaining behind.
-    // Outside the shared page container the sky stays at its minimum; the ramp
-    // begins at the container edge and reaches the presentation's original look
-    // at screen centre. `resolution` is in CSS pixels because the hero renders
-    // at DPR 1, so the 1448px HTML and shader measurements are the same space.
-    let containerMargin = max((shade.resolution.x - CONTENT_MAX_WIDTH) * 0.5, 0.0);
-    let containerStart = containerMargin / shade.resolution.x;
-    let screenOpacity = mix(0.1, 1.0, smoothstep(containerStart, 0.5, uv.x));
-    background = shadeStars(g.rayDirection, stars, shade.time, skyDdxRotated, skyDdyRotated) * screenOpacity;
+    background = shadeStars(g.rayDirection, stars, shade.time, skyDdxRotated, skyDdyRotated);
   }
 
   // The same shadeDisk, called twice with two different crossings. disk.wgsl
@@ -495,6 +520,21 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   color = compositeDisk(color, backSample);
   color = compositeDisk(color, frontSample);
 
+  // Apply the layout-aware fade to the complete linear-HDR scene. Doing this
+  // after the disk composites means the black hole and stars share one mask;
+  // doing it before bloom means their glow fades to black with the source.
+  let sideMask = mix(
+    1.0,
+    contentFade(uv.x, shade.resolution.x),
+    clamp(shade.sideFade, 0.0, 1.0),
+  );
+  let centerMask = mix(
+    1.0,
+    centeredCopyFade(uv.y),
+    clamp(shade.centerFade, 0.0, 1.0),
+  );
+  let heroFade = sideMask * centerMask;
+
   // Debug visualisations of the baked G-buffer (lil-gui "debug view").
   //
   // THEY RETURN BEFORE `tonemap`, ON PURPOSE: these channels carry data, not
@@ -504,6 +544,9 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
   //
   // Views 1..5 describe the FRONT crossing; view 7 is the second one.
   let mode = i32(shade.debugView + 0.5);
+  if (mode == 10) {
+    return vec4f(vec3f(heroFade), 1.0);
+  }
   if (mode == 1) {
     return vec4f(g.normal * 0.5 + vec3f(0.5), 1.0);
   }
@@ -559,6 +602,8 @@ fn compositeDisk(under: vec3f, sample: DiskSample) -> vec3f {
       1.0,
     );
   }
+
+  color *= heroFade;
   // Synthesized-crossing diagnostic — the sub-pixel arcs that live INSIDE the
   // shadow silhouette, where no centre ray of the neighbourhood ever hit the disk
   // and coverage alone had nothing to scale. R = that crossing's normalized disk

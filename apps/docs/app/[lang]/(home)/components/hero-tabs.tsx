@@ -1,8 +1,9 @@
-'use client';
+"use client";
 
-import { Fragment, useEffect, useRef, useState } from 'react';
-import { Check, Copy } from 'lucide-react';
-import { InlineCode, stripBackticks } from './inline-code';
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
+import { type HeroTab, useHeroTab } from "@/components/hero/hero-tab-state";
+import { InlineCode, stripBackticks } from "./inline-code";
 
 /**
  * `backtick` spans are atomic (never broken across lines); `mono` decides
@@ -19,13 +20,15 @@ import { InlineCode, stripBackticks } from './inline-code';
  * breaks after "npx" on a phone and strands the command name on line two.
  */
 const tabContent = {
-  Prompt: { text: 'Setup vgpu on my project, run `npx vgpu`', mono: false },
-  Skill: { text: '`npx skills add vercel-labs/vgpu`', mono: true },
+  Prompt: { text: "Setup vgpu on my project, run `npx vgpu`", mono: false },
+  Skill: { text: "`npx skills add vercel-labs/vgpu`", mono: true },
 } as const;
 
 type Tab = keyof typeof tabContent;
 
-const tabs = Object.keys(tabContent) as Tab[];
+type HeroTabsTab = Extract<Tab, HeroTab>;
+
+const tabs = Object.keys(tabContent) as HeroTabsTab[];
 
 /**
  * How long the outgoing snippet takes to clear, in ms. The incoming one settles
@@ -51,7 +54,7 @@ const LEAVE_MS = 150;
  * components the way the rest of the landing chrome is (see TGEIST-10).
  */
 export function HeroTabs() {
-  const [activeTab, setActiveTab] = useState<Tab>('Prompt');
+  const { activeTab, setActiveTab } = useHeroTab();
   // The tab that is currently on its way out. Every other inactive tab is
   // "parked" below the line, which is what makes the next one rise from below.
   const [leavingTab, setLeavingTab] = useState<Tab | null>(null);
@@ -90,9 +93,10 @@ export function HeroTabs() {
     // below), and a gap would add to both sides equally.
     <div className="flex w-full flex-col">
       <div
+        data-hero-tabs-list
         role="tablist"
         aria-label="Setup option"
-        className="flex items-center justify-start text-[15px] leading-none lg:text-[16px]"
+        className="flex items-center justify-center text-[15px] leading-none lg:text-[16px]"
       >
         {tabs.map((tab, index) => (
           <Fragment key={tab}>
@@ -107,7 +111,9 @@ export function HeroTabs() {
               aria-selected={activeTab === tab}
               onClick={() => selectTab(tab)}
               className={
-                activeTab === tab ? 'text-white' : 'text-white/50 hover:text-white/80'
+                activeTab === tab
+                  ? "text-white"
+                  : "text-white/50 hover:text-white/80"
               }
             >
               {tab}
@@ -142,10 +148,11 @@ export function HeroTabs() {
       />
 
       <button
+        data-hero-tabs-copy
         type="button"
         onClick={copy}
-        aria-label={copied ? 'Copied' : `Copy: ${stripBackticks(content)}`}
-        className="group relative w-full pr-7 text-left text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
+        aria-label={copied ? "Copied" : `Copy: ${stripBackticks(content)}`}
+        className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
       >
         {/*
           Every snippet is rendered, stacked in one grid cell, and crossfaded.
@@ -165,24 +172,32 @@ export function HeroTabs() {
         */}
         <span className="grid">
           {tabs.map((tab) => {
-            const state = tab === activeTab ? 'active' : tab === leavingTab ? 'leaving' : 'idle';
+            const state =
+              tab === activeTab
+                ? "active"
+                : tab === leavingTab
+                ? "leaving"
+                : "idle";
             return (
               <span
                 key={tab}
-                aria-hidden={state !== 'active'}
+                aria-hidden={state !== "active"}
                 // motion-reduce drops the transition only: the same end states
                 // still apply, so the swap is instant instead of animated.
                 className={`col-start-1 row-start-1 motion-reduce:transition-none ${
-                  state === 'active'
-                    ? 'translate-y-0 opacity-100 transition duration-200 ease-out'
-                    : state === 'leaving'
-                      ? '-translate-y-1.5 select-none opacity-0 transition duration-150 ease-out'
-                      : // Parked below with no transition, so re-parking after a
-                        // switch costs nothing and is invisible at opacity 0.
-                        'translate-y-1.5 select-none opacity-0'
+                  state === "active"
+                    ? "translate-y-0 opacity-100 transition duration-200 ease-out"
+                    : state === "leaving"
+                    ? "-translate-y-1.5 select-none opacity-0 transition duration-150 ease-out"
+                    : // Parked below with no transition, so re-parking after a
+                      // switch costs nothing and is invisible at opacity 0.
+                      "translate-y-1.5 select-none opacity-0"
                 }`}
               >
-                <InlineCode text={tabContent[tab].text} mono={tabContent[tab].mono} />
+                <InlineCode
+                  text={tabContent[tab].text}
+                  mono={tabContent[tab].mono}
+                />
               </span>
             );
           })}
@@ -190,10 +205,14 @@ export function HeroTabs() {
         <span
           aria-hidden
           className={`absolute right-0 top-1/2 -translate-y-1/2 transition-opacity ${
-            copied ? 'opacity-90' : 'opacity-0 group-hover:opacity-50'
+            copied ? "opacity-90" : "opacity-0 group-hover:opacity-50"
           }`}
         >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
         </span>
       </button>
     </div>
