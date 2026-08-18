@@ -21,9 +21,9 @@ const WORLD_AXES_MODEL_MATRIX = scaleTranslationMatrix(1.45, [0, 0, 0]);
 const CAMERA_TARGET_AXES_SCALE = 0.22;
 const SPHERE_MORPH_DURATION_MS = 1040;
 const HERO_FLOOR_AO_DEFAULTS = {
-  glassAoScale: 1,
-  glassAoAmplitude: 0.47,
-  glassAoOpacity: 0.41,
+  glassAoScale: 0.54,
+  glassAoAmplitude: 0.41,
+  glassAoOpacity: 0.11,
   fractalAoScale: 0.88,
   fractalAoAmplitude: 0.18,
   fractalAoOpacity: 0.57,
@@ -65,6 +65,8 @@ export interface HeroFractalGlass {
   readonly fractalScale: number;
   /** Uniform scale of the orb inside the fixed glass shell. */
   readonly orbScale: number;
+  /** Vertical world-space offset applied only as the fractal becomes an orb. */
+  readonly orbOffsetY: number;
   /** Morph between the tetrahedral fractal and its normalized sphere target. */
   readonly sphereMix: number;
   /** Index of refraction used by front-surface transmission and Fresnel. */
@@ -179,6 +181,7 @@ function createMaterialDebugGui(
   glass: {
     fractalScale: number;
     orbScale: number;
+    orbOffsetY: number;
     sphereMix: number;
     ior: number;
     reflectionStrength: number;
@@ -236,6 +239,7 @@ function createMaterialDebugGui(
   const orbFolder = gui.addFolder("Orb material");
   addMaterialControllers(orbFolder, orbMaterial);
   orbFolder.add(glass, "orbScale", 0.35, 0.99, 0.005).name("scale");
+  orbFolder.add(glass, "orbOffsetY", -0.5, 0.5, 0.005).name("offset y");
 
   const glassFolder = gui.addFolder("Glass");
   const sphereMixController = glassFolder
@@ -383,6 +387,7 @@ export function createHeroFractalRenderer(
   const glass = {
     fractalScale: options.glass.fractalScale,
     orbScale: options.glass.orbScale,
+    orbOffsetY: options.glass.orbOffsetY,
     sphereMix: options.glass.sphereMix,
     ior: options.glass.ior,
     reflectionStrength: options.glass.reflectionStrength,
@@ -531,10 +536,15 @@ export function createHeroFractalRenderer(
       environmentExposure: glass.environmentExposure,
       reflectionDebug: debug.view === "reflection" ? 1 : 0,
     };
-    // The vertex shader owns the staggered 120-degree Skill turn. Keeping the
-    // model matrix scale-only leaves the glass shell fixed and lets each
-    // vertex rotate with its local morph progress.
-    const fractalModel = scaleTranslationMatrix(innerScale, [0, 0, 0]);
+    // The vertex shader owns the staggered 120-degree Skill turn. The model's
+    // vertical translation starts at zero, preserving the authored fractal
+    // placement, and reaches the configurable optical correction only in orb
+    // mode. The glass shell remains fixed.
+    const fractalModel = scaleTranslationMatrix(innerScale, [
+      0,
+      glass.orbOffsetY * materialMix,
+      0,
+    ]);
     draws.glassBack.set({
       params: glassParams,
       environmentTexture: assets.environmentView,
