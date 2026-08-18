@@ -44,7 +44,7 @@ const HERO_FRACTAL_GLASS = {
   orbOffsetY: 0.08,
   sphereMix: 0,
   ior: 1.149,
-  reflectionStrength: 0.36,
+  reflectionStrength: 0.71,
   backOpacity: 0.19,
   absorption: [74 / 255, 74 / 255, 74 / 255],
   frostRadius: 1.8,
@@ -52,7 +52,7 @@ const HERO_FRACTAL_GLASS = {
   iridescenceStrength: 0.04,
   iridescenceFrequency: 2,
   environmentRotation: [0, -36, 0],
-  environmentExposure: 1.58,
+  environmentExposure: 1,
 } satisfies HeroFractalGlass;
 
 /** Decorative light-mode hero visual with an isolated renderer and shader. */
