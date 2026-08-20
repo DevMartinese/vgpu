@@ -25,7 +25,9 @@ const ExamplesPage = () => (
       <p className="mt-3 max-w-2xl text-copy-16 text-gray-900">{description}</p>
     </header>
 
-    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+    {/* geistdocs' theme lowers Tailwind's `sm` to 401px, where two card
+        columns don't fit; use an explicit 700px breakpoint instead. */}
+    <div className="grid gap-5 min-[700px]:grid-cols-2 xl:grid-cols-3">
       {examplesMetadata.map((example) => (
         <ExampleCard example={example} key={example.slug} />
       ))}
