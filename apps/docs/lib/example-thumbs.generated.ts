@@ -70,6 +70,10 @@ export const exampleThumbs: Record<string, ExampleThumbPresence> = {
     "card": "/examples/nextjs-flare.card.png",
     "hero": "/examples/nextjs-flare.hero.png"
   },
+  "optimized-black-hole": {
+    "card": "/examples/optimized-black-hole.card.png",
+    "hero": "/examples/optimized-black-hole.hero.png"
+  },
   "post-processing": {
     "card": "/examples/post-processing.card.png",
     "hero": "/examples/post-processing.hero.png"

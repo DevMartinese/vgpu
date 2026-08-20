@@ -1,4 +1,3 @@
-import { HeroVisual } from "@/components/hero/hero-visual";
 import { HeroTabProvider } from "@/components/hero/hero-tab-state";
 import localFont from "next/font/local";
 import { HeroTabs } from "./hero-tabs";
@@ -13,10 +12,9 @@ const geistSerif = localFont({
 /**
  * Landing hero.
  *
- * The dark-mode shader is the full section; the copy sits on top of it. Light
- * mode intentionally keeps the visual layer empty while a replacement is
- * designed. Structure, overlays and copy are ported unchanged from the old
- * homepage hero.
+ * The GPU experiments formerly hosted here now live in the examples gallery.
+ * The homepage keeps the same dark/light surface and content composition while
+ * its next visual direction is designed.
  */
 export function Hero() {
   return (
@@ -25,8 +23,6 @@ export function Hero() {
         data-hero-invert
         className="relative min-h-svh overflow-hidden bg-black"
       >
-        <HeroVisual />
-
         {/* Foot fade. This was a tall, near-opaque band back when the setup
           snippet was pinned to the bottom and needed contrast; the snippet
           now sits centred with the tagline, so that job is gone and the band

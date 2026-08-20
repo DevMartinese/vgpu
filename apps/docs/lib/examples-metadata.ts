@@ -7,6 +7,7 @@ import { meta as triangleLedFrontMeta } from '../examples/triangle-led-front/met
 import { meta as antiAliasingMeta } from '../examples/anti-aliasing/meta';
 import { meta as postProcessingMeta } from '../examples/post-processing/meta';
 import { meta as blackHoleMeta } from '../examples/black-hole/meta';
+import { meta as optimizedBlackHoleMeta } from '../examples/optimized-black-hole/meta';
 import { meta as earthMeta } from '../examples/earth/meta';
 import { meta as fluidMeta } from '../examples/fluid/meta';
 import { meta as instancedRenderingMeta } from '../examples/instanced-rendering/meta';
@@ -30,6 +31,7 @@ const rawMetadata = {
   'anti-aliasing': antiAliasingMeta,
   'post-processing': postProcessingMeta,
   'black-hole': blackHoleMeta,
+  'optimized-black-hole': optimizedBlackHoleMeta,
   earth: earthMeta,
   fluid: fluidMeta,
   'instanced-rendering': instancedRenderingMeta,
@@ -62,6 +64,7 @@ export const exampleMetadataBySlug = {
   'anti-aliasing': withThumbnails(rawMetadata['anti-aliasing']),
   'post-processing': withThumbnails(rawMetadata['post-processing']),
   'black-hole': withThumbnails(rawMetadata['black-hole']),
+  'optimized-black-hole': withThumbnails(rawMetadata['optimized-black-hole']),
   earth: withThumbnails(rawMetadata.earth),
   fluid: withThumbnails(rawMetadata.fluid),
   'instanced-rendering': withThumbnails(rawMetadata['instanced-rendering']),
