@@ -36,9 +36,8 @@ export async function transformWgsl(sourceOrOpts: string | TransformWgslOptions,
     const wgsl = applyMinifyWgsl(opts.source, opts.minify);
     return { code: shaderSourceModule(wgsl), map: null };
   }
-  const resolved = await resolveShader({ entry: opts.id, validate: false, minify: opts.minify });
+  const resolved = await resolveShader({ entry: opts.id, validate: false, minify: opts.minify, onDependency: opts.onDependency });
   assertNoErrorDiagnostics(resolved.diagnostics, opts.id);
-  for (const dep of resolved.deps) if (dep !== opts.id) opts.onDependency?.(dep);
   return { code: shaderSourceModule(resolved.wgsl), map: null };
 }
 

@@ -26,6 +26,8 @@ export interface ResolveOptions {
   readonly rootDir?: string;
   readonly packageMap?: Record<string, string>;
   readonly modules?: Record<string, string>;
+  /** Called once for each imported module as soon as its path is resolved, even if loading later fails. */
+  readonly onDependency?: (path: string) => void;
   /**
    * Validate emitted WGSL against a real WebGPU adapter (`createShaderModule` plus a
    * compilation-info round trip).
@@ -135,7 +137,11 @@ async function loadGraph(path: string, opts: ResolveOptions, loaded: Map<string,
   if (!module) { const tokens = scan(source, path); module = { path, source, tokens, parsed: parseModule(tokens) }; remember(scanCache, cacheKey, module); }
   loaded.set(path, module);
   stack.push(path);
-  for (const imp of module.parsed.imports) await loadGraph(resolvePath(imp.from, path, opts, diagnostics), opts, loaded, stack, diagnostics);
+  for (const imp of module.parsed.imports) {
+    const dependency = resolvePath(imp.from, path, opts, diagnostics);
+    if (!loaded.has(dependency)) opts.onDependency?.(dependency);
+    await loadGraph(dependency, opts, loaded, stack, diagnostics);
+  }
   stack.pop();
 }
 

@@ -133,6 +133,24 @@ test("loaders resolve top-level import", async () => {
   expect(code).toContain("_vgsl_");
 });
 
+test("webpack loader tracks an imported shader when resolution fails", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "vgsl-"));
+  const entry = join(dir, "main.wgsl");
+  const dependency = join(dir, "dependency.wgsl");
+  const source = "import { expectedExport } from './dependency.wgsl'; fn main(){expectedExport();}";
+  await writeFile(entry, source);
+  await writeFile(dependency, "export fn differentExport(){}");
+  const dependencies: string[] = [];
+
+  await expect(new Promise<string>((resolve, reject) => wgslWebpackLoader.call({
+    resourcePath: entry,
+    addDependency: (file) => dependencies.push(file),
+    async: () => (error, result) => error ? reject(error) : resolve(result ?? ""),
+  }, source))).rejects.toMatchObject({ code: "VGPU-WGSL-SYM-NOEXPORT" });
+
+  expect(dependencies).toContain(dependency);
+});
+
 test("loaders resolve imports after top-level diagnostic directives", async () => {
   const dir = await mkdtemp(join(tmpdir(), "vgsl-"));
   const entry = join(dir, "main.wgsl");
