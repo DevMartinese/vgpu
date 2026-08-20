@@ -1,0 +1,12 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = ". scripts/use-project-node.sh && pnpm install --frozen-lockfile && { [ \"${CONDUCTOR_IS_LOCAL:-0}\" != \"1\" ] || pnpm exec portless trust; } && pnpm build"
+archive = "true"
+run_mode = "concurrent"
+
+[scripts.run.docs]
+available_in = [ "local" ]
+command = ". scripts/use-project-node.sh >/dev/null && PORTLESS_PORT=1355 PORTLESS_HTTPS=1 PORTLESS_SYNC_HOSTS=0 pnpm exec portless --name \"vgpu-$CONDUCTOR_WORKSPACE_NAME\" --app-port \"$CONDUCTOR_PORT\" -- pnpm --dir apps/docs dev"
+default = true
+icon = "globe"
