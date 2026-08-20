@@ -11,6 +11,7 @@
     "anti-aliasing": 53081,
     "post-processing": 53581,
     "black-hole": 55332,
+    "optimized-black-hole": 57817,
     "fluid": 57872,
     "instanced-rendering": 60234,
     "batch-rendering": 60084,

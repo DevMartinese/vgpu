@@ -199,6 +199,7 @@ const tree = loadTree();
 function contentTypeFor(key: string): string {
   if (key.endsWith(".json")) return "application/json; charset=utf-8";
   if (key.endsWith(".wgsl.raw")) return "text/wgsl; charset=utf-8";
+  if (key.endsWith(".mjs.raw")) return "text/plain; charset=utf-8";
   return "text/typescript; charset=utf-8";
 }
 
