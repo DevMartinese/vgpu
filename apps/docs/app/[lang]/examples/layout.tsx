@@ -21,7 +21,13 @@ export const metadata: Metadata = {
 export default function ExamplesLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-background-200">
-      <DocsLayout tree={buildExamplesPageTree()}>{children}</DocsLayout>
+      <DocsLayout tree={buildExamplesPageTree()}>
+        {/* DocsLayout's grid places children by named area ("sidebar main
+            toc"); without an explicit area this content auto-flows into the
+            sidebar column, which collapses to 0px on mobile where the
+            sidebar is hidden. */}
+        <div className="min-w-0 [grid-area:main]">{children}</div>
+      </DocsLayout>
     </div>
   );
 }
