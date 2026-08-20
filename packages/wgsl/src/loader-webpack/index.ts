@@ -30,11 +30,14 @@ export default function wgslWebpackLoader(this: LoaderContext, source: string): 
   }
   const done = this.async?.();
   const run = async () => {
-    const resolved = await resolveShader({ entry: this.resourcePath ?? "<webpack>", validate: false, minify: options.minify });
+    const resolved = await resolveShader({
+      entry: this.resourcePath ?? "<webpack>",
+      validate: false,
+      minify: options.minify,
+      // Register each import as soon as it is discovered so a failed resolution remains watchable.
+      onDependency: (dep) => this.addDependency?.(dep),
+    });
     assertNoErrorDiagnostics(resolved.diagnostics, this.resourcePath ?? "<webpack>");
-    // Webpack loader API: https://webpack.js.org/api/loaders/#thisadddependency
-    // Invalidate this loader's output when any transitively-imported .wgsl file changes.
-    for (const dep of resolved.deps) if (dep !== this.resourcePath) this.addDependency?.(dep);
     return shaderSourceModule(resolved.wgsl);
   };
   if (!done) throw wgslError("VGPU-WGSL-RUNTIME-IMPORT", "@vgpu/wgsl webpack loader requires asynchronous mode for imports.");
