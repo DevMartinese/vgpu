@@ -1,7 +1,8 @@
 // Final linear-HDR presentation. The bloom pyramid is already rebuilt
 // additively from 1/16 back to 1/2 resolution, so this pass only normalizes the
 // accumulated energy, adds it to the untouched HDR scene, and performs the one
-// ACES tone mapping plus sRGB conversion.
+// ACES tone mapping plus sRGB conversion. Geometry was already resolved by the
+// 4x MSAA scene targets before this pass samples it.
 
 import { linearToSrgb3, tonemapAces } from "@vgpu/wgsl-std/color";
 

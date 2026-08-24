@@ -77,7 +77,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let longitudinalFalloff = exp(-scene.rainbowFalloff * in.travel)
     * (1.0 - smoothstep(0.55, 0.95, in.travel));
   return vec4f(
-    in.color * in.intensity * radialFalloff * longitudinalFalloff,
+    in.color * in.intensity * radialFalloff * longitudinalFalloff
+      * max(scene.lightOpacity, 0.0),
     0.0,
   );
 }

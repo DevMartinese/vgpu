@@ -46,8 +46,8 @@ export function Hero() {
           }}
         />
 
-        {/* The copy and setup snippet sit on opposite sides of the prism on
-          wide screens, and return to one stack on smaller screens.
+        {/* The copy, setup snippet, and CTAs share the left side of the prism
+          on wide screens, and remain one stack on smaller screens.
 
           The band is pointer-events-none so it never eats clicks over the
           rest of the hero, but the children opt back IN: without that the
@@ -61,43 +61,12 @@ export function Hero() {
             <h1
               aria-label="vgpu"
               data-hero-title
-              className="relative mb-[1em] aspect-[188/75] w-[200px] [--wordmark-fill-blur:3px] [--wordmark-outline-blur:20px]"
+              className="relative mb-[1em] aspect-[188/75] w-[200px] [--wordmark-blur:3px]"
             >
-              <svg
-                aria-hidden="true"
-                className="absolute size-0"
-              >
+              <svg aria-hidden="true" className="absolute size-0">
                 <defs>
-                  <filter
-                    id="hero-wordmark-inner-bezel"
-                    x="-20%"
-                    y="-35%"
-                    width="140%"
-                    height="170%"
-                    colorInterpolationFilters="sRGB"
-                  >
-                    <feTurbulence
-                      type="fractalNoise"
-                      baseFrequency="0.009 0.035"
-                      numOctaves="1"
-                      seed="5"
-                      result="bezel-map"
-                    />
-                    <feGaussianBlur
-                      in="bezel-map"
-                      stdDeviation="0.2"
-                      result="soft-bezel-map"
-                    />
-                    <feDisplacementMap
-                      in="SourceGraphic"
-                      in2="soft-bezel-map"
-                      scale="38"
-                      xChannelSelector="R"
-                      yChannelSelector="G"
-                    />
-                  </filter>
                   <mask
-                    id="hero-wordmark-fill-mask"
+                    id="hero-wordmark-mask"
                     maskUnits="objectBoundingBox"
                     maskContentUnits="objectBoundingBox"
                     x="0"
@@ -113,69 +82,18 @@ export function Hero() {
                       <VgpuWordmarkGlyphs />
                     </g>
                   </mask>
-                  <mask
-                    id="hero-wordmark-outline-mask"
-                    maskUnits="objectBoundingBox"
-                    maskContentUnits="objectBoundingBox"
-                    x="0"
-                    y="0"
-                    width="1"
-                    height="1"
-                    style={{ maskType: "luminance" }}
-                  >
-                    <g
-                      fill="none"
-                      stroke="white"
-                      strokeWidth="1"
-                      transform="scale(0.005319148936 0.013333333333)"
-                    >
-                      <VgpuWordmarkGlyphs />
-                    </g>
-                  </mask>
                 </defs>
               </svg>
-              <span
-                aria-hidden="true"
-                className="hero-glass-wordmark-fill"
-              />
-              <span
-                aria-hidden="true"
-                className="hero-glass-wordmark-outline-backdrop"
-              />
+              <span aria-hidden="true" className="hero-glass-wordmark" />
               <svg
                 aria-hidden="true"
-                className="hero-glass-wordmark-outline"
+                className="hero-glass-wordmark-stroke"
                 viewBox="0 0 188 75"
               >
-                <defs>
-                  <linearGradient
-                    id="hero-wordmark-outline-light"
-                    gradientUnits="userSpaceOnUse"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="75"
-                  >
-                    <stop offset="0" stopColor="white" stopOpacity="1" />
-                    <stop offset="1" stopColor="white" stopOpacity="0" />
-                  </linearGradient>
-                  <linearGradient
-                    id="hero-wordmark-surface-tint"
-                    gradientUnits="userSpaceOnUse"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="75"
-                  >
-                    <stop offset="0" stopColor="white" stopOpacity="0.1" />
-                    <stop offset="0.55" stopColor="white" stopOpacity="0.025" />
-                    <stop offset="1" stopColor="white" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
                 <g
-                  fill="url(#hero-wordmark-surface-tint)"
-                  stroke="url(#hero-wordmark-outline-light)"
-                  strokeWidth="1."
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.62)"
+                  strokeWidth="0.8"
                 >
                   <VgpuWordmarkGlyphs />
                 </g>
@@ -187,6 +105,9 @@ export function Hero() {
             >
               The WebGPU library, designed for agents.
             </p>
+            <div className="mt-8 w-full max-w-[21em]">
+              <HeroTabs />
+            </div>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3 min-[768px]:justify-start">
               <Button
                 asChild
@@ -208,10 +129,6 @@ export function Hero() {
                 </DynamicLink>
               </Button>
             </div>
-          </div>
-
-          <div className="pointer-events-auto w-full max-w-[21em] min-[1100px]:col-start-3 min-[1100px]:row-start-1 min-[1100px]:justify-self-end">
-            <HeroTabs />
           </div>
         </div>
       </section>

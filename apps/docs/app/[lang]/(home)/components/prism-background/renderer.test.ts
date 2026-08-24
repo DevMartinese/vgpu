@@ -44,6 +44,13 @@ vi.mock("vgpu", () => ({
 }));
 
 import { createRenderer } from "./renderer";
+import {
+  LIGHT_INTERNAL_FIRST_VERTEX,
+  LIGHT_INTERNAL_VERTICES,
+  LIGHT_OUTGOING_FIRST_VERTEX,
+  LIGHT_OUTGOING_VERTICES,
+  LIGHT_WHITE_VERTICES,
+} from "./light-mesh";
 import { wallExtent } from "./scene";
 import {
   DEFAULT_PRISM_CONTROLS,
@@ -57,6 +64,10 @@ function deferred<T>() {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function partialDraw(pipeline: unknown, firstVertex: number, vertices: number) {
+  return { pipeline, options: { firstVertex, vertices } };
 }
 
 function browser() {
@@ -107,13 +118,22 @@ function browser() {
 
 function gpu() {
   const stop = vi.fn();
+  const gpuClock = {
+    time: 0,
+    deltaTime: 0,
+    frameCount: 0,
+    advance: vi.fn(),
+  };
   const encodedPasses: unknown[][] = [];
   const passOptions: unknown[] = [];
   const loopFrame = {
     pass: vi.fn((options: unknown, body: (pass: unknown) => void) => {
       passOptions.push(options);
       const encoded: unknown[] = [];
-      body({ draw: (pipeline: unknown) => encoded.push(pipeline) });
+      body({
+        draw: (pipeline: unknown, options?: unknown) =>
+          encoded.push(options ? { pipeline, options } : pipeline),
+      });
       encodedPasses.push(encoded);
     }),
   };
@@ -142,9 +162,19 @@ function gpu() {
   const targets: {
     size: number[];
     format: string;
+    color: { gpu: object };
+    msaa?: boolean | 4;
     resize: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>;
   }[] = [];
+  const textures: {
+    gpu: object;
+    label?: string;
+    options: Record<string, unknown>;
+    destroy: ReturnType<typeof vi.fn>;
+  }[] = [];
+  const copyTextureToTexture = vi.fn();
+  const finishEncoder = vi.fn(() => ({}));
   const pipeline = (
     into: { set: ReturnType<typeof vi.fn>; compile: ReturnType<typeof vi.fn> }[]
   ) => {
@@ -153,18 +183,46 @@ function gpu() {
     return created;
   };
   const instance = {
-    gpu: { queue: { onSubmittedWorkDone: vi.fn(async () => {}) } },
-    device: { createBuffer: vi.fn(() => lightBuffer) },
+    clock: gpuClock,
+    gpu: {
+      queue: {
+        onSubmittedWorkDone: vi.fn(async () => {}),
+        submit: vi.fn(),
+      },
+      createCommandEncoder: vi.fn(() => ({
+        copyTextureToTexture,
+        finish: finishEncoder,
+      })),
+    },
+    device: {
+      createBuffer: vi.fn(() => lightBuffer),
+      createTexture: vi.fn((options: Record<string, unknown>) => {
+        const created = {
+          gpu: {},
+          label: options.label as string | undefined,
+          options,
+          destroy: vi.fn(),
+        };
+        textures.push(created);
+        return created;
+      }),
+    },
     settled: vi.fn(async () => {}),
     dispose: vi.fn(),
     fns: {
       surface: vi.fn(() => surface),
       sampler: vi.fn(() => ({})),
       geometry: vi.fn(() => ({ destroy: vi.fn() })),
-      target: vi.fn((options: { size: number[]; format?: string }) => {
+      target: vi.fn((options: {
+        size: number[];
+        format?: string;
+        msaa?: boolean | 4;
+      }) => {
         const created = {
           size: [...options.size],
           format: options.format ?? "bgra8unorm",
+          color: { gpu: {} },
+          msaa: options.msaa,
           resize: vi.fn((size: number[]) => {
             created.size = [...size];
           }),
@@ -193,9 +251,12 @@ function gpu() {
     effects,
     draws,
     targets,
+    textures,
+    copyTextureToTexture,
     loopFrame,
     encodedPasses,
     passOptions,
+    gpuClock,
     stop,
   };
 }
@@ -217,110 +278,224 @@ test("renders the deterministic light once and idles until something changes", a
   // output aspect is known. No history textures are allocated.
   expect(live.instance.device.createBuffer).toHaveBeenCalledOnce();
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(2);
-  expect(live.effects).toHaveLength(10);
-  expect(live.draws).toHaveLength(6);
+  expect(live.effects).toHaveLength(13);
+  expect(live.draws).toHaveLength(7);
+  expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
+    3,
+    expect.objectContaining({ blend: "premultiplied" })
+  );
+  expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
+    7,
+    expect.objectContaining({
+      vertices: 6,
+      instances: 6000,
+      depth: false,
+      blend: "additive",
+    })
+  );
+  expect(live.instance.fns.sampler).toHaveBeenNthCalledWith(2, {
+    minFilter: "linear",
+    magFilter: "linear",
+    mipmapFilter: "linear",
+    addressModeU: "repeat",
+    addressModeV: "clamp-to-edge",
+  });
   for (const created of [...live.effects, ...live.draws])
     expect(created.compile).toHaveBeenCalledOnce();
   // Canvas surfaces do not expose a current texture until a frame begins, so
   // output pipelines must pre-warm from the surface's stable format signature.
-  expect(live.effects[9]!.compile).toHaveBeenCalledWith({
+  expect(live.effects[8]!.compile).toHaveBeenCalledWith({
     colors: ["bgra8unorm"],
   });
-  // Two full-resolution targets resolve glass. Four progressively smaller HDR
-  // targets hold the 1/2 through 1/16 bloom pyramid.
-  expect(live.targets).toHaveLength(6);
+  // One full-resolution MSAA target composites back-side glass and light; a
+  // second lets the front interface sample that resolved result. Four smaller
+  // HDR targets hold bloom, and the remainder are transient mip-bake surfaces.
+  expect(live.targets).toHaveLength(36);
   expect(live.targets[0]!.format).toBe("rgba16float");
   expect(live.targets[1]!.format).toBe("rgba16float");
-  expect(live.targets.slice(2).map((entry) => entry.size)).toEqual([
+  expect(live.targets[0]!.msaa).toBe(true);
+  expect(live.targets[1]!.msaa).toBe(true);
+  expect(live.targets.slice(2, 6).map((entry) => entry.size)).toEqual([
     [100, 50],
     [50, 25],
     [25, 13],
     [13, 7],
   ]);
-  for (const bloomTarget of live.targets.slice(2)) {
+  for (const bloomTarget of live.targets.slice(2, 6)) {
     expect(bloomTarget.format).toBe("rgba16float");
+    expect(bloomTarget.msaa).toBeUndefined();
   }
+  expect(live.textures).toHaveLength(2);
+  for (const environmentTexture of live.textures) {
+    expect(environmentTexture.options).toEqual(
+      expect.objectContaining({
+        size: [2048, 1024],
+        format: "rgba16float",
+        mipLevelCount: 8,
+        usage: ["texture_binding", "copy_dst"],
+      })
+    );
+  }
+  expect(live.effects[9]!.compile).toHaveBeenCalledWith(live.targets[6]);
+  expect(live.effects[10]!.compile).toHaveBeenCalledWith(live.targets[6]);
+  expect(live.effects[11]!.compile).toHaveBeenCalledWith(live.targets[7]);
+  expect(live.effects[12]!.compile).toHaveBeenCalledWith(live.targets[7]);
+  expect(live.effects[9]!.set).toHaveBeenCalledWith({
+    params: { debug: 0 },
+  });
+  expect(live.effects[11]!.set).toHaveBeenCalledWith({
+    params: { debug: 1 },
+  });
+  expect(live.copyTextureToTexture).toHaveBeenCalledTimes(16);
   expect(live.effects[0]!.compile).toHaveBeenCalledWith(live.targets[1]);
-  expect(live.effects[1]!.compile).toHaveBeenCalledWith(live.targets[0]);
   for (let level = 0; level < 4; level++) {
-    expect(live.effects[level + 2]!.compile).toHaveBeenCalledWith(
+    expect(live.effects[level + 1]!.compile).toHaveBeenCalledWith(
       live.targets[level + 2]
     );
   }
   for (let index = 0; index < 3; index++) {
-    expect(live.effects[index + 6]!.compile).toHaveBeenCalledWith(
+    expect(live.effects[index + 5]!.compile).toHaveBeenCalledWith(
       live.targets[4 - index]
     );
   }
-  expect(live.draws[2]!.compile).toHaveBeenCalledWith(live.targets[1]);
-  expect(live.draws[3]!.compile).toHaveBeenCalledWith(live.targets[0]);
-  expect(live.draws[4]!.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(live.draws[0]!.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(live.draws[1]!.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(live.draws[2]!.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(live.draws[3]!.compile).toHaveBeenCalledWith(live.targets[1]);
+  expect(live.draws[4]!.compile).toHaveBeenCalledWith(live.targets[1]);
   expect(live.draws[5]!.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(live.draws[6]!.compile).toHaveBeenCalledWith({
+    colors: ["bgra8unorm"],
+  });
   expect(live.effects[0]!.set).toHaveBeenLastCalledWith({
     sceneTexture: live.targets[0],
   });
   expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sceneTexture: live.targets[0] })
+    expect.objectContaining({
+      studioEnvironment: live.textures[0],
+      debugEnvironment: live.textures[1],
+    })
   );
-  expect(live.effects[1]!.set).toHaveBeenLastCalledWith({
-    sceneTexture: live.targets[1],
-  });
   expect(live.draws[3]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sceneTexture: live.targets[1] })
-  );
-  expect(live.effects[2]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[0] })
-  );
-  expect(live.effects[3]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[2] })
-  );
-  expect(live.effects[6]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[5] })
-  );
-  expect(live.effects[7]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[4] })
-  );
-  expect(live.effects[8]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[3] })
-  );
-  expect(live.effects[9]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sceneTexture: live.targets[0],
+      studioEnvironment: live.textures[0],
+      debugEnvironment: live.textures[1],
+    })
+  );
+  const backGlassBindings = live.draws[2]!.set.mock.lastCall?.[0];
+  const frontGlassBindings = live.draws[3]!.set.mock.lastCall?.[0];
+  expect(backGlassBindings).not.toHaveProperty("sceneTexture");
+  expect(backGlassBindings).not.toHaveProperty("sceneSampler");
+  expect(frontGlassBindings).toEqual(
+    expect.objectContaining({ sceneTexture: live.targets[0] })
+  );
+  expect(frontGlassBindings).toHaveProperty("sceneSampler");
+  expect(live.effects[1]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[1] })
+  );
+  expect(live.effects[2]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[2] })
+  );
+  expect(live.effects[5]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[5] })
+  );
+  expect(live.effects[6]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[4] })
+  );
+  expect(live.effects[7]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[3] })
+  );
+  expect(live.effects[8]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      sceneTexture: live.targets[1],
       bloomTexture: live.targets[2],
     })
   );
   expect(live.draws[0]!.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({ lightPlaneZ: PRISM_LIGHT_PLANE_Z }),
   });
+  expect(live.draws[6]!.set).toHaveBeenLastCalledWith({
+    params: expect.objectContaining({
+      outputSize: [200, 100],
+      time: 0,
+      lightPlaneZ: PRISM_LIGHT_PLANE_Z,
+      exposure: 1,
+    }),
+    lightTexture: live.targets[2],
+    lightSampler: expect.anything(),
+  });
 
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   tick(live.loopFrame);
-  // frameLoop already owns the frame: all eleven passes encode into the supplied
-  // frame instead of opening nested frames.
-  expect(live.instance.fns.frame).not.toHaveBeenCalled();
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(11);
+  // Thirty standalone passes bake both eight-level pyramids once. Runtime
+  // rendering encodes the sorted background, refractive front, seven bloom
+  // passes and present.
+  expect(live.instance.fns.frame).toHaveBeenCalledTimes(30);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
   expect(live.encodedPasses).toEqual([
-    [live.draws[1]],
-    [live.effects[0], live.draws[2], live.draws[0]],
-    [live.effects[1], live.draws[3]],
+    [
+      live.draws[1],
+      partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+      partialDraw(
+        live.draws[0],
+        LIGHT_OUTGOING_FIRST_VERTEX,
+        LIGHT_OUTGOING_VERTICES
+      ),
+      live.draws[2],
+      partialDraw(
+        live.draws[0],
+        LIGHT_INTERNAL_FIRST_VERTEX,
+        LIGHT_INTERNAL_VERTICES
+      ),
+    ],
+    [live.effects[0], live.draws[3]],
+    [live.effects[1]],
     [live.effects[2]],
     [live.effects[3]],
     [live.effects[4]],
     [live.effects[5]],
     [live.effects[6]],
     [live.effects[7]],
-    [live.effects[8]],
-    [live.effects[9]],
+    [live.effects[8], live.draws[6]],
   ]);
-  for (const options of live.passOptions.slice(7, 10)) {
+  for (const options of live.passOptions.slice(6, 9)) {
     expect(options).toEqual(expect.objectContaining({ clear: false }));
   }
   tick(live.loopFrame);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(11);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
   renderer.dispose();
 });
 
-test("the back-face view presents the second target before the front interface", async () => {
+test("dust-only animation frames reuse the resolved scene and bloom", async () => {
+  const env = browser();
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({ canvas: env.canvas });
+  await renderer.ready;
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
+
+  live.gpuClock.time = 1 / 30;
+  tick(live.loopFrame);
+
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(11);
+  expect(live.encodedPasses.at(-1)).toEqual([
+    live.effects[8],
+    live.draws[6],
+  ]);
+  expect(live.draws[6]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: expect.objectContaining({ time: 1 / 30 }),
+    })
+  );
+  expect(live.lightBuffer.write).toHaveBeenCalledTimes(2);
+  renderer.dispose();
+});
+
+test("the back-face view keeps the sorted light around the environment-only glass", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
@@ -332,8 +507,22 @@ test("the back-face view presents the second target before the front interface",
   tick(live.loopFrame);
 
   expect(live.encodedPasses).toEqual([
-    [live.draws[1]],
-    [live.effects[0], live.draws[2], live.draws[0]],
+    [
+      live.draws[1],
+      partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+      partialDraw(
+        live.draws[0],
+        LIGHT_OUTGOING_FIRST_VERTEX,
+        LIGHT_OUTGOING_VERTICES
+      ),
+      live.draws[2],
+      partialDraw(
+        live.draws[0],
+        LIGHT_INTERNAL_FIRST_VERTEX,
+        LIGHT_INTERNAL_VERTICES
+      ),
+    ],
+    [live.effects[0]],
     [live.effects[1]],
     [live.effects[2]],
     [live.effects[3]],
@@ -342,7 +531,6 @@ test("the back-face view presents the second target before the front interface",
     [live.effects[6]],
     [live.effects[7]],
     [live.effects[8]],
-    [live.effects[9]],
   ]);
   renderer.dispose();
 });
@@ -364,8 +552,28 @@ test("the light wireframe reveals every generated triangle in the light-only vie
 
   expect(live.encodedPasses[0]).toEqual([
     live.draws[1],
-    live.draws[0],
-    live.draws[5],
+    partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+    partialDraw(
+      live.draws[0],
+      LIGHT_OUTGOING_FIRST_VERTEX,
+      LIGHT_OUTGOING_VERTICES
+    ),
+    partialDraw(live.draws[5], 0, LIGHT_WHITE_VERTICES),
+    partialDraw(
+      live.draws[5],
+      LIGHT_OUTGOING_FIRST_VERTEX,
+      LIGHT_OUTGOING_VERTICES
+    ),
+    partialDraw(
+      live.draws[0],
+      LIGHT_INTERNAL_FIRST_VERTEX,
+      LIGHT_INTERNAL_VERTICES
+    ),
+    partialDraw(
+      live.draws[5],
+      LIGHT_INTERNAL_FIRST_VERTEX,
+      LIGHT_INTERNAL_VERTICES
+    ),
   ]);
   expect(live.draws[5]!.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({ lightPlaneZ: PRISM_LIGHT_PLANE_Z }),
@@ -431,12 +639,18 @@ test("only optical controls rebuild the light mesh", async () => {
     wireframe: true,
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
-  // The optional mirror ball is a separate renderer and cannot retrace light.
+  // The diagnostic environment changes glass uniforms, but cannot retrace light.
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
     environmentDebug: true,
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
+  tick(live.loopFrame);
+  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: expect.objectContaining({ environmentDebug: 1 }),
+    })
+  );
   // Glass material sliders update uniforms without retracing the spectral mesh.
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
@@ -464,11 +678,12 @@ test("only optical controls rebuild the light mesh", async () => {
       bloomStrength: 1.8,
       bloomThreshold: 0.4,
       bloomRadius: 4,
+      particleExposure: 2.25,
     },
   });
   tick(live.loopFrame);
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
-  expect(live.effects[2]!.set).toHaveBeenLastCalledWith(
+  expect(live.effects[1]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({
         threshold: 0.4,
@@ -476,9 +691,14 @@ test("only optical controls rebuild the light mesh", async () => {
       }),
     })
   );
-  expect(live.effects[9]!.set).toHaveBeenLastCalledWith(
+  expect(live.effects[8]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: { bloomStrength: 1.8 },
+    })
+  );
+  expect(live.draws[6]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: expect.objectContaining({ exposure: 2.25 }),
     })
   );
   // A different index of refraction bends every ribbon differently.
@@ -518,13 +738,21 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
 
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
-    lightFade: { edgeFalloff: 10, rainbowFalloff: 3.2 },
+    lightFade: {
+      beamOpacity: 0.35,
+      edgeFalloff: 10,
+      rainbowFalloff: 3.2,
+    },
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
 
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
-    lightFade: { edgeFalloff: 10, rainbowFalloff: 5.5 },
+    lightFade: {
+      beamOpacity: 0.35,
+      edgeFalloff: 10,
+      rainbowFalloff: 5.5,
+    },
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
   tick(live.loopFrame);
@@ -532,6 +760,7 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
     scene: expect.objectContaining({
       lightEdgeFalloff: 10,
       rainbowFalloff: 5.5,
+      lightOpacity: 0.35,
     }),
   });
   renderer.dispose();
@@ -583,11 +812,11 @@ test("the camera follows the pointer without rebuilding an unchanged light", asy
   // regenerating the already-current world-space light mesh.
   env.windowListeners.get("pointermove")?.(pointer);
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(11);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
   renderer.dispose();
 });
 
-test("coalesces resizes and updates both targets plus the light mesh", async () => {
+test("coalesces resizes and updates both scene targets plus the light mesh", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
@@ -610,10 +839,14 @@ test("coalesces resizes and updates both targets plus the light mesh", async () 
     [225, 125],
     [113, 63],
   ];
-  live.targets.slice(2).forEach((colorTarget, level) => {
+  live.targets.slice(2, 6).forEach((colorTarget, level) => {
     expect(colorTarget.resize).toHaveBeenCalledWith(bloomSizes[level]);
   });
-  for (const colorTarget of live.targets)
+  for (const transientTarget of live.targets.slice(6)) {
+    expect(transientTarget.resize).not.toHaveBeenCalled();
+    expect(transientTarget.destroy).toHaveBeenCalledOnce();
+  }
+  for (const colorTarget of live.targets.slice(0, 6))
     expect(colorTarget.destroy).not.toHaveBeenCalled();
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(3);
 
@@ -628,6 +861,8 @@ test("coalesces resizes and updates both targets plus the light mesh", async () 
   expect(live.lightBuffer.destroy).toHaveBeenCalledOnce();
   for (const colorTarget of live.targets)
     expect(colorTarget.destroy).toHaveBeenCalledOnce();
+  for (const environmentTexture of live.textures)
+    expect(environmentTexture.destroy).toHaveBeenCalledOnce();
 });
 
 test("dispose during init cleans up a late GPU without starting a loop", async () => {

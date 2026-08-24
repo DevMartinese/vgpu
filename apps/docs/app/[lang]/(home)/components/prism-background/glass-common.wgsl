@@ -1,6 +1,7 @@
 // Uniform layout and optical helpers shared by the two glass interfaces.
 
-import { rotateEnvironmentDirection, sampleStudioEnvironment } from "./environment.wgsl";
+import { env_lod, sample_env } from "./environment-map-common.wgsl";
+import { rotateEnvironmentDirection } from "./environment.wgsl";
 
 export struct Glass {
   viewProjection: mat4x4f,
@@ -12,44 +13,61 @@ export struct Glass {
   prismA: vec2f,
   prismB: vec2f,
   prismC: vec2f,
-  resolution: vec2f,
+  environmentSize: vec2f,
   frontZ: f32,
   backZ: f32,
-  /** The wall is a plane behind the prism, perpendicular to the z axis. */
-  wallZ: f32,
   ior: f32,
   reflectionStrength: f32,
-  frostRadius: f32,
-  dispersion: f32,
   iridescenceStrength: f32,
   iridescenceFrequency: f32,
   environmentExposure: f32,
+  environmentDebug: f32,
+  environmentTexelAngle: f32,
 }
 
-export fn glassEnvironment(direction: vec3f, params: Glass) -> vec3f {
-  return sampleStudioEnvironment(
-    rotateEnvironmentDirection(direction, params.environmentRotation),
+export fn glassEnvironment(
+  direction: vec3f,
+  params: Glass,
+  studioEnvironment: texture_2d<f32>,
+  debugEnvironment: texture_2d<f32>,
+  environmentSampler: sampler,
+  lod: f32,
+) -> vec3f {
+  let rotatedDirection = rotateEnvironmentDirection(
+    direction,
+    params.environmentRotation,
+  );
+  let maxLod = f32(textureNumLevels(studioEnvironment) - 1u);
+  let safeLod = clamp(lod, 0.0, maxLod);
+  if (params.environmentDebug > 0.5) {
+    return sample_env(
+      debugEnvironment,
+      environmentSampler,
+      rotatedDirection,
+      safeLod,
+      params.environmentSize,
+    ) * params.environmentExposure;
+  }
+  return sample_env(
+    studioEnvironment,
+    environmentSampler,
+    rotatedDirection,
+    safeLod,
+    params.environmentSize,
   ) * params.environmentExposure;
+}
+
+export fn glassEnvironmentLod(direction: vec3f, params: Glass) -> f32 {
+  return env_lod(
+    0.0,
+    dpdx(direction),
+    dpdy(direction),
+    params.environmentTexelAngle,
+  );
 }
 
 export fn dielectricFresnel(ior: f32, facing: f32) -> f32 {
   let ratio = (ior - 1.0) / (ior + 1.0);
   let f0 = ratio * ratio;
   return f0 + (1.0 - f0) * pow(1.0 - clamp(facing, 0.0, 1.0), 5.0);
-}
-
-export fn projectToUv(point: vec3f, viewProjection: mat4x4f) -> vec2f {
-  let clip = viewProjection * vec4f(point, 1.0);
-  let ndc = clip.xy / max(clip.w, 0.00001);
-  return vec2f(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-}
-
-export fn sampleScene(
-  sceneTexture: texture_2d<f32>,
-  sceneSampler: sampler,
-  uv: vec2f,
-  halfTexel: vec2f,
-) -> vec3f {
-  let safeUv = clamp(uv, halfTexel, vec2f(1.0) - halfTexel);
-  return textureSampleLevel(sceneTexture, sceneSampler, safeUv, 0.0).rgb;
 }

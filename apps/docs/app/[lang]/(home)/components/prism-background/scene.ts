@@ -2,10 +2,11 @@
  * Deterministic scene graph.
  *
  * The CPU traces wavelength-connected sheets across the finite beam and writes
- * them into one fixed vertex buffer. Every frame resolves wall, inner glass and
- * outer glass through two full-resolution ping-pong HDR targets, then builds a
- * four-level reduced-resolution bloom pyramid before the sole tone-mapped
- * presentation pass. There is no temporal history or convergence state.
+ * them into one fixed vertex buffer. Every frame draws wall, external light,
+ * back-side glass and internal light in painter's order into one 4x MSAA HDR
+ * target. A second pass lets the front interface refract that resolved image
+ * without reading from its own render attachment. The result then feeds a
+ * four-level bloom pyramid and the sole tone-mapped presentation pass.
  */
 
 import type {
@@ -29,13 +30,28 @@ import {
 import bloomUpsampleWgsl from "./bloom-upsample.wgsl";
 import bloomWgsl from "./bloom.wgsl";
 import copyLinearWgsl from "./copy-linear.wgsl";
+import dustWgsl from "./dust.wgsl";
+import {
+  createEnvironmentSampler,
+  createEnvironmentTexture,
+  destroyEnvironmentTexture,
+  ENVIRONMENT_SIZE,
+  ENVIRONMENT_TEXEL_ANGLE,
+  prepareEnvironmentTexture,
+  type EnvironmentTexture,
+} from "./environment-texture";
 import glassBackWgsl from "./glass-back.wgsl";
 import glassWgsl from "./glass.wgsl";
 import {
   buildLightMesh,
   LIGHT_INTERNAL_QUADS,
   LIGHT_INTERNAL_SEGMENTS,
+  LIGHT_INTERNAL_FIRST_VERTEX,
+  LIGHT_INTERNAL_VERTICES,
+  LIGHT_OUTGOING_FIRST_VERTEX,
+  LIGHT_OUTGOING_VERTICES,
   LIGHT_WHITE_QUADS,
+  LIGHT_WHITE_VERTICES,
   LIGHT_VERTEX_STRIDE,
   lightVertexCount,
   type LightMeshStats,
@@ -57,6 +73,7 @@ import {
   PRISM_INCIDENCE_ARC,
   PRISM_LIGHT_PLANE_Z,
   PRISM_LIGHT_FADE_RANGES,
+  PRISM_POSTPROCESS_RANGES,
   PRISM_SPECTRAL_DISPERSION_RANGES,
   PRISM_TRIANGLE,
   clampBeamWidth,
@@ -70,6 +87,7 @@ import {
 type Output = Surface | Target;
 const ENVIRONMENT_ROTATION = rotationMatrix(PRISM_GLASS.environmentRotation);
 const BLOOM_LEVELS = 4;
+const DUST_PARTICLE_COUNT = 6000;
 type BloomTargets = readonly [Target, Target, Target, Target];
 type BloomEffects = readonly [Effect, Effect, Effect, Effect];
 type BloomUpsampleEffects = readonly [Effect, Effect, Effect];
@@ -77,15 +95,16 @@ type BloomUpsampleEffects = readonly [Effect, Effect, Effect];
 export interface PrismScene {
   readonly gpu: Gpu;
   outputSize: readonly [number, number];
-  sceneTargets?: readonly [Target, Target];
+  backgroundTarget?: Target;
+  sceneTarget?: Target;
   bloomTargets?: BloomTargets;
   readonly light: Draw;
   readonly lightWireframe: Draw;
+  readonly dust: Draw;
   readonly lightBuffer: Buffer;
   lightStats: LightMeshStats;
   readonly wall: Draw;
-  readonly copyToBack: Effect;
-  readonly copyToFront: Effect;
+  readonly copyBackground: Effect;
   readonly bloomDownsample: BloomEffects;
   readonly bloomUpsample: BloomUpsampleEffects;
   readonly present: Effect;
@@ -95,6 +114,9 @@ export interface PrismScene {
   readonly prism: Geometry;
   readonly prismWireframe: Geometry;
   readonly sceneSampler: ReturnType<typeof sampler>;
+  readonly environmentSampler: ReturnType<typeof sampler>;
+  studioEnvironment?: EnvironmentTexture;
+  debugEnvironment?: EnvironmentTexture;
   controls: PrismControls;
   lampArc: number;
   lampTarget: number;
@@ -169,9 +191,8 @@ export function createScene(
       depth: false,
       label: `${label}.wall`,
     }),
-    copyToBack: effect(gpu, copyLinearWgsl, { label: `${label}.copy-to-back` }),
-    copyToFront: effect(gpu, copyLinearWgsl, {
-      label: `${label}.copy-to-front`,
+    copyBackground: effect(gpu, copyLinearWgsl, {
+      label: `${label}.copy-background`,
     }),
     bloomDownsample: [
       effect(gpu, bloomWgsl, { label: `${label}.bloom-half` }),
@@ -199,6 +220,7 @@ export function createScene(
       geometry: prism,
       cull: "front",
       depth: false,
+      blend: "premultiplied",
       label: `${label}.glass-back`,
     }),
     glassFront: draw(gpu, {
@@ -224,6 +246,15 @@ export function createScene(
       blend: "premultiplied",
       label: `${label}.light-wireframe`,
     }),
+    dust: draw(gpu, {
+      shader: dustWgsl,
+      vertices: 6,
+      instances: DUST_PARTICLE_COUNT,
+      cull: "none",
+      depth: false,
+      blend: "additive",
+      label: `${label}.dust`,
+    }),
     prism,
     prismWireframe,
     sceneSampler: sampler(gpu, {
@@ -232,6 +263,7 @@ export function createScene(
       addressModeU: "clamp-to-edge",
       addressModeV: "clamp-to-edge",
     }),
+    environmentSampler: createEnvironmentSampler(gpu),
     controls: {
       ...DEFAULT_PRISM_CONTROLS,
       spectralDispersion:
@@ -330,6 +362,13 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
       ),
     },
     lightFade: {
+      beamOpacity: Math.min(
+        PRISM_LIGHT_FADE_RANGES.beamOpacity.max,
+        Math.max(
+          PRISM_LIGHT_FADE_RANGES.beamOpacity.min,
+          finite(inputLightFade.beamOpacity, defaultLightFade.beamOpacity)
+        )
+      ),
       edgeFalloff: Math.min(
         PRISM_LIGHT_FADE_RANGES.edgeFalloff.max,
         Math.max(
@@ -364,8 +403,6 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
         finite(inputAbsorption[1], defaultGlass.absorption[1]),
         finite(inputAbsorption[2], defaultGlass.absorption[2]),
       ] as const,
-      frostRadius: finite(inputGlass.frostRadius, defaultGlass.frostRadius),
-      dispersion: finite(inputGlass.dispersion, defaultGlass.dispersion),
       iridescenceStrength: finite(
         inputGlass.iridescenceStrength,
         defaultGlass.iridescenceStrength
@@ -391,6 +428,16 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
       bloomRadius: finite(
         inputPostprocess.bloomRadius,
         defaultPostprocess.bloomRadius
+      ),
+      particleExposure: Math.min(
+        PRISM_POSTPROCESS_RANGES.particleExposure.max,
+        Math.max(
+          PRISM_POSTPROCESS_RANGES.particleExposure.min,
+          finite(
+            inputPostprocess.particleExposure,
+            defaultPostprocess.particleExposure
+          )
+        )
       ),
     },
   };
@@ -437,8 +484,8 @@ export function resizeScene(
 ): void {
   scene.outputSize = output;
   scene.aspect = output[0] / Math.max(1, output[1]);
-  scene.sceneTargets?.[0].resize(output);
-  scene.sceneTargets?.[1].resize(output);
+  scene.backgroundTarget?.resize(output);
+  scene.sceneTarget?.resize(output);
   scene.bloomTargets?.forEach((bloomTarget, level) => {
     bloomTarget.resize(bloomLevelSize(output, level));
   });
@@ -492,6 +539,7 @@ export function sceneUniforms(scene: PrismScene): Record<string, unknown> {
     lightBeamSlices: PRISM_BEAM_SLICES,
     lightInternalQuads: LIGHT_INTERNAL_QUADS,
     lightInternalSegments: LIGHT_INTERNAL_SEGMENTS,
+    lightOpacity: scene.controls.lightFade.beamOpacity,
     lightEdgeFalloff: scene.controls.lightFade.edgeFalloff,
     rainbowFalloff: scene.controls.lightFade.rainbowFalloff,
   };
@@ -507,17 +555,35 @@ export function glassUniforms(scene: PrismScene): Record<string, unknown> {
     prismA: PRISM_TRIANGLE.a,
     prismB: PRISM_TRIANGLE.b,
     prismC: PRISM_TRIANGLE.c,
-    resolution: scene.outputSize,
+    environmentSize: ENVIRONMENT_SIZE,
     frontZ: PRISM_FRONT_Z,
     backZ: PRISM_BACK_Z,
-    wallZ: 0,
     ior: glass.ior,
     reflectionStrength: glass.reflectionStrength,
-    frostRadius: glass.frostRadius,
-    dispersion: glass.dispersion,
     iridescenceStrength: glass.iridescenceStrength,
     iridescenceFrequency: glass.iridescenceFrequency,
     environmentExposure: glass.environmentExposure,
+    environmentDebug: scene.controls.environmentDebug ? 1 : 0,
+    environmentTexelAngle: ENVIRONMENT_TEXEL_ANGLE,
+  };
+}
+
+export function dustUniforms(
+  scene: PrismScene,
+  time: number
+): Record<string, unknown> {
+  return {
+    viewProjection: scene.view.camera.viewProjection,
+    fieldHalfExtent: wallExtent(
+      scene.aspect,
+      scene.controls.cameraDistance,
+      scene.controls.cameraFov
+    ),
+    outputSize: scene.outputSize,
+    time,
+    cameraDistance: scene.controls.cameraDistance,
+    lightPlaneZ: PRISM_LIGHT_PLANE_Z,
+    exposure: scene.controls.postprocess.particleExposure,
   };
 }
 
@@ -529,32 +595,35 @@ export async function prepareScene(
   scene.aspect = output.size[0] / Math.max(1, output.size[1]);
   refreshCamera(scene);
   refreshLightMesh(scene);
-  const readTarget =
-    scene.sceneTargets?.[0] ??
+  const backgroundTarget =
+    scene.backgroundTarget ??
     target(scene.gpu, {
       size: output.size,
       format: "rgba16float",
-      label: `${scene.label}.scene-a`,
+      msaa: true,
+      label: `${scene.label}.background`,
     });
-  const writeTarget =
-    scene.sceneTargets?.[1] ??
+  scene.backgroundTarget = backgroundTarget;
+  const sceneTarget =
+    scene.sceneTarget ??
     target(scene.gpu, {
       size: output.size,
       format: "rgba16float",
-      label: `${scene.label}.scene-b`,
+      msaa: true,
+      label: `${scene.label}.scene`,
     });
-  scene.sceneTargets = [readTarget, writeTarget];
+  scene.sceneTarget = sceneTarget;
   if (
-    readTarget.size[0] !== output.size[0] ||
-    readTarget.size[1] !== output.size[1]
+    backgroundTarget.size[0] !== output.size[0] ||
+    backgroundTarget.size[1] !== output.size[1]
   ) {
-    readTarget.resize(output.size);
+    backgroundTarget.resize(output.size);
   }
   if (
-    writeTarget.size[0] !== output.size[0] ||
-    writeTarget.size[1] !== output.size[1]
+    sceneTarget.size[0] !== output.size[0] ||
+    sceneTarget.size[1] !== output.size[1]
   ) {
-    writeTarget.resize(output.size);
+    sceneTarget.resize(output.size);
   }
   const bloomTargets =
     scene.bloomTargets ??
@@ -572,17 +641,43 @@ export async function prepareScene(
       bloomTarget.resize(size);
     }
   });
-  bind(scene, readTarget, writeTarget, bloomTargets);
+  const studioEnvironment =
+    scene.studioEnvironment ??
+    createEnvironmentTexture(
+      scene.gpu,
+      `${scene.label}.environment-studio`,
+      false
+    );
+  const debugEnvironment =
+    scene.debugEnvironment ??
+    createEnvironmentTexture(
+      scene.gpu,
+      `${scene.label}.environment-debug`,
+      true
+    );
+  scene.studioEnvironment = studioEnvironment;
+  scene.debugEnvironment = debugEnvironment;
+  bind(scene, backgroundTarget, sceneTarget, bloomTargets, 0);
   const outputSignature = { colors: [output.format] } as const;
   await Promise.all([
-    scene.light.compile(readTarget),
-    scene.wall.compile(readTarget),
-    scene.copyToBack.compile(writeTarget),
-    scene.glassBack.compile(writeTarget),
-    scene.copyToFront.compile(readTarget),
-    scene.glassFront.compile(readTarget),
-    scene.wireframe.compile(readTarget),
-    scene.lightWireframe.compile(readTarget),
+    prepareEnvironmentTexture(
+      scene.gpu,
+      studioEnvironment,
+      scene.environmentSampler
+    ),
+    prepareEnvironmentTexture(
+      scene.gpu,
+      debugEnvironment,
+      scene.environmentSampler
+    ),
+    scene.light.compile(backgroundTarget),
+    scene.wall.compile(backgroundTarget),
+    scene.glassBack.compile(backgroundTarget),
+    scene.lightWireframe.compile(backgroundTarget),
+    scene.copyBackground.compile(sceneTarget),
+    scene.glassFront.compile(sceneTarget),
+    scene.wireframe.compile(sceneTarget),
+    scene.dust.compile(outputSignature),
     ...scene.bloomDownsample.map((bloom, level) =>
       bloom.compile(bloomTargets[level]!)
     ),
@@ -596,56 +691,85 @@ export async function prepareScene(
 export function presentScene(
   scene: PrismScene,
   output: Output,
-  currentFrame?: Frame
+  currentFrame?: Frame,
+  time = 0,
+  updateScene = true
 ): void {
-  const readTarget = scene.sceneTargets?.[0];
-  const writeTarget = scene.sceneTargets?.[1];
+  const backgroundTarget = scene.backgroundTarget;
+  const sceneTarget = scene.sceneTarget;
   const bloomTargets = scene.bloomTargets;
-  if (!readTarget || !writeTarget || !bloomTargets) {
+  if (!backgroundTarget || !sceneTarget || !bloomTargets) {
     throw new Error("prepareScene must run before presentScene.");
   }
-  bind(scene, readTarget, writeTarget, bloomTargets);
+  bind(scene, backgroundTarget, sceneTarget, bloomTargets, time);
   const encode = (current: Frame) => {
     const showBackFace =
       scene.controls.view === "glass" || scene.controls.view === "back";
-    const showLightOnly = scene.controls.view === "caustic";
-    current.pass({ target: readTarget, clear: [0, 0, 0, 1] }, (pass) => {
-      pass.draw(scene.wall);
-      if (showLightOnly) {
-        pass.draw(scene.light);
-        if (scene.controls.lightWireframe) pass.draw(scene.lightWireframe);
-      }
-    });
-    current.pass({ target: writeTarget, clear: [0, 0, 0, 1] }, (pass) => {
-      pass.draw(scene.copyToBack);
-      if (showBackFace) pass.draw(scene.glassBack);
-      if (showBackFace) {
-        pass.draw(scene.light);
-        if (scene.controls.lightWireframe) pass.draw(scene.lightWireframe);
-      }
-    });
-    current.pass({ target: readTarget, clear: [0, 0, 0, 1] }, (pass) => {
-      pass.draw(scene.copyToFront);
-      if (scene.controls.view === "glass") {
-        pass.draw(scene.glassFront);
-        if (scene.controls.wireframe) pass.draw(scene.wireframe);
-      }
-    });
-    bloomTargets.forEach((bloomTarget, level) => {
-      current.pass({ target: bloomTarget, clear: [0, 0, 0, 1] }, (pass) => {
-        pass.draw(scene.bloomDownsample[level]!);
-      });
-    });
-    scene.bloomUpsample.forEach((bloom, index) => {
+    const showLight = scene.controls.view !== "wall";
+    if (updateScene) {
       current.pass(
-        { target: bloomTargets[2 - index]!, clear: false },
+        { target: backgroundTarget, clear: [0, 0, 0, 1] },
         (pass) => {
-          pass.draw(bloom);
+          pass.draw(scene.wall);
+          if (showLight) {
+            pass.draw(scene.light, {
+              firstVertex: 0,
+              vertices: LIGHT_WHITE_VERTICES,
+            });
+            pass.draw(scene.light, {
+              firstVertex: LIGHT_OUTGOING_FIRST_VERTEX,
+              vertices: LIGHT_OUTGOING_VERTICES,
+            });
+            if (scene.controls.lightWireframe) {
+              pass.draw(scene.lightWireframe, {
+                firstVertex: 0,
+                vertices: LIGHT_WHITE_VERTICES,
+              });
+              pass.draw(scene.lightWireframe, {
+                firstVertex: LIGHT_OUTGOING_FIRST_VERTEX,
+                vertices: LIGHT_OUTGOING_VERTICES,
+              });
+            }
+          }
+          if (showBackFace) pass.draw(scene.glassBack);
+          if (showLight) {
+            pass.draw(scene.light, {
+              firstVertex: LIGHT_INTERNAL_FIRST_VERTEX,
+              vertices: LIGHT_INTERNAL_VERTICES,
+            });
+            if (scene.controls.lightWireframe) {
+              pass.draw(scene.lightWireframe, {
+                firstVertex: LIGHT_INTERNAL_FIRST_VERTEX,
+                vertices: LIGHT_INTERNAL_VERTICES,
+              });
+            }
+          }
         }
       );
-    });
+      current.pass({ target: sceneTarget, clear: [0, 0, 0, 1] }, (pass) => {
+        pass.draw(scene.copyBackground);
+        if (scene.controls.view === "glass") {
+          pass.draw(scene.glassFront);
+          if (scene.controls.wireframe) pass.draw(scene.wireframe);
+        }
+      });
+      bloomTargets.forEach((bloomTarget, level) => {
+        current.pass({ target: bloomTarget, clear: [0, 0, 0, 1] }, (pass) => {
+          pass.draw(scene.bloomDownsample[level]!);
+        });
+      });
+      scene.bloomUpsample.forEach((bloom, index) => {
+        current.pass(
+          { target: bloomTargets[2 - index]!, clear: false },
+          (pass) => {
+            pass.draw(bloom);
+          }
+        );
+      });
+    }
     current.pass({ target: output }, (pass) => {
       pass.draw(scene.present);
+      if (scene.controls.view === "glass") pass.draw(scene.dust);
     });
   };
   if (currentFrame) encode(currentFrame);
@@ -654,31 +778,40 @@ export function presentScene(
 
 function bind(
   scene: PrismScene,
-  readTarget: Target,
-  writeTarget: Target,
-  bloomTargets: BloomTargets
+  backgroundTarget: Target,
+  sceneTarget: Target,
+  bloomTargets: BloomTargets,
+  time: number
 ): void {
+  const studioEnvironment = scene.studioEnvironment;
+  const debugEnvironment = scene.debugEnvironment;
+  if (!studioEnvironment || !debugEnvironment) {
+    throw new Error("Environment textures must exist before binding the scene.");
+  }
   const values = sceneUniforms(scene);
   scene.light.set({ scene: values });
   scene.lightWireframe.set({ scene: values });
   scene.wall.set({ scene: values });
-  scene.copyToBack.set({ sceneTexture: readTarget });
+  scene.copyBackground.set({ sceneTexture: backgroundTarget });
   scene.glassBack.set({
     params: glassUniforms(scene),
-    sceneTexture: readTarget,
-    sceneSampler: scene.sceneSampler,
+    studioEnvironment: studioEnvironment.texture,
+    debugEnvironment: debugEnvironment.texture,
+    environmentSampler: scene.environmentSampler,
   });
-  scene.copyToFront.set({ sceneTexture: writeTarget });
   scene.glassFront.set({
     params: glassUniforms(scene),
-    sceneTexture: writeTarget,
+    sceneTexture: backgroundTarget,
     sceneSampler: scene.sceneSampler,
+    studioEnvironment: studioEnvironment.texture,
+    debugEnvironment: debugEnvironment.texture,
+    environmentSampler: scene.environmentSampler,
   });
   scene.wireframe.set({
     params: { viewProjection: scene.view.camera.viewProjection },
   });
   scene.bloomDownsample.forEach((bloom, level) => {
-    const source = level === 0 ? readTarget : bloomTargets[level - 1]!;
+    const source = level === 0 ? sceneTarget : bloomTargets[level - 1]!;
     bloom.set({
       sourceTexture: source,
       sourceSampler: scene.sceneSampler,
@@ -702,7 +835,7 @@ function bind(
     });
   });
   scene.present.set({
-    sceneTexture: readTarget,
+    sceneTexture: sceneTarget,
     bloomTexture: bloomTargets[0],
     bloomSampler: scene.sceneSampler,
     params: {
@@ -711,6 +844,11 @@ function bind(
           ? scene.controls.postprocess.bloomStrength
           : 0,
     },
+  });
+  scene.dust.set({
+    params: dustUniforms(scene, time),
+    lightTexture: bloomTargets[0],
+    lightSampler: scene.sceneSampler,
   });
 }
 
@@ -730,11 +868,16 @@ function destroyTarget(value: Target | undefined): void {
 }
 
 export function destroyScene(scene: PrismScene): void {
-  destroyTarget(scene.sceneTargets?.[0]);
-  destroyTarget(scene.sceneTargets?.[1]);
-  scene.sceneTargets = undefined;
+  destroyTarget(scene.backgroundTarget);
+  scene.backgroundTarget = undefined;
+  destroyTarget(scene.sceneTarget);
+  scene.sceneTarget = undefined;
   scene.bloomTargets?.forEach(destroyTarget);
   scene.bloomTargets = undefined;
+  destroyEnvironmentTexture(scene.studioEnvironment);
+  scene.studioEnvironment = undefined;
+  destroyEnvironmentTexture(scene.debugEnvironment);
+  scene.debugEnvironment = undefined;
   scene.lightBuffer.destroy();
   scene.prism.destroy();
   scene.prismWireframe.destroy();

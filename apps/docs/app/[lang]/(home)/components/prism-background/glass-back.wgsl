@@ -1,23 +1,21 @@
 // Inner/back interface of the prism.
 //
-// Rendering back faces first lets the outer pass sample the result at the exact
-// point its camera ray leaves the solid. In camera-ray order this interface is
-// glass -> air, so Snell uses eta = IOR. The refracted ray is then intersected
-// with the real wall plane instead of being approximated by a fixed UV offset.
-// Total internal reflection keeps tracing inside the solid, matching the CPU
-// light path instead of deleting that radiance at the first grazing interface.
+// This is an environment-only background layer: it never reads the scene target.
+// Premultiplied Fresnel blending supplies its reflection while the previously
+// drawn wall and external light remain the transmitted component. Internal light
+// is drawn afterwards. The front interface refracts this resolved composition.
 
 import {
   Glass,
   dielectricFresnel,
   glassEnvironment,
-  projectToUv,
-  sampleScene,
+  glassEnvironmentLod,
 } from "./glass-common.wgsl";
 
 @group(0) @binding(0) var<uniform> params: Glass;
-@group(0) @binding(1) var sceneTexture: texture_2d<f32>;
-@group(0) @binding(2) var sceneSampler: sampler;
+@group(0) @binding(1) var studioEnvironment: texture_2d<f32>;
+@group(0) @binding(2) var debugEnvironment: texture_2d<f32>;
+@group(0) @binding(3) var environmentSampler: sampler;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
@@ -41,6 +39,17 @@ struct ExitPath {
 const NO_HIT: f32 = 100000.0;
 const SURFACE_EPSILON: f32 = 0.0002;
 const MAX_INTERNAL_BOUNCES: u32 = 3u;
+
+fn sampleEnvironment(direction: vec3f) -> vec3f {
+  return glassEnvironment(
+    direction,
+    params,
+    studioEnvironment,
+    debugEnvironment,
+    environmentSampler,
+    glassEnvironmentLod(direction, params),
+  );
+}
 
 @vertex
 fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f) -> VertexOut {
@@ -158,25 +167,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   // Back-facing triangles expose their inward normal to the camera ray.
   let inwardNormal = -normalize(in.worldNormal);
   let exit = traceExit(in.worldPosition, incident, inwardNormal);
-  let wallDenominator = exit.direction.z;
-  let wallDistance = (params.wallZ - exit.position.z) / select(
-    0.00001,
-    wallDenominator,
-    abs(wallDenominator) > 0.00001,
-  );
-  let validWallHit = exit.escaped != 0u && wallDistance > 0.00001;
-
-  let originalUv = in.position.xy / max(params.resolution, vec2f(1.0));
-  let wallPoint = exit.position + exit.direction * max(wallDistance, 0.0);
-  let refractedUv = select(
-    originalUv,
-    projectToUv(wallPoint, params.viewProjection),
-    validWallHit,
-  );
-  let halfTexel = 0.5 / max(params.resolution, vec2f(1.0));
-  let wallColor = sampleScene(sceneTexture, sceneSampler, refractedUv, halfTexel);
-  let exteriorColor = glassEnvironment(exit.direction, params) * params.reflectionStrength;
-  let sceneColor = select(exteriorColor, wallColor, validWallHit);
 
   let reflectedExit = traceReflectedEnvironmentExit(
     exit.position,
@@ -193,15 +183,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     1.0 - dielectricFresnel(params.ior, reflectedFacing),
     reflectedExit.escaped != 0u,
   );
-  let reflectedEnvironment = glassEnvironment(reflectedExit.direction, params)
+  let reflectedEnvironment = sampleEnvironment(reflectedExit.direction)
     * params.reflectionStrength
     * reflectedExitTransmission;
   let facing = clamp(-dot(exit.incidentDirection, exit.inwardNormal), 0.0, 1.0);
   let fresnel = dielectricFresnel(params.ior, facing);
-  let radiance = select(
-    reflectedEnvironment,
-    mix(sceneColor, reflectedEnvironment, fresnel),
+  let reflectionWeight = select(
+    1.0,
+    fresnel,
     exit.escaped != 0u,
   );
-  return vec4f(radiance, 1.0);
+  return vec4f(reflectedEnvironment * reflectionWeight, reflectionWeight);
 }

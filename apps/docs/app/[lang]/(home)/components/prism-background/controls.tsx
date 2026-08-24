@@ -33,6 +33,7 @@ interface GuiValues {
   cameraDistance: number;
   cameraFov: number;
   beamWidth: number;
+  beamOpacity: number;
   edgeFalloff: number;
   rainbowFalloff: number;
   wallColor: string;
@@ -44,14 +45,13 @@ interface GuiValues {
   absorptionR: number;
   absorptionG: number;
   absorptionB: number;
-  frostRadius: number;
-  glassDispersion: number;
   iridescenceStrength: number;
   iridescenceFrequency: number;
   environmentExposure: number;
   bloomStrength: number;
   bloomThreshold: number;
   bloomRadius: number;
+  particleExposure: number;
 }
 
 function options<T extends string>(
@@ -98,6 +98,9 @@ export function Controls({
         initialValue.cameraDistance ?? DEFAULT_PRISM_CONTROLS.cameraDistance,
       cameraFov: initialValue.cameraFov ?? DEFAULT_PRISM_CONTROLS.cameraFov,
       beamWidth: initialValue.beamWidth ?? DEFAULT_PRISM_CONTROLS.beamWidth,
+      beamOpacity:
+        lightFade.beamOpacity ??
+        DEFAULT_PRISM_CONTROLS.lightFade.beamOpacity,
       edgeFalloff:
         lightFade.edgeFalloff ?? DEFAULT_PRISM_CONTROLS.lightFade.edgeFalloff,
       rainbowFalloff:
@@ -117,10 +120,6 @@ export function Controls({
       absorptionR: absorption[0] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[0],
       absorptionG: absorption[1] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[1],
       absorptionB: absorption[2] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[2],
-      frostRadius:
-        glass.frostRadius ?? DEFAULT_PRISM_CONTROLS.glass.frostRadius,
-      glassDispersion:
-        glass.dispersion ?? DEFAULT_PRISM_CONTROLS.glass.dispersion,
       iridescenceStrength:
         glass.iridescenceStrength ??
         DEFAULT_PRISM_CONTROLS.glass.iridescenceStrength,
@@ -139,6 +138,9 @@ export function Controls({
       bloomRadius:
         postprocess.bloomRadius ??
         DEFAULT_PRISM_CONTROLS.postprocess.bloomRadius,
+      particleExposure:
+        postprocess.particleExposure ??
+        DEFAULT_PRISM_CONTROLS.postprocess.particleExposure,
     };
     const gui = new GUI({ title: "Prism", container });
     Object.assign(gui.domElement.style, {
@@ -162,6 +164,7 @@ export function Controls({
         cameraFov: values.cameraFov,
         beamWidth: values.beamWidth,
         lightFade: {
+          beamOpacity: values.beamOpacity,
           edgeFalloff: values.edgeFalloff,
           rainbowFalloff: values.rainbowFalloff,
         },
@@ -177,8 +180,6 @@ export function Controls({
             values.absorptionG,
             values.absorptionB,
           ],
-          frostRadius: values.frostRadius,
-          dispersion: values.glassDispersion,
           iridescenceStrength: values.iridescenceStrength,
           iridescenceFrequency: values.iridescenceFrequency,
           environmentExposure: values.environmentExposure,
@@ -187,6 +188,7 @@ export function Controls({
           bloomStrength: values.bloomStrength,
           bloomThreshold: values.bloomThreshold,
           bloomRadius: values.bloomRadius,
+          particleExposure: values.particleExposure,
         },
       });
 
@@ -251,6 +253,16 @@ export function Controls({
       sceneFolder
         .addColor(values, "wallColor")
         .name("wall color")
+        .onChange(publish),
+      lightFolder
+        .add(
+          values,
+          "beamOpacity",
+          PRISM_LIGHT_FADE_RANGES.beamOpacity.min,
+          PRISM_LIGHT_FADE_RANGES.beamOpacity.max,
+          PRISM_LIGHT_FADE_RANGES.beamOpacity.step
+        )
+        .name("beam opacity")
         .onChange(publish),
       lightFolder
         .add(
@@ -332,26 +344,6 @@ export function Controls({
         )
         .name("absorption B")
         .onChange(publish),
-      transmissionFolder
-        .add(
-          values,
-          "frostRadius",
-          PRISM_GLASS_RANGES.frostRadius.min,
-          PRISM_GLASS_RANGES.frostRadius.max,
-          PRISM_GLASS_RANGES.frostRadius.step
-        )
-        .name("frost px")
-        .onChange(publish),
-      transmissionFolder
-        .add(
-          values,
-          "glassDispersion",
-          PRISM_GLASS_RANGES.dispersion.min,
-          PRISM_GLASS_RANGES.dispersion.max,
-          PRISM_GLASS_RANGES.dispersion.step
-        )
-        .name("chromatic shift")
-        .onChange(publish),
       reflectionFolder
         .add(
           values,
@@ -391,6 +383,16 @@ export function Controls({
           PRISM_GLASS_RANGES.iridescenceFrequency.step
         )
         .name("film frequency")
+        .onChange(publish),
+      postprocessFolder
+        .add(
+          values,
+          "particleExposure",
+          PRISM_POSTPROCESS_RANGES.particleExposure.min,
+          PRISM_POSTPROCESS_RANGES.particleExposure.max,
+          PRISM_POSTPROCESS_RANGES.particleExposure.step
+        )
+        .name("particle exposure")
         .onChange(publish),
       postprocessFolder
         .add(
@@ -449,7 +451,7 @@ export function Controls({
   return (
     <div
       ref={containerRef}
-      className="pointer-events-none absolute inset-0 z-[2]"
+      className="pointer-events-none absolute inset-0 z-50"
     />
   );
 }

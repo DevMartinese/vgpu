@@ -1,5 +1,5 @@
 import type { Frame, Gpu, Surface, Target } from 'vgpu';
-import { frameLoop, surface } from 'vgpu';
+import { clock, frameLoop, surface } from 'vgpu';
 
 import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '@/lib/example-renderer';
 import {
@@ -23,6 +23,7 @@ import {
 } from './types';
 
 export type PrismRenderer = ExampleRenderer<PrismControls>;
+const DUST_FPS = 30;
 
 export interface PrismThumbnailOptions extends ThumbnailOptions {
   readonly controls?: PrismControls;
@@ -35,6 +36,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
   let reportedError = false;
   let controls: PrismControls = options.initialControls ?? DEFAULT_PRISM_CONTROLS;
   let gpu: Gpu | undefined;
+  let gpuClock: ReturnType<typeof clock> | undefined;
   let canvasSurface: Surface | undefined;
   let scene: PrismScene | undefined;
   let prepared = false;
@@ -50,6 +52,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
   let aimCurrent: readonly [number, number] = [PRISM_DEFAULT_ARC, 0.5];
   /** Set whenever the picture would differ from the frame already on screen. */
   let pendingPresent = true;
+  let lastDustTime = -1;
 
   const handleFailure = (error: unknown) => {
     if (disposed) return;
@@ -162,12 +165,18 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     if (disposed || !scene || !canvasSurface || !prepared) return;
     const aimMoved = stepAim();
     const orbitMoved = stepOrbit();
-    if (!aimMoved && !orbitMoved && !pendingPresent) return;
+    const updateScene = aimMoved || orbitMoved || pendingPresent;
+    const dustTime = gpuClock
+      ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS
+      : 0;
+    const dustMoved = controls.view === 'glass' && dustTime !== lastDustTime;
+    if (!updateScene && !dustMoved) return;
     try {
       if (aimMoved) setLampAim(scene, aimCurrent[0], aimCurrent[1]);
       if (orbitMoved) setOrbit(scene, orbitCurrent[0], orbitCurrent[1]);
-      presentScene(scene, canvasSurface, currentFrame);
+      presentScene(scene, canvasSurface, currentFrame, dustTime, updateScene);
       pendingPresent = false;
+      lastDustTime = dustTime;
     } catch (error) {
       handleFailure(error);
     }
@@ -192,6 +201,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     canvasSurface = undefined;
     gpu?.dispose();
     gpu = undefined;
+    gpuClock = undefined;
   }
 
   const initialize = async () => {
@@ -214,6 +224,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     await prepareScene(scene, canvasSurface);
     if (disposed) return;
     prepared = true;
+    gpuClock = clock(gpu);
     loop = frameLoop(gpu, tick);
   };
 
@@ -242,7 +253,8 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
 /**
  * Headless render used for the gallery thumbnail and by the Node GPU tests.
  *
- * Nothing here reads the clock or a random seed, so one frame is the final image.
+ * Particle positions are deterministic and their animation is pinned to time
+ * zero, so one frame remains the final image.
  */
 export async function renderThumbnail(
   gpu: Gpu,

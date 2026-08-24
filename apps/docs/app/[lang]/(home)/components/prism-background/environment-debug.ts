@@ -5,6 +5,15 @@ import { perspectiveCamera, sphere } from "vgpu/scene";
 import { cameraView, rotationMatrix } from "./camera";
 import environmentDebugAxesWgsl from "./environment-debug-axes.wgsl";
 import environmentDebugWgsl from "./environment-debug.wgsl";
+import {
+  createEnvironmentSampler,
+  createEnvironmentTexture,
+  destroyEnvironmentTexture,
+  ENVIRONMENT_SIZE,
+  ENVIRONMENT_TEXEL_ANGLE,
+  prepareEnvironmentTexture,
+  type EnvironmentTexture,
+} from "./environment-texture";
 import { PRISM_GLASS } from "./types";
 
 const SPHERE_RADIUS = 0.68;
@@ -44,6 +53,8 @@ export function createEnvironmentDebugRenderer(
   let axes: Draw | undefined;
   let mirrorGeometry: Geometry | undefined;
   let axesGeometry: Geometry | undefined;
+  let environment: EnvironmentTexture | undefined;
+  let environmentSampler: GPUSampler | undefined;
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
   let pointerId: number | undefined;
@@ -146,6 +157,8 @@ export function createEnvironmentDebugRenderer(
           environmentRotation: ENVIRONMENT_ROTATION,
           cameraPosition,
           environmentExposure,
+          environmentSize: ENVIRONMENT_SIZE,
+          environmentTexelAngle: ENVIRONMENT_TEXEL_ANGLE,
         },
       });
       axes.set({
@@ -177,6 +190,14 @@ export function createEnvironmentDebugRenderer(
     }
     gpu = nextGpu;
     canvasSurface = surface(gpu, options.canvas, { dpr: [1, 2] });
+    environmentSampler = createEnvironmentSampler(gpu);
+    environment = createEnvironmentTexture(
+      gpu,
+      "prism-environment-debug-map",
+      true
+    );
+    await prepareEnvironmentTexture(gpu, environment, environmentSampler);
+    if (disposed) return;
     mirrorGeometry = geometry(gpu, sphere({
       radius: SPHERE_RADIUS,
       widthSegments: 48,
@@ -189,6 +210,10 @@ export function createEnvironmentDebugRenderer(
       cull: "back",
       depth: false,
       label: "prism-environment-debug-mirror",
+    });
+    mirror.set({
+      environmentTexture: environment.texture,
+      environmentSampler,
     });
     axes = draw(gpu, {
       shader: environmentDebugAxesWgsl,
@@ -229,6 +254,9 @@ export function createEnvironmentDebugRenderer(
     mirrorGeometry = undefined;
     axesGeometry?.destroy();
     axesGeometry = undefined;
+    destroyEnvironmentTexture(environment);
+    environment = undefined;
+    environmentSampler = undefined;
     canvasSurface?.dispose();
     canvasSurface = undefined;
     gpu?.dispose();

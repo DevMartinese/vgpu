@@ -1,31 +1,31 @@
 // Outer/front interface of the prism, based on `glass-fractal`'s
 // `hero-glass-transmission.wgsl`.
 //
-// The material is that shader's, response for response: a dielectric Fresnel
-// split between a refracted lookup and a studio reflection, four stable taps for
-// frost, two more for chromatic separation, Beer-Lambert absorption over the
-// distance travelled inside the solid, a thin-film tint that grows towards
-// grazing angles, and an additive HDR highlight so a bright studio panel keeps
-// its shape on a low-IOR frontal face.
+// The material keeps that shader's dielectric response: one refracted scene
+// lookup, one studio reflection, Beer-Lambert absorption over the distance
+// travelled inside the solid, a thin-film tint that grows towards grazing
+// angles, and an additive HDR highlight so a bright studio panel keeps its shape
+// on a low-IOR frontal face. Geometric antialiasing belongs to the 4x MSAA target.
 //
 // Two things had to change, and both are simplifications. That example's glass is
 // a shell around a fractal, so it approximates the interior with a nested
 // tetrahedron and samples at the shell gap; this one is solid, so the refracted
 // ray is followed to the face it actually leaves through — the intersection of
-// the same three edges the CPU ray bundle refracts through, capped front and back. And
-// the environment is evaluated rather than sampled from a cubemap, for the reason
-// `environment.wgsl` gives.
+// the same three edges the CPU ray bundle refracts through, capped front and back.
+// Environment reads use the same equirectangular texture path as the repository's
+// environment-map and transmission examples.
 //
-// `sceneTexture` already contains the wall seen through the inner interface.
-// Following the air -> glass ray to its exit point and sampling that pixel joins
-// both independently-rasterized interfaces into one complete optical path.
+// `sceneTexture` contains external light, the transparent back-side interface
+// and internal light. The front shader follows air -> glass only as far as the
+// first inner face and samples that resolved background there. The back-side
+// material already owns glass -> air and TIR; tracing them again here would bend
+// the same image twice.
 
 import {
   Glass,
   dielectricFresnel,
   glassEnvironment,
-  projectToUv,
-  sampleScene,
+  glassEnvironmentLod,
 } from "./glass-common.wgsl";
 
 /**
@@ -39,11 +39,25 @@ const NO_EXIT: f32 = 100000.0;
 @group(0) @binding(0) var<uniform> params: Glass;
 @group(0) @binding(1) var sceneTexture: texture_2d<f32>;
 @group(0) @binding(2) var sceneSampler: sampler;
+@group(0) @binding(3) var studioEnvironment: texture_2d<f32>;
+@group(0) @binding(4) var debugEnvironment: texture_2d<f32>;
+@group(0) @binding(5) var environmentSampler: sampler;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
   @location(0) worldPosition: vec3f,
   @location(1) worldNormal: vec3f,
+};
+
+struct SurfaceHit {
+  distance: f32,
+  outwardNormal: vec3f,
+};
+
+struct InteriorHit {
+  position: vec3f,
+  distance: f32,
+  valid: u32,
 };
 
 /** The mesh is built in world coordinates, so there is no model matrix to apply. */
@@ -55,6 +69,8 @@ fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f) -> VertexOu
   out.worldNormal = normal;
   return out;
 }
+
+const SURFACE_EPSILON: f32 = 0.0002;
 
 /** Distance to one outward plane `dot(outward, p) = offset`, or `NO_EXIT`. */
 fn planeExitDistance(origin: vec3f, direction: vec3f, outward: vec3f, offset: f32) -> f32 {
@@ -71,26 +87,81 @@ fn planeExitDistance(origin: vec3f, direction: vec3f, outward: vec3f, offset: f3
  * from the cross-section's edges, rotated outward by the same rule `optics.ts`
  * uses, and the two caps the extrusion added.
  */
-fn prismExitDistance(origin: vec3f, direction: vec3f) -> f32 {
+fn nextSurface(origin: vec3f, direction: vec3f) -> SurfaceHit {
   var corners = array<vec2f, 3>(params.prismA, params.prismB, params.prismC);
-  var nearest = min(
-    planeExitDistance(origin, direction, vec3f(0.0, 0.0, 1.0), params.frontZ),
-    planeExitDistance(origin, direction, vec3f(0.0, 0.0, -1.0), -params.backZ),
+  let frontDistance = planeExitDistance(
+    origin,
+    direction,
+    vec3f(0.0, 0.0, 1.0),
+    params.frontZ,
   );
+  let backDistance = planeExitDistance(
+    origin,
+    direction,
+    vec3f(0.0, 0.0, -1.0),
+    -params.backZ,
+  );
+  var nearest = frontDistance;
+  var outwardNormal = vec3f(0.0, 0.0, 1.0);
+  if (backDistance < nearest) {
+    nearest = backDistance;
+    outwardNormal = vec3f(0.0, 0.0, -1.0);
+  }
   for (var index = 0u; index < 3u; index = index + 1u) {
     let start = corners[index];
     let edge = corners[(index + 1u) % 3u] - start;
     let outward = normalize(vec2f(edge.y, -edge.x));
-    nearest = min(
-      nearest,
-      planeExitDistance(origin, direction, vec3f(outward, 0.0), dot(outward, start)),
+    let distance = planeExitDistance(
+      origin,
+      direction,
+      vec3f(outward, 0.0),
+      dot(outward, start),
     );
+    if (distance < nearest) {
+      nearest = distance;
+      outwardNormal = vec3f(outward, 0.0);
+    }
   }
-  return nearest;
+  return SurfaceHit(nearest, outwardNormal);
 }
 
-fn sampleInterior(uv: vec2f, halfTexel: vec2f) -> vec3f {
-  return sampleScene(sceneTexture, sceneSampler, uv, halfTexel);
+fn traceInteriorHit(
+  entryPosition: vec3f,
+  insideDirection: vec3f,
+) -> InteriorHit {
+  let shiftedPosition = entryPosition + insideDirection * SURFACE_EPSILON;
+  let hit = nextSurface(shiftedPosition, insideDirection);
+  let valid = hit.distance < 10.0;
+  let distance = select(0.0, hit.distance, valid);
+  return InteriorHit(
+    shiftedPosition + insideDirection * distance,
+    distance,
+    select(0u, 1u, valid),
+  );
+}
+
+fn sampleEnvironment(direction: vec3f) -> vec3f {
+  return glassEnvironment(
+    direction,
+    params,
+    studioEnvironment,
+    debugEnvironment,
+    environmentSampler,
+    glassEnvironmentLod(direction, params),
+  );
+}
+
+fn projectToUv(point: vec3f) -> vec2f {
+  let clip = params.viewProjection * vec4f(point, 1.0);
+  let ndc = clip.xy / max(clip.w, 0.00001);
+  return vec2f(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+}
+
+fn sampleBackground(uv: vec2f) -> vec3f {
+  let resolution = max(vec2f(textureDimensions(sceneTexture)), vec2f(1.0));
+  let halfTexel = 0.5 / resolution;
+  let safeUv = clamp(uv, halfTexel, vec2f(1.0) - halfTexel);
+  return textureSampleLevel(sceneTexture, sceneSampler, safeUv, 0.0).rgb;
 }
 
 @fragment
@@ -99,60 +170,27 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let view = normalize(params.cameraPosition - in.worldPosition);
   let incident = -view;
   let facing = clamp(dot(view, normal), 0.0, 1.0);
-  let reflectedEnvironment = glassEnvironment(reflect(incident, normal), params);
+  let reflectedEnvironment = sampleEnvironment(reflect(incident, normal));
   let fresnel = dielectricFresnel(params.ior, facing);
-  let refracted = normalize(refract(incident, normal, 1.0 / params.ior));
-  // Nudged off the surface so the face this ray just entered through is not the
-  // one it is found to leave by.
-  let exitDistance = prismExitDistance(in.worldPosition + refracted * 0.0002, refracted);
-
-  let originalUv = in.position.xy / max(params.resolution, vec2f(1.0));
-  let validExit = exitDistance < 10.0;
-  // The previous pass rasterized the inner interface. Projecting the true exit
-  // point tells us which back-face pixel already contains the glass -> air bend
-  // and the wall radiance behind it.
-  let sampleDistance = select(0.0, exitDistance, validExit);
-  let samplePoint = in.worldPosition + refracted * sampleDistance;
+  let insideDirection = normalize(refract(incident, normal, 1.0 / params.ior));
+  let interiorHit = traceInteriorHit(
+    in.worldPosition,
+    insideDirection,
+  );
+  let resolution = max(vec2f(textureDimensions(sceneTexture)), vec2f(1.0));
+  let originalUv = in.position.xy / resolution;
   let refractedUv = select(
     originalUv,
-    projectToUv(samplePoint, params.viewProjection),
-    validExit,
+    projectToUv(interiorHit.position),
+    interiorHit.valid != 0u,
   );
-  let safeResolution = max(params.resolution, vec2f(1.0));
-  let halfTexel = 0.5 / safeResolution;
-
-  // Four stable bilinear taps provide a subtle frosted transmission without a
-  // noise texture, temporal shimmer, mip chain or additional render pass.
-  let frostOffset = max(params.frostRadius, 0.0) / safeResolution;
-  let frosted = (
-    sampleInterior(refractedUv + vec2f(frostOffset.x, 0.0), halfTexel)
-    + sampleInterior(refractedUv - vec2f(frostOffset.x, 0.0), halfTexel)
-    + sampleInterior(refractedUv + vec2f(0.0, frostOffset.y), halfTexel)
-    + sampleInterior(refractedUv - vec2f(0.0, frostOffset.y), halfTexel)
-  ) * 0.25;
-
-  // Two independent taps provide chromatic separation. Keeping their distance
-  // separate from the four frost taps lets RGB shift grow without making the
-  // entire transmission blurrier.
-  let refractionDeltaPixels = (refractedUv - originalUv) * safeResolution;
-  let refractionDeltaLength = length(refractionDeltaPixels);
-  let refractionAxis = select(
-    vec2f(1.0, 0.0),
-    refractionDeltaPixels / max(refractionDeltaLength, 0.0001),
-    refractionDeltaLength > 0.0001,
+  let background = sampleBackground(refractedUv);
+  let transmittance = exp(-params.absorption * interiorHit.distance);
+  let transmitted = select(
+    vec3f(0.0),
+    background * transmittance,
+    interiorHit.valid != 0u,
   );
-  let dispersionOffset = refractionAxis * (max(params.dispersion, 0.0) * 72.0) / safeResolution;
-  let towardRefraction = sampleInterior(refractedUv + dispersionOffset, halfTexel);
-  let awayFromRefraction = sampleInterior(refractedUv - dispersionOffset, halfTexel);
-  let dispersionMix = clamp(params.dispersion * 48.0, 0.0, 1.0);
-  let sceneColor = vec3f(
-    mix(frosted.r, towardRefraction.r, dispersionMix),
-    frosted.g,
-    mix(frosted.b, awayFromRefraction.b, dispersionMix),
-  );
-
-  let transmittance = exp(-params.absorption * sampleDistance);
-  let transmitted = sceneColor * transmittance;
   let reflected = reflectedEnvironment * params.reflectionStrength;
 
   // A thin film changes the Fresnel reflectance per wavelength. Modeling that

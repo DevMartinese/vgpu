@@ -15,6 +15,7 @@ export struct Scene {
   lightInternalQuads: u32,
   lightInternalSegments: u32,
   /** User-controlled lateral and outgoing-distance falloff strengths. */
+  lightOpacity: f32,
   lightEdgeFalloff: f32,
   rainbowFalloff: f32,
 }

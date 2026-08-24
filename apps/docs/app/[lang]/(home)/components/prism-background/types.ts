@@ -110,10 +110,6 @@ export interface GlassControls {
   readonly reflectionStrength: number;
   /** Beer-Lambert absorption per scene unit, in linear RGB. */
   readonly absorption: readonly [number, number, number];
-  /** Screen-space blur radius of the transmitted image, in pixels. */
-  readonly frostRadius: number;
-  /** Red/blue separation of the refracted lookup. */
-  readonly dispersion: number;
   /** Strength of the angle-dependent spectral tint on reflections. */
   readonly iridescenceStrength: number;
   /** Spectral tint cycles across the Fresnel range. */
@@ -129,9 +125,13 @@ export interface PostprocessControls {
   readonly bloomThreshold: number;
   /** Reconstruction radius in texels at every level of the bloom pyramid. */
   readonly bloomRadius: number;
+  /** Display exposure applied only to illuminated dust particles. */
+  readonly particleExposure: number;
 }
 
 export interface LightFadeControls {
+  /** Linear multiplier applied to the complete emissive light sheet. */
+  readonly beamOpacity: number;
   /** Exponential concentration from the beam centre toward its side edges. */
   readonly edgeFalloff: number;
   /** Exponential attenuation applied only to the dispersed outgoing light. */
@@ -172,10 +172,12 @@ export const PRISM_BEAM_WIDTH_RANGE = {
   step: 0.005,
 } as const;
 export const DEFAULT_LIGHT_FADE_CONTROLS: LightFadeControls = {
+  beamOpacity: 1,
   edgeFalloff: 16,
   rainbowFalloff: 8,
 };
 export const PRISM_LIGHT_FADE_RANGES = {
+  beamOpacity: { min: 0, max: 1, step: 0.01 },
   edgeFalloff: { min: 0, max: 16, step: 0.1 },
   rainbowFalloff: { min: 0, max: 8, step: 0.1 },
 } as const;
@@ -191,8 +193,6 @@ export const PRISM_GLASS_RANGES = {
   ior: { min: 1, max: 2.5, step: 0.001 },
   reflectionStrength: { min: 0, max: 3, step: 0.01 },
   absorption: { min: 0, max: 1, step: 0.005 },
-  frostRadius: { min: 0, max: 6, step: 0.1 },
-  dispersion: { min: 0, max: 0.08, step: 0.001 },
   iridescenceStrength: { min: 0, max: 1, step: 0.01 },
   iridescenceFrequency: { min: 0, max: 8, step: 0.1 },
   environmentExposure: { min: 0, max: 4, step: 0.05 },
@@ -208,8 +208,6 @@ export const DEFAULT_GLASS_CONTROLS: GlassControls = {
   ior: 1.244,
   reflectionStrength: 2.21,
   absorption: [0.58, 0.685, 0.15],
-  frostRadius: 0.3,
-  dispersion: 0.015,
   iridescenceStrength: 0.16,
   iridescenceFrequency: 2,
   environmentExposure: 1.55,
@@ -219,12 +217,14 @@ export const PRISM_POSTPROCESS_RANGES = {
   bloomStrength: { min: 0, max: 3, step: 0.05 },
   bloomThreshold: { min: 0, max: 4, step: 0.05 },
   bloomRadius: { min: 0.25, max: 3, step: 0.05 },
+  particleExposure: { min: 0, max: 4, step: 0.05 },
 } as const;
 
 export const DEFAULT_POSTPROCESS_CONTROLS: PostprocessControls = {
   bloomStrength: 0.6,
   bloomThreshold: 0.45,
   bloomRadius: 1,
+  particleExposure: 1,
 };
 
 export function clampBeamWidth(width: number): number {

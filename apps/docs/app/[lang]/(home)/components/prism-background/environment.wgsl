@@ -2,16 +2,16 @@
 //
 // It started as `glass-fractal`'s nine-panel baked cubemap, but this shot only
 // needs three intentional surfaces: a dark back-left wall, a cool right key and
-// a neutral strip below the prism. Evaluating them directly keeps the environment
-// editable in one WGSL file and available to both the glass and mirror-ball debugger.
+// a neutral strip below the prism. Defining them here keeps the environment editable
+// in one WGSL file; `environment-bake.wgsl` rasterizes it once into the same 360° HDR
+// texture layout used by the environment-map and transmission examples.
 //
 // The final line replays the round trip the asset used to perform — encode to
 // gamma 2.2, decode as sRGB — so the values a reflection reads here are the values
 // a reflection reads there, including the small mismatch between those two curves.
 //
-// Sampling analytically also costs nothing in fidelity for this material: the
-// baked cubemap carries a prefiltered mip chain for rough surfaces, and glass
-// only ever reads its sharpest level.
+// The glass has no material roughness cone, but its pixel footprint can still
+// select a prefiltered mip when a reflection compresses this map on screen.
 
 import { srgbToLinear3 } from "@vgpu/wgsl-std/color";
 

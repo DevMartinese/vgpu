@@ -1,4 +1,4 @@
-// Raw ping-pong copy. The scene stays in linear HDR until the final surface pass.
+// Raw resolved copy. The scene stays in linear HDR until presentation.
 
 @group(0) @binding(0) var sceneTexture: texture_2d<f32>;
 
