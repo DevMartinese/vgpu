@@ -19,11 +19,11 @@ export function Hero() {
     <HeroTabProvider>
       <section
         data-hero-invert
-        className="relative min-h-[calc(100svh-4rem)] overflow-hidden bg-black"
+        className="relative h-[calc(100svh-4rem)] max-h-[50em] overflow-hidden bg-black"
       >
         <div
           data-hero-container
-          className="relative mx-auto min-h-[calc(100svh-4rem)] w-full max-w-[1448px] overflow-hidden"
+          className="relative mx-auto h-full w-full max-w-[1448px] overflow-hidden"
         >
           <PrismBackground />
 
@@ -104,8 +104,7 @@ export function Hero() {
                 </svg>
               </h1>
               <p
-                className="max-w-[10em] text-balance text-center font-light leading-tight text-white min-[768px]:text-left"
-                style={{ fontSize: "clamp(1rem, 4svh, 10.75rem)" }}
+                className="max-w-[10em] text-4xl text-balance text-center font-light leading-tight text-white min-[768px]:text-left"
               >
                 The WebGPU library, designed for agents.
               </p>
