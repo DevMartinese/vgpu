@@ -5,7 +5,6 @@ import DynamicLink from "fumadocs-core/dynamic-link";
 import { HeroTabs } from "./hero-tabs";
 import { PrismBackground } from "./prism-background/prism-background";
 import "../hero-glass-button.css";
-import "../hero-glass-wordmark.css";
 import "../hero-light-invert.css";
 
 /**
@@ -65,42 +64,15 @@ export function Hero() {
               <h1
                 aria-label="vgpu"
                 data-hero-title
-                className="relative mb-[1em] aspect-[188/75] w-[200px] [--wordmark-blur:3px]"
+                className="mb-[1em] aspect-[179.2/75] w-[200px]"
               >
-                <svg aria-hidden="true" className="absolute size-0">
-                  <defs>
-                    <mask
-                      id="hero-wordmark-mask"
-                      maskUnits="objectBoundingBox"
-                      maskContentUnits="objectBoundingBox"
-                      x="0"
-                      y="0"
-                      width="1"
-                      height="1"
-                      style={{ maskType: "luminance" }}
-                    >
-                      <g
-                        fill="white"
-                        transform="scale(0.005319148936 0.013333333333)"
-                      >
-                        <VgpuWordmarkGlyphs />
-                      </g>
-                    </mask>
-                  </defs>
-                </svg>
-                <span aria-hidden="true" className="hero-glass-wordmark" />
                 <svg
                   aria-hidden="true"
-                  className="hero-glass-wordmark-stroke"
-                  viewBox="0 0 188 75"
+                  className="block size-full"
+                  fill="white"
+                  viewBox="0 0 179.2 75"
                 >
-                  <g
-                    fill="none"
-                    stroke="rgba(255, 255, 255, 0.62)"
-                    strokeWidth="0.8"
-                  >
-                    <VgpuWordmarkGlyphs />
-                  </g>
+                  <VgpuWordmarkGlyphs />
                 </svg>
               </h1>
               <p
@@ -108,7 +80,7 @@ export function Hero() {
               >
                 The WebGPU library, designed for agents.
               </p>
-              <div className="mt-8 w-full max-w-[21em]">
+              <div className="mt-20 w-full max-w-[21em]">
                 <HeroTabs />
               </div>
               <div

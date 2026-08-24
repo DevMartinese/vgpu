@@ -6,7 +6,8 @@
  * back-side glass and internal light in painter's order into one 4x MSAA HDR
  * target. A second pass lets the front interface refract that resolved image
  * without reading from its own render attachment. The result then feeds a
- * four-level bloom pyramid and the sole tone-mapped presentation pass.
+ * two visible bloom levels, one broad particle-light level, and the sole
+ * tone-mapped presentation pass.
  */
 
 import type {
@@ -27,8 +28,19 @@ import {
   wallHalfHeight,
   type CameraView,
 } from "./camera";
-import bloomUpsampleWgsl from "./bloom-upsample.wgsl";
-import bloomWgsl from "./bloom.wgsl";
+import bloomBlurWgsl from "./bloom-blur.wgsl";
+import bloomCompositeWgsl from "./bloom-composite.wgsl";
+import bloomExtractWgsl from "./bloom-extract.wgsl";
+import {
+  BLOOM_KERNEL_TAPS,
+  BLOOM_LEVEL_DIVISORS,
+  BLOOM_LEVEL_FACTORS,
+  BLOOM_LEVELS,
+  BLOOM_VISIBLE_LEVELS,
+  PARTICLE_LIGHT_FIRST_LEVEL,
+  bloomKernelWeights,
+  bloomSpread,
+} from "./bloom";
 import copyLinearWgsl from "./copy-linear.wgsl";
 import dustWgsl from "./dust.wgsl";
 import {
@@ -67,6 +79,7 @@ import {
 } from "./light-mesh";
 import lightWgsl from "./light.wgsl";
 import lightWireframeWgsl from "./light-wireframe.wgsl";
+import particleLightDownsampleWgsl from "./particle-light-downsample.wgsl";
 import presentWgsl from "./present.wgsl";
 import {
   prismGeometry,
@@ -99,8 +112,10 @@ import {
 
 type Output = Surface | Target;
 const ENVIRONMENT_ROTATION = rotationMatrix(PRISM_GLASS.environmentRotation);
-const BLOOM_LEVELS = 4;
-const DUST_PARTICLE_COUNT = 6000;
+const DUST_PARTICLE_COUNT = 2200;
+const BLOOM_KERNEL_WEIGHTS = BLOOM_KERNEL_TAPS.map((tapCount) =>
+  bloomKernelWeights(tapCount)
+);
 const CAMERA_FIT_MIN_DISTANCE = PRISM_FRONT_Z + 0.1;
 const CAMERA_FIT_MAX_DISTANCE = 32;
 const PRISM_FRAME_POINTS = (() => {
@@ -111,9 +126,24 @@ const PRISM_FRAME_POINTS = (() => {
   }
   return points;
 })();
-type BloomTargets = readonly [Target, Target, Target, Target];
-type BloomEffects = readonly [Effect, Effect, Effect, Effect];
-type BloomUpsampleEffects = readonly [Effect, Effect, Effect];
+interface BloomLevelTargets {
+  readonly horizontal: Target;
+  readonly vertical: Target;
+}
+interface BloomLevelEffects {
+  readonly horizontal: Effect;
+  readonly vertical: Effect;
+}
+type BloomTargets = readonly [
+  BloomLevelTargets,
+  BloomLevelTargets,
+  BloomLevelTargets
+];
+type BloomBlurEffects = readonly [
+  BloomLevelEffects,
+  BloomLevelEffects,
+  BloomLevelEffects
+];
 
 export interface PrismScene {
   readonly gpu: Gpu;
@@ -128,8 +158,10 @@ export interface PrismScene {
   lightStats: LightMeshStats;
   readonly wall: Draw;
   readonly copyBackground: Effect;
-  readonly bloomDownsample: BloomEffects;
-  readonly bloomUpsample: BloomUpsampleEffects;
+  readonly bloomExtract: Effect;
+  readonly bloomBlur: BloomBlurEffects;
+  readonly bloomComposite: Effect;
+  readonly particleLightDownsample: Effect;
   readonly present: Effect;
   readonly glassBack: Draw;
   readonly glassFront: Draw;
@@ -218,28 +250,25 @@ export function createScene(
       label: `${label}.wall`,
     }),
     copyBackground: effect(gpu, copyLinearWgsl, {
-      label: `${label}.copy-background`,
+      label: `${label}.pass-b-copy-a`,
     }),
-    bloomDownsample: [
-      effect(gpu, bloomWgsl, { label: `${label}.bloom-half` }),
-      effect(gpu, bloomWgsl, { label: `${label}.bloom-quarter` }),
-      effect(gpu, bloomWgsl, { label: `${label}.bloom-eighth` }),
-      effect(gpu, bloomWgsl, { label: `${label}.bloom-sixteenth` }),
-    ],
-    bloomUpsample: [
-      effect(gpu, bloomUpsampleWgsl, {
-        label: `${label}.bloom-upsample-eighth`,
-        blend: "additive",
+    bloomExtract: effect(gpu, bloomExtractWgsl, {
+      label: `${label}.bloom-extract`,
+    }),
+    bloomBlur: Array.from({ length: BLOOM_LEVELS }, (_, level) => ({
+      horizontal: effect(gpu, bloomBlurWgsl, {
+        label: `${label}.bloom-${level}-horizontal`,
       }),
-      effect(gpu, bloomUpsampleWgsl, {
-        label: `${label}.bloom-upsample-quarter`,
-        blend: "additive",
+      vertical: effect(gpu, bloomBlurWgsl, {
+        label: `${label}.bloom-${level}-vertical`,
       }),
-      effect(gpu, bloomUpsampleWgsl, {
-        label: `${label}.bloom-upsample-half`,
-        blend: "additive",
-      }),
-    ],
+    })) as unknown as BloomBlurEffects,
+    bloomComposite: effect(gpu, bloomCompositeWgsl, {
+      label: `${label}.bloom-composite`,
+    }),
+    particleLightDownsample: effect(gpu, particleLightDownsampleWgsl, {
+      label: `${label}.particle-light-downsample`,
+    }),
     present: effect(gpu, presentWgsl, { label: `${label}.present` }),
     glassBack: draw(gpu, {
       shader: glassBackWgsl,
@@ -393,6 +422,9 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
   const inputGlass = controls.glass ?? defaultGlass;
   const inputPostprocess = controls.postprocess ?? defaultPostprocess;
   const inputLightFade = controls.lightFade ?? defaultLightFade;
+  const legacyLightFade = inputLightFade as typeof inputLightFade & {
+    rainbowFalloff?: number;
+  };
   const inputSpectralDispersion =
     controls.spectralDispersion ??
     PRISM_DISPERSION_PRESETS[
@@ -447,11 +479,24 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
           finite(inputLightFade.edgeFalloff, defaultLightFade.edgeFalloff)
         )
       ),
-      rainbowFalloff: Math.min(
-        PRISM_LIGHT_FADE_RANGES.rainbowFalloff.max,
+      rainbowFalloffRate: Math.min(
+        PRISM_LIGHT_FADE_RANGES.rainbowFalloffRate.max,
         Math.max(
-          PRISM_LIGHT_FADE_RANGES.rainbowFalloff.min,
-          finite(inputLightFade.rainbowFalloff, defaultLightFade.rainbowFalloff)
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffRate.min,
+          finite(
+            inputLightFade.rainbowFalloffRate ?? legacyLightFade.rainbowFalloff,
+            defaultLightFade.rainbowFalloffRate
+          )
+        )
+      ),
+      rainbowFalloffPower: Math.min(
+        PRISM_LIGHT_FADE_RANGES.rainbowFalloffPower.max,
+        Math.max(
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffPower.min,
+          finite(
+            inputLightFade.rainbowFalloffPower,
+            defaultLightFade.rainbowFalloffPower
+          )
         )
       ),
     },
@@ -488,16 +533,6 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
       bloomRadius: finite(
         inputPostprocess.bloomRadius,
         defaultPostprocess.bloomRadius
-      ),
-      particleExposure: Math.min(
-        PRISM_POSTPROCESS_RANGES.particleExposure.max,
-        Math.max(
-          PRISM_POSTPROCESS_RANGES.particleExposure.min,
-          finite(
-            inputPostprocess.particleExposure,
-            defaultPostprocess.particleExposure
-          )
-        )
       ),
     },
   };
@@ -558,8 +593,10 @@ export function resizeScene(
   scene.aspect = output[0] / Math.max(1, output[1]);
   scene.backgroundTarget?.resize(output);
   scene.sceneTarget?.resize(output);
-  scene.bloomTargets?.forEach((bloomTarget, level) => {
-    bloomTarget.resize(bloomLevelSize(output, level));
+  scene.bloomTargets?.forEach((bloomLevel, level) => {
+    const size = bloomLevelSize(output, level);
+    bloomLevel.horizontal.resize(size);
+    bloomLevel.vertical.resize(size);
   });
   refreshFraming(scene);
   refreshCamera(scene);
@@ -630,7 +667,8 @@ export function sceneUniforms(scene: PrismScene): Record<string, unknown> {
     lightInternalSegments: LIGHT_INTERNAL_SEGMENTS,
     lightOpacity: scene.controls.lightFade.beamOpacity,
     lightEdgeFalloff: scene.controls.lightFade.edgeFalloff,
-    rainbowFalloff: scene.controls.lightFade.rainbowFalloff,
+    rainbowFalloffRate: scene.controls.lightFade.rainbowFalloffRate,
+    rainbowFalloffPower: scene.controls.lightFade.rainbowFalloffPower,
   };
 }
 
@@ -671,7 +709,10 @@ export function dustUniforms(
     time,
     cameraDistance: scene.cameraDistance,
     lightPlaneZ: PRISM_LIGHT_PLANE_Z,
-    exposure: scene.controls.postprocess.particleExposure,
+    prismA: PRISM_TRIANGLE.a,
+    prismB: PRISM_TRIANGLE.b,
+    prismC: PRISM_TRIANGLE.c,
+    prismFrontZ: PRISM_FRONT_Z,
   };
 }
 
@@ -690,7 +731,7 @@ export async function prepareScene(
       size: output.size,
       format: "rgba16float",
       msaa: true,
-      label: `${scene.label}.background`,
+      label: `${scene.label}.pass-a-back-and-light`,
     });
   scene.backgroundTarget = backgroundTarget;
   const sceneTarget =
@@ -699,7 +740,7 @@ export async function prepareScene(
       size: output.size,
       format: "rgba16float",
       msaa: true,
-      label: `${scene.label}.scene`,
+      label: `${scene.label}.pass-b-front-glass`,
     });
   scene.sceneTarget = sceneTarget;
   if (
@@ -717,17 +758,26 @@ export async function prepareScene(
   const bloomTargets =
     scene.bloomTargets ??
     (Array.from({ length: BLOOM_LEVELS }, (_, level) =>
-      target(scene.gpu, {
-        size: bloomLevelSize(output.size, level),
-        format: "rgba16float",
-        label: `${scene.label}.bloom-${level}`,
+      Object.freeze({
+        horizontal: target(scene.gpu, {
+          size: bloomLevelSize(output.size, level),
+          format: "rgba16float",
+          label: `${scene.label}.bloom-${level}-horizontal`,
+        }),
+        vertical: target(scene.gpu, {
+          size: bloomLevelSize(output.size, level),
+          format: "rgba16float",
+          label: `${scene.label}.bloom-${level}-vertical`,
+        }),
       })
     ) as unknown as BloomTargets);
   scene.bloomTargets = bloomTargets;
-  bloomTargets.forEach((bloomTarget, level) => {
+  bloomTargets.forEach((bloomLevel, level) => {
     const size = bloomLevelSize(output.size, level);
-    if (bloomTarget.size[0] !== size[0] || bloomTarget.size[1] !== size[1]) {
-      bloomTarget.resize(size);
+    for (const bloomTarget of [bloomLevel.horizontal, bloomLevel.vertical]) {
+      if (bloomTarget.size[0] !== size[0] || bloomTarget.size[1] !== size[1]) {
+        bloomTarget.resize(size);
+      }
     }
   });
   const studioEnvironment =
@@ -767,11 +817,14 @@ export async function prepareScene(
     scene.glassFront.compile(sceneTarget),
     scene.wireframe.compile(sceneTarget),
     scene.dust.compile(outputSignature),
-    ...scene.bloomDownsample.map((bloom, level) =>
-      bloom.compile(bloomTargets[level]!)
-    ),
-    ...scene.bloomUpsample.map((bloom, index) =>
-      bloom.compile(bloomTargets[2 - index]!)
+    scene.bloomExtract.compile(bloomTargets[0].vertical),
+    ...scene.bloomBlur.flatMap((bloom, level) => [
+      bloom.horizontal.compile(bloomTargets[level]!.horizontal),
+      bloom.vertical.compile(bloomTargets[level]!.vertical),
+    ]),
+    scene.bloomComposite.compile(bloomTargets[0].horizontal),
+    scene.particleLightDownsample.compile(
+      bloomTargets[PARTICLE_LIGHT_FIRST_LEVEL].vertical
     ),
     scene.present.compile(outputSignature),
   ]);
@@ -792,10 +845,14 @@ export function presentScene(
   }
   bind(scene, backgroundTarget, sceneTarget, bloomTargets, time);
   const encode = (current: Frame) => {
+    // `wall` and `caustic` are hidden test isolations. Both composed views run
+    // the exact same Pass A; these flags only let GPU tests inspect its inputs.
     const showBackFace =
       scene.controls.view === "glass" || scene.controls.view === "back";
     const showLight = scene.controls.view !== "wall";
     if (updateScene) {
+      // Pass A: wall -> external light -> transparent back face -> internal
+      // light. All four draws share one full-resolution MSAA render pass.
       current.pass(
         { target: backgroundTarget, clear: [0, 0, 0, 1] },
         (pass) => {
@@ -835,6 +892,8 @@ export function presentScene(
           }
         }
       );
+      // Pass B first preserves Pass A over the full frame, then replaces only
+      // the prism silhouette with the front material sampling Pass A.
       current.pass({ target: sceneTarget, clear: [0, 0, 0, 1] }, (pass) => {
         pass.draw(scene.copyBackground);
         if (scene.controls.view === "glass") {
@@ -842,23 +901,68 @@ export function presentScene(
           if (scene.controls.wireframe) pass.draw(scene.wireframe);
         }
       });
-      bloomTargets.forEach((bloomTarget, level) => {
-        current.pass({ target: bloomTarget, clear: [0, 0, 0, 1] }, (pass) => {
-          pass.draw(scene.bloomDownsample[level]!);
+      current.pass(
+        { target: bloomTargets[0].vertical, clear: [0, 0, 0, 1] },
+        (pass) => {
+          pass.draw(scene.bloomExtract);
+        }
+      );
+      bloomTargets
+        .slice(0, BLOOM_VISIBLE_LEVELS)
+        .forEach((bloomLevel, level) => {
+          current.pass(
+            { target: bloomLevel.horizontal, clear: [0, 0, 0, 1] },
+            (pass) => {
+              pass.draw(scene.bloomBlur[level]!.horizontal);
+            }
+          );
+          current.pass(
+            { target: bloomLevel.vertical, clear: [0, 0, 0, 1] },
+            (pass) => {
+              pass.draw(scene.bloomBlur[level]!.vertical);
+            }
+          );
         });
-      });
-      scene.bloomUpsample.forEach((bloom, index) => {
-        current.pass(
-          { target: bloomTargets[2 - index]!, clear: false },
-          (pass) => {
-            pass.draw(bloom);
-          }
-        );
-      });
+      current.pass(
+        {
+          target: bloomTargets[PARTICLE_LIGHT_FIRST_LEVEL].vertical,
+          clear: [0, 0, 0, 1],
+        },
+        (pass) => {
+          pass.draw(scene.particleLightDownsample);
+        }
+      );
+      bloomTargets
+        .slice(PARTICLE_LIGHT_FIRST_LEVEL)
+        .forEach((bloomLevel, index) => {
+          const level = PARTICLE_LIGHT_FIRST_LEVEL + index;
+          current.pass(
+            { target: bloomLevel.horizontal, clear: [0, 0, 0, 1] },
+            (pass) => {
+              pass.draw(scene.bloomBlur[level]!.horizontal);
+            }
+          );
+          current.pass(
+            { target: bloomLevel.vertical, clear: [0, 0, 0, 1] },
+            (pass) => {
+              pass.draw(scene.bloomBlur[level]!.vertical);
+            }
+          );
+        });
+      current.pass(
+        { target: bloomTargets[0].horizontal, clear: [0, 0, 0, 1] },
+        (pass) => {
+          pass.draw(scene.bloomComposite);
+        }
+      );
     }
     current.pass({ target: output }, (pass) => {
       pass.draw(scene.present);
-      if (scene.controls.view === "glass") pass.draw(scene.dust);
+      if (scene.controls.view === "glass") {
+        pass.draw(scene.dust, {
+          instances: DUST_PARTICLE_COUNT,
+        });
+      }
     });
   };
   if (currentFrame) encode(currentFrame);
@@ -901,33 +1005,71 @@ function bind(
   scene.wireframe.set({
     params: { viewProjection: scene.view.viewProjection },
   });
-  scene.bloomDownsample.forEach((bloom, level) => {
-    const source = level === 0 ? sceneTarget : bloomTargets[level - 1]!;
-    bloom.set({
-      sourceTexture: source,
+  scene.bloomExtract.set({
+    sourceTexture: sceneTarget,
+    sourceSampler: scene.sceneSampler,
+    params: { threshold: scene.controls.postprocess.bloomThreshold },
+  });
+  const particleLightTarget = bloomTargets[PARTICLE_LIGHT_FIRST_LEVEL];
+  scene.particleLightDownsample.set({
+    sourceTexture: sceneTarget,
+    sourceSampler: scene.sceneSampler,
+    params: {
+      sourceTexelSize: [1 / sceneTarget.size[0], 1 / sceneTarget.size[1]],
+      sourceToTargetScale: [
+        sceneTarget.size[0] / particleLightTarget.vertical.size[0],
+        sceneTarget.size[1] / particleLightTarget.vertical.size[1],
+      ],
+    },
+  });
+  scene.bloomBlur.forEach((bloom, level) => {
+    const targetLevel = bloomTargets[level]!;
+    const horizontalSource =
+      level === 0 || level === PARTICLE_LIGHT_FIRST_LEVEL
+        ? targetLevel.vertical
+        : bloomTargets[level - 1]!.vertical;
+    const tapCount = BLOOM_KERNEL_TAPS[level]!;
+    const coefficients = BLOOM_KERNEL_WEIGHTS[level]!;
+    const commonParams = {
+      texelSize: [
+        1 / targetLevel.horizontal.size[0],
+        1 / targetLevel.horizontal.size[1],
+      ],
+      tapCount,
+      coefficients0: coefficients.slice(0, 4),
+      coefficients1: coefficients.slice(4, 8),
+      coefficients2: coefficients.slice(8, 12),
+      coefficients3: coefficients.slice(12, 16),
+      coefficients4: coefficients.slice(16, 20),
+      coefficients5: coefficients.slice(20, 24),
+    };
+    bloom.horizontal.set({
+      sourceTexture: horizontalSource,
       sourceSampler: scene.sceneSampler,
-      params: {
-        sourceTexelSize: [1 / source.size[0], 1 / source.size[1]],
-        threshold: scene.controls.postprocess.bloomThreshold,
-        extractHighlights: level === 0 ? 1 : 0,
-      },
+      params: { ...commonParams, direction: [1, 0] },
+    });
+    bloom.vertical.set({
+      sourceTexture: targetLevel.horizontal,
+      sourceSampler: scene.sceneSampler,
+      params: { ...commonParams, direction: [0, 1] },
     });
   });
-  scene.bloomUpsample.forEach((bloom, index) => {
-    const source = bloomTargets[3 - index]!;
-    bloom.set({
-      sourceTexture: source,
-      sourceSampler: scene.sceneSampler,
-      params: {
-        sourceTexelSize: [1 / source.size[0], 1 / source.size[1]],
-        radius: scene.controls.postprocess.bloomRadius,
-        scatter: 0.65,
-      },
-    });
+  scene.bloomComposite.set({
+    level0Texture: bloomTargets[0].vertical,
+    level1Texture: bloomTargets[1].vertical,
+    levelSampler: scene.sceneSampler,
+    params: {
+      radius: bloomSpread(
+        scene.controls.postprocess.bloomRadius,
+        PRISM_POSTPROCESS_RANGES.bloomRadius.min,
+        PRISM_POSTPROCESS_RANGES.bloomRadius.max
+      ),
+      factors: [...BLOOM_LEVEL_FACTORS, 0, 0],
+    },
   });
   scene.present.set({
     sceneTexture: sceneTarget,
-    bloomTexture: bloomTargets[0],
+    bloomTexture: bloomTargets[0].horizontal,
     bloomSampler: scene.sceneSampler,
     params: {
       bloomStrength:
@@ -938,7 +1080,8 @@ function bind(
   });
   scene.dust.set({
     params: dustUniforms(scene, time),
-    lightTexture: bloomTargets[0],
+    colorTexture: bloomTargets[1].vertical,
+    lightTexture: bloomTargets[2].vertical,
     lightSampler: scene.sceneSampler,
   });
 }
@@ -947,7 +1090,7 @@ function bloomLevelSize(
   size: readonly [number, number],
   level: number
 ): readonly [number, number] {
-  const divisor = 2 ** (level + 1);
+  const divisor = BLOOM_LEVEL_DIVISORS[level] ?? BLOOM_LEVEL_DIVISORS.at(-1)!;
   return [
     Math.max(1, Math.ceil(size[0] / divisor)),
     Math.max(1, Math.ceil(size[1] / divisor)),
@@ -963,7 +1106,10 @@ export function destroyScene(scene: PrismScene): void {
   scene.backgroundTarget = undefined;
   destroyTarget(scene.sceneTarget);
   scene.sceneTarget = undefined;
-  scene.bloomTargets?.forEach(destroyTarget);
+  scene.bloomTargets?.forEach((bloomLevel) => {
+    destroyTarget(bloomLevel.horizontal);
+    destroyTarget(bloomLevel.vertical);
+  });
   scene.bloomTargets = undefined;
   destroyEnvironmentTexture(scene.studioEnvironment);
   scene.studioEnvironment = undefined;

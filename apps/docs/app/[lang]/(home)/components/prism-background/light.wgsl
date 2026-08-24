@@ -74,8 +74,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let radius = abs(in.profile);
   let radialFalloff = exp(-scene.lightEdgeFalloff * radius * radius)
     * (1.0 - smoothstep(0.55, 1.0, radius));
-  let longitudinalFalloff = exp(-scene.rainbowFalloff * in.travel)
-    * (1.0 - smoothstep(0.55, 0.95, in.travel));
+  // Geometric dilution falls quickly near the effective source, then leaves a
+  // progressively softer tail. Unlike the previous exponential plus cutoff,
+  // this never introduces a second abrupt fade near the wall.
+  let attenuationDistance = max(scene.rainbowFalloffRate, 0.0)
+    * max(in.travel, 0.0);
+  let longitudinalFalloff = 1.0 / pow(
+    1.0 + attenuationDistance,
+    max(scene.rainbowFalloffPower, 0.0001),
+  );
   return vec4f(
     in.color * in.intensity * radialFalloff * longitudinalFalloff
       * max(scene.lightOpacity, 0.0),

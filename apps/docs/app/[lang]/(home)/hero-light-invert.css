@@ -22,15 +22,3 @@ html.light [data-hero-invert] [data-hero-foot-fade] {
     rgba(5, 5, 5, 0) 100%
   ) !important;
 }
-
-/* Dark mode keeps the original outlined wordmark. In light mode the section
-   is inverted as a whole, so authoring this title white produces a solid black
-   title after the parent filter is applied. */
-[data-hero-title] {
-  -webkit-text-stroke: 0.00em #999;
-}
-
-html.light [data-hero-invert] [data-hero-title] {
-  color: white;
-  -webkit-text-stroke: 0;
-}

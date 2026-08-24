@@ -16,7 +16,6 @@ import {
   PRISM_VIEW_ORDER,
   type PrismControls,
   type PrismDispersion,
-  type PrismView,
 } from "./types";
 
 export interface ControlsProps {
@@ -25,16 +24,19 @@ export interface ControlsProps {
   disabled?: boolean;
 }
 
+type GuiView = (typeof PRISM_VIEW_ORDER)[number];
+
 interface GuiValues {
   dispersion: PrismDispersion;
   dispersionBase: number;
   dispersionStrength: number;
-  view: PrismView;
+  view: GuiView;
   cameraFov: number;
   beamWidth: number;
   beamOpacity: number;
   edgeFalloff: number;
-  rainbowFalloff: number;
+  rainbowFalloffRate: number;
+  rainbowFalloffPower: number;
   wallColor: string;
   wireframe: boolean;
   lightWireframe: boolean;
@@ -48,7 +50,6 @@ interface GuiValues {
   bloomStrength: number;
   bloomThreshold: number;
   bloomRadius: number;
-  particleExposure: number;
 }
 
 function options<T extends string>(
@@ -56,6 +57,10 @@ function options<T extends string>(
   labels: Readonly<Record<T, string>>
 ): Record<string, T> {
   return Object.fromEntries(order.map((value) => [labels[value], value]));
+}
+
+function guiView(value: unknown): GuiView {
+  return value === "back" ? "back" : "glass";
 }
 
 /** lil-gui owns its small mutable model; React only owns the mount point. */
@@ -79,6 +84,9 @@ export function Controls({
       initialValue.postprocess ?? DEFAULT_PRISM_CONTROLS.postprocess;
     const lightFade =
       initialValue.lightFade ?? DEFAULT_PRISM_CONTROLS.lightFade;
+    const legacyLightFade = lightFade as typeof lightFade & {
+      rainbowFalloff?: number;
+    };
     const absorption =
       glass.absorption ?? DEFAULT_PRISM_CONTROLS.glass.absorption;
     const spectralDispersion =
@@ -90,16 +98,22 @@ export function Controls({
       dispersion: initialValue.dispersion ?? DEFAULT_PRISM_CONTROLS.dispersion,
       dispersionBase: spectralDispersion.base,
       dispersionStrength: spectralDispersion.strength,
-      view: initialValue.view ?? DEFAULT_PRISM_CONTROLS.view,
+      // Old Fast Refresh state may still hold the now-hidden wall/caustic
+      // diagnostics. The public control always resumes at a composed view.
+      view: guiView(initialValue.view),
       cameraFov: initialValue.cameraFov ?? DEFAULT_PRISM_CONTROLS.cameraFov,
       beamWidth: initialValue.beamWidth ?? DEFAULT_PRISM_CONTROLS.beamWidth,
       beamOpacity:
         lightFade.beamOpacity ?? DEFAULT_PRISM_CONTROLS.lightFade.beamOpacity,
       edgeFalloff:
         lightFade.edgeFalloff ?? DEFAULT_PRISM_CONTROLS.lightFade.edgeFalloff,
-      rainbowFalloff:
-        lightFade.rainbowFalloff ??
-        DEFAULT_PRISM_CONTROLS.lightFade.rainbowFalloff,
+      rainbowFalloffRate:
+        lightFade.rainbowFalloffRate ??
+        legacyLightFade.rainbowFalloff ??
+        DEFAULT_PRISM_CONTROLS.lightFade.rainbowFalloffRate,
+      rainbowFalloffPower:
+        lightFade.rainbowFalloffPower ??
+        DEFAULT_PRISM_CONTROLS.lightFade.rainbowFalloffPower,
       wallColor: initialValue.wallColor ?? DEFAULT_PRISM_CONTROLS.wallColor,
       wireframe: initialValue.wireframe ?? DEFAULT_PRISM_CONTROLS.wireframe,
       lightWireframe:
@@ -126,9 +140,6 @@ export function Controls({
       bloomRadius:
         postprocess.bloomRadius ??
         DEFAULT_PRISM_CONTROLS.postprocess.bloomRadius,
-      particleExposure:
-        postprocess.particleExposure ??
-        DEFAULT_PRISM_CONTROLS.postprocess.particleExposure,
     };
     const gui = new GUI({ title: "Prism", container });
     Object.assign(gui.domElement.style, {
@@ -153,7 +164,8 @@ export function Controls({
         lightFade: {
           beamOpacity: values.beamOpacity,
           edgeFalloff: values.edgeFalloff,
-          rainbowFalloff: values.rainbowFalloff,
+          rainbowFalloffRate: values.rainbowFalloffRate,
+          rainbowFalloffPower: values.rainbowFalloffPower,
         },
         wallColor: values.wallColor,
         wireframe: values.wireframe,
@@ -173,7 +185,6 @@ export function Controls({
           bloomStrength: values.bloomStrength,
           bloomThreshold: values.bloomThreshold,
           bloomRadius: values.bloomRadius,
-          particleExposure: values.particleExposure,
         },
       });
 
@@ -262,12 +273,22 @@ export function Controls({
       lightFolder
         .add(
           values,
-          "rainbowFalloff",
-          PRISM_LIGHT_FADE_RANGES.rainbowFalloff.min,
-          PRISM_LIGHT_FADE_RANGES.rainbowFalloff.max,
-          PRISM_LIGHT_FADE_RANGES.rainbowFalloff.step
+          "rainbowFalloffRate",
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffRate.min,
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffRate.max,
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffRate.step
         )
-        .name("rainbow falloff")
+        .name("rainbow falloff rate")
+        .onChange(publish),
+      lightFolder
+        .add(
+          values,
+          "rainbowFalloffPower",
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffPower.min,
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffPower.max,
+          PRISM_LIGHT_FADE_RANGES.rainbowFalloffPower.step
+        )
+        .name("rainbow falloff power")
         .onChange(publish),
       cameraFolder
         .add(
@@ -338,16 +359,6 @@ export function Controls({
           PRISM_GLASS_RANGES.environmentExposure.step
         )
         .name("env exposure")
-        .onChange(publish),
-      postprocessFolder
-        .add(
-          values,
-          "particleExposure",
-          PRISM_POSTPROCESS_RANGES.particleExposure.min,
-          PRISM_POSTPROCESS_RANGES.particleExposure.max,
-          PRISM_POSTPROCESS_RANGES.particleExposure.step
-        )
-        .name("particle exposure")
         .onChange(publish),
       postprocessFolder
         .add(

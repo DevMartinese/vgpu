@@ -82,23 +82,22 @@ export const PRISM_DISPERSION_LABELS: Record<PrismDispersion, string> = {
 /**
  * What the frame shows, peeling the picture back one layer at a time.
  *
- * `glass` is the final scene after the front-face pass. `back` presents the
- * second HDR target after the back-face glass and internal-light draws. `wall`
- * stops before either glass interface or the light sheet, and `caustic` shows
- * that light sheet alone over black.
+ * `glass` is the final scene after Pass B. `back` presents Pass A after its
+ * external-light, back-face and internal-light draws. `wall` and `caustic` are
+ * retained as programmatic GPU-test isolations; they only skip draws inside
+ * Pass A and never allocate another render target or render pass.
  */
 export type PrismView = "glass" | "back" | "wall" | "caustic";
 
-export const PRISM_VIEW_ORDER: readonly PrismView[] = [
+/** The two composed outputs exposed to lil-gui. */
+export const PRISM_VIEW_ORDER = [
   "glass",
   "back",
-  "wall",
-  "caustic",
-];
+] as const satisfies readonly PrismView[];
 
 export const PRISM_VIEW_LABELS: Record<PrismView, string> = {
-  glass: "Final (front face)",
-  back: "Back-face pass",
+  glass: "Final (Pass B)",
+  back: "Pass A (back face + light)",
   wall: "Wall pass",
   caustic: "Light only",
 };
@@ -119,10 +118,8 @@ export interface PostprocessControls {
   readonly bloomStrength: number;
   /** Linear-light brightness at which pixels begin contributing to bloom. */
   readonly bloomThreshold: number;
-  /** Reconstruction radius in texels at every level of the bloom pyramid. */
+  /** Moves visible bloom energy across its two progressively wider scales. */
   readonly bloomRadius: number;
-  /** Display exposure applied only to illuminated dust particles. */
-  readonly particleExposure: number;
 }
 
 export interface LightFadeControls {
@@ -130,8 +127,10 @@ export interface LightFadeControls {
   readonly beamOpacity: number;
   /** Exponential concentration from the beam centre toward its side edges. */
   readonly edgeFalloff: number;
-  /** Exponential attenuation applied only to the dispersed outgoing light. */
-  readonly rainbowFalloff: number;
+  /** Distance scale at which the dispersed outgoing light starts to fade. */
+  readonly rainbowFalloffRate: number;
+  /** Curvature of the dispersed outgoing light's distance attenuation. */
+  readonly rainbowFalloffPower: number;
 }
 
 export interface PrismControls {
@@ -168,12 +167,14 @@ export const PRISM_BEAM_WIDTH_RANGE = {
 export const DEFAULT_LIGHT_FADE_CONTROLS: LightFadeControls = {
   beamOpacity: 1,
   edgeFalloff: 16,
-  rainbowFalloff: 8,
+  rainbowFalloffRate: 2.1,
+  rainbowFalloffPower: 8,
 };
 export const PRISM_LIGHT_FADE_RANGES = {
   beamOpacity: { min: 0, max: 1, step: 0.01 },
   edgeFalloff: { min: 0, max: 16, step: 0.1 },
-  rainbowFalloff: { min: 0, max: 8, step: 0.1 },
+  rainbowFalloffRate: { min: 0, max: 40, step: 0.1 },
+  rainbowFalloffPower: { min: 0.25, max: 8, step: 0.05 },
 } as const;
 /** Vertical field of view of the camera looking at the wall, in degrees. */
 export const CAMERA_FOV_DEGREES = 48;
@@ -206,14 +207,12 @@ export const PRISM_POSTPROCESS_RANGES = {
   bloomStrength: { min: 0, max: 3, step: 0.05 },
   bloomThreshold: { min: 0, max: 4, step: 0.05 },
   bloomRadius: { min: 0.25, max: 3, step: 0.05 },
-  particleExposure: { min: 0, max: 4, step: 0.05 },
 } as const;
 
 export const DEFAULT_POSTPROCESS_CONTROLS: PostprocessControls = {
   bloomStrength: 0.5,
   bloomThreshold: 0.5,
   bloomRadius: 1,
-  particleExposure: 1,
 };
 
 export function clampBeamWidth(width: number): number {

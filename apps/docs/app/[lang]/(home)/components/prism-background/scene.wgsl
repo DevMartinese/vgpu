@@ -17,7 +17,8 @@ export struct Scene {
   /** User-controlled lateral and outgoing-distance falloff strengths. */
   lightOpacity: f32,
   lightEdgeFalloff: f32,
-  rainbowFalloff: f32,
+  rainbowFalloffRate: f32,
+  rainbowFalloffPower: f32,
 }
 
 /** Maps top-origin texture coordinates to the wall plane in world space. */

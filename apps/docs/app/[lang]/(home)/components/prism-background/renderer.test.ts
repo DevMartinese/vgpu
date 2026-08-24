@@ -56,7 +56,9 @@ import {
   CAMERA_DISTANCE,
   DEFAULT_PRISM_CONTROLS,
   PRISM_DEFAULT_ARC,
+  PRISM_FRONT_Z,
   PRISM_LIGHT_PLANE_Z,
+  PRISM_TRIANGLE,
 } from "./types";
 
 function deferred<T>() {
@@ -69,6 +71,10 @@ function deferred<T>() {
 
 function partialDraw(pipeline: unknown, firstVertex: number, vertices: number) {
   return { pipeline, options: { firstVertex, vertices } };
+}
+
+function instancedDraw(pipeline: unknown, instances: number) {
+  return { pipeline, options: { instances } };
 }
 
 function browser() {
@@ -294,7 +300,7 @@ test("renders the deterministic light once and idles until something changes", a
   // output aspect is known. No history textures are allocated.
   expect(live.instance.device.createBuffer).toHaveBeenCalledOnce();
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(2);
-  expect(live.effects).toHaveLength(13);
+  expect(live.effects).toHaveLength(15);
   expect(live.draws).toHaveLength(7);
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
     3,
@@ -304,7 +310,7 @@ test("renders the deterministic light once and idles until something changes", a
     7,
     expect.objectContaining({
       vertices: 6,
-      instances: 6000,
+      instances: 2200,
       depth: false,
       blend: "additive",
     })
@@ -320,24 +326,27 @@ test("renders the deterministic light once and idles until something changes", a
     expect(created.compile).toHaveBeenCalledOnce();
   // Canvas surfaces do not expose a current texture until a frame begins, so
   // output pipelines must pre-warm from the surface's stable format signature.
-  expect(live.effects[8]!.compile).toHaveBeenCalledWith({
+  expect(live.effects[10]!.compile).toHaveBeenCalledWith({
     colors: ["bgra8unorm"],
   });
   // One full-resolution MSAA target composites back-side glass and light; a
-  // second lets the front interface sample that resolved result. Four smaller
-  // HDR targets hold bloom, and the remainder are transient mip-bake surfaces.
-  expect(live.targets).toHaveLength(36);
+  // second lets the front interface sample that resolved result. Three pairs of
+  // smaller HDR targets hold two bloom scales and one particle-light scale; the
+  // remainder are transient environment mip-bake surfaces.
+  expect(live.targets).toHaveLength(38);
   expect(live.targets[0]!.format).toBe("rgba16float");
   expect(live.targets[1]!.format).toBe("rgba16float");
   expect(live.targets[0]!.msaa).toBe(true);
   expect(live.targets[1]!.msaa).toBe(true);
-  expect(live.targets.slice(2, 6).map((entry) => entry.size)).toEqual([
+  expect(live.targets.slice(2, 8).map((entry) => entry.size)).toEqual([
+    [100, 50],
     [100, 50],
     [50, 25],
-    [25, 13],
+    [50, 25],
+    [13, 7],
     [13, 7],
   ]);
-  for (const bloomTarget of live.targets.slice(2, 6)) {
+  for (const bloomTarget of live.targets.slice(2, 8)) {
     expect(bloomTarget.format).toBe("rgba16float");
     expect(bloomTarget.msaa).toBeUndefined();
   }
@@ -352,28 +361,29 @@ test("renders the deterministic light once and idles until something changes", a
       })
     );
   }
-  expect(live.effects[9]!.compile).toHaveBeenCalledWith(live.targets[6]);
-  expect(live.effects[10]!.compile).toHaveBeenCalledWith(live.targets[6]);
-  expect(live.effects[11]!.compile).toHaveBeenCalledWith(live.targets[7]);
-  expect(live.effects[12]!.compile).toHaveBeenCalledWith(live.targets[7]);
-  expect(live.effects[9]!.set).toHaveBeenCalledWith({
+  expect(live.effects[11]!.compile).toHaveBeenCalledWith(live.targets[8]);
+  expect(live.effects[12]!.compile).toHaveBeenCalledWith(live.targets[8]);
+  expect(live.effects[13]!.compile).toHaveBeenCalledWith(live.targets[9]);
+  expect(live.effects[14]!.compile).toHaveBeenCalledWith(live.targets[9]);
+  expect(live.effects[11]!.set).toHaveBeenCalledWith({
     params: { debug: 0 },
   });
-  expect(live.effects[11]!.set).toHaveBeenCalledWith({
+  expect(live.effects[13]!.set).toHaveBeenCalledWith({
     params: { debug: 1 },
   });
   expect(live.copyTextureToTexture).toHaveBeenCalledTimes(16);
   expect(live.effects[0]!.compile).toHaveBeenCalledWith(live.targets[1]);
-  for (let level = 0; level < 4; level++) {
-    expect(live.effects[level + 1]!.compile).toHaveBeenCalledWith(
-      live.targets[level + 2]
+  expect(live.effects[1]!.compile).toHaveBeenCalledWith(live.targets[3]);
+  for (let level = 0; level < 3; level++) {
+    expect(live.effects[level * 2 + 2]!.compile).toHaveBeenCalledWith(
+      live.targets[level * 2 + 2]
+    );
+    expect(live.effects[level * 2 + 3]!.compile).toHaveBeenCalledWith(
+      live.targets[level * 2 + 3]
     );
   }
-  for (let index = 0; index < 3; index++) {
-    expect(live.effects[index + 5]!.compile).toHaveBeenCalledWith(
-      live.targets[4 - index]
-    );
-  }
+  expect(live.effects[8]!.compile).toHaveBeenCalledWith(live.targets[2]);
+  expect(live.effects[9]!.compile).toHaveBeenCalledWith(live.targets[7]);
   expect(live.draws[0]!.compile).toHaveBeenCalledWith(live.targets[0]);
   expect(live.draws[1]!.compile).toHaveBeenCalledWith(live.targets[0]);
   expect(live.draws[2]!.compile).toHaveBeenCalledWith(live.targets[0]);
@@ -411,18 +421,24 @@ test("renders the deterministic light once and idles until something changes", a
     expect.objectContaining({ sourceTexture: live.targets[1] })
   );
   expect(live.effects[2]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[3] })
+  );
+  expect(live.effects[3]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({ sourceTexture: live.targets[2] })
   );
-  expect(live.effects[5]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[5] })
-  );
-  expect(live.effects[6]!.set).toHaveBeenLastCalledWith(
-    expect.objectContaining({ sourceTexture: live.targets[4] })
-  );
-  expect(live.effects[7]!.set).toHaveBeenLastCalledWith(
+  expect(live.effects[4]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({ sourceTexture: live.targets[3] })
   );
   expect(live.effects[8]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      level0Texture: live.targets[3],
+      level1Texture: live.targets[5],
+    })
+  );
+  expect(live.effects[9]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sourceTexture: live.targets[1] })
+  );
+  expect(live.effects[10]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sceneTexture: live.targets[1],
       bloomTexture: live.targets[2],
@@ -436,19 +452,24 @@ test("renders the deterministic light once and idles until something changes", a
       outputSize: [200, 100],
       time: 0,
       lightPlaneZ: PRISM_LIGHT_PLANE_Z,
-      exposure: 1,
+      prismA: PRISM_TRIANGLE.a,
+      prismB: PRISM_TRIANGLE.b,
+      prismC: PRISM_TRIANGLE.c,
+      prismFrontZ: PRISM_FRONT_Z,
     }),
-    lightTexture: live.targets[2],
+    colorTexture: live.targets[5],
+    lightTexture: live.targets[7],
     lightSampler: expect.anything(),
   });
 
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   tick(live.loopFrame);
-  // Thirty standalone passes bake both eight-level pyramids once. Runtime
-  // rendering encodes the sorted background, refractive front, seven bloom
-  // passes and present.
+  // Thirty standalone passes bake both environment pyramids once. Runtime
+  // rendering encodes the sorted background, refractive front, highlight
+  // extraction, four visible blur passes, the unthresholded particle reduction,
+  // two broad particle blur passes, bloom composition and present.
   expect(live.instance.fns.frame).toHaveBeenCalledTimes(30);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(12);
   expect(live.encodedPasses).toEqual([
     [
       live.draws[1],
@@ -471,15 +492,14 @@ test("renders the deterministic light once and idles until something changes", a
     [live.effects[3]],
     [live.effects[4]],
     [live.effects[5]],
+    [live.effects[9]],
     [live.effects[6]],
     [live.effects[7]],
-    [live.effects[8], live.draws[6]],
+    [live.effects[8]],
+    [live.effects[10], instancedDraw(live.draws[6], 2200)],
   ]);
-  for (const options of live.passOptions.slice(6, 9)) {
-    expect(options).toEqual(expect.objectContaining({ clear: false }));
-  }
   tick(live.loopFrame);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(12);
   renderer.dispose();
 });
 
@@ -492,13 +512,16 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
 
   tick(live.loopFrame);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(12);
 
   live.gpuClock.time = 1 / 30;
   tick(live.loopFrame);
 
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(11);
-  expect(live.encodedPasses.at(-1)).toEqual([live.effects[8], live.draws[6]]);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(13);
+  expect(live.encodedPasses.at(-1)).toEqual([
+    live.effects[10],
+    instancedDraw(live.draws[6], 2200),
+  ]);
   expect(live.draws[6]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({ time: 1 / 30 }),
@@ -508,7 +531,7 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   renderer.dispose();
 });
 
-test("the back-face view keeps the sorted light around the environment-only glass", async () => {
+test("the Pass A view keeps the sorted light around the environment-only back face", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
@@ -541,9 +564,11 @@ test("the back-face view keeps the sorted light around the environment-only glas
     [live.effects[3]],
     [live.effects[4]],
     [live.effects[5]],
+    [live.effects[9]],
     [live.effects[6]],
     [live.effects[7]],
     [live.effects[8]],
+    [live.effects[10]],
   ]);
   renderer.dispose();
 });
@@ -688,10 +713,10 @@ test("only optical controls rebuild the light mesh", async () => {
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
     postprocess: {
+      ...DEFAULT_PRISM_CONTROLS.postprocess,
       bloomStrength: 1.8,
       bloomThreshold: 0.4,
       bloomRadius: 4,
-      particleExposure: 2.25,
     },
   });
   tick(live.loopFrame);
@@ -700,20 +725,33 @@ test("only optical controls rebuild the light mesh", async () => {
     expect.objectContaining({
       params: expect.objectContaining({
         threshold: 0.4,
-        extractHighlights: 1,
       }),
     })
   );
   expect(live.effects[8]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: expect.objectContaining({ radius: 1 }),
+    })
+  );
+  expect(live.effects[10]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: { bloomStrength: 1.8 },
     })
   );
   expect(live.draws[6]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
-      params: expect.objectContaining({ exposure: 2.25 }),
+      params: expect.objectContaining({
+        outputSize: [200, 100],
+        prismA: PRISM_TRIANGLE.a,
+        prismB: PRISM_TRIANGLE.b,
+        prismC: PRISM_TRIANGLE.c,
+      }),
     })
   );
+  expect(live.encodedPasses.at(-1)).toEqual([
+    live.effects[10],
+    instancedDraw(live.draws[6], 2200),
+  ]);
   // A different index of refraction bends every ribbon differently.
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
@@ -754,7 +792,8 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
     lightFade: {
       beamOpacity: 0.35,
       edgeFalloff: 10,
-      rainbowFalloff: 3.2,
+      rainbowFalloffRate: 3.2,
+      rainbowFalloffPower: 2,
     },
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
@@ -764,7 +803,8 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
     lightFade: {
       beamOpacity: 0.35,
       edgeFalloff: 10,
-      rainbowFalloff: 5.5,
+      rainbowFalloffRate: 5.5,
+      rainbowFalloffPower: 4.25,
     },
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
@@ -772,7 +812,8 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
   expect(live.draws[0]!.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({
       lightEdgeFalloff: 10,
-      rainbowFalloff: 5.5,
+      rainbowFalloffRate: 5.5,
+      rainbowFalloffPower: 4.25,
       lightOpacity: 0.35,
     }),
   });
@@ -852,7 +893,7 @@ test("the camera follows the pointer without rebuilding an unchanged light", asy
   // regenerating the already-current world-space light mesh.
   env.windowListeners.get("pointermove")?.(pointer);
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(12);
   renderer.dispose();
 });
 
@@ -876,17 +917,18 @@ test("coalesces resizes and updates both scene targets plus the light mesh", asy
   const bloomSizes = [
     [900, 500],
     [450, 250],
-    [225, 125],
     [113, 63],
   ];
-  live.targets.slice(2, 6).forEach((colorTarget, level) => {
-    expect(colorTarget.resize).toHaveBeenCalledWith(bloomSizes[level]);
+  live.targets.slice(2, 8).forEach((colorTarget, index) => {
+    expect(colorTarget.resize).toHaveBeenCalledWith(
+      bloomSizes[Math.floor(index / 2)]
+    );
   });
-  for (const transientTarget of live.targets.slice(6)) {
+  for (const transientTarget of live.targets.slice(8)) {
     expect(transientTarget.resize).not.toHaveBeenCalled();
     expect(transientTarget.destroy).toHaveBeenCalledOnce();
   }
-  for (const colorTarget of live.targets.slice(0, 6))
+  for (const colorTarget of live.targets.slice(0, 8))
     expect(colorTarget.destroy).not.toHaveBeenCalled();
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(3);
 
