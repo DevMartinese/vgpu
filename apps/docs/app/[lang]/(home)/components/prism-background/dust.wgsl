@@ -46,6 +46,19 @@ fn hash11(value: f32) -> f32 {
   return fract(sin(value * 127.1) * 43758.5453);
 }
 
+// Integer hashing keeps respawn positions stable for long-running sessions.
+// Growing f32 inputs eventually lose the low bits that distinguish particles,
+// especially before a trigonometric hash.
+fn hashU32(value: u32) -> f32 {
+  var mixed = value;
+  mixed = mixed ^ (mixed >> 16u);
+  mixed = mixed * 0x7feb352du;
+  mixed = mixed ^ (mixed >> 15u);
+  mixed = mixed * 0x846ca68bu;
+  mixed = mixed ^ (mixed >> 16u);
+  return f32(mixed & 0x00ffffffu) / 16777216.0;
+}
+
 fn quadCorner(vertexIndex: u32) -> vec2f {
   let cornerIndex = array<u32, 6>(0u, 1u, 2u, 2u, 1u, 3u)[vertexIndex % 6u];
   switch (cornerIndex) {
@@ -121,11 +134,12 @@ fn vs_main(
 
   // A completed lifecycle creates a new particle rather than reviving the old
   // one. The position changes only at the zero-opacity seam between cycles.
-  let spawnId = id + lifeGeneration * 4093.0;
-  let seedX = hash11(spawnId * 1.113);
-  let seedY = hash11(spawnId * 2.371 + 7.0);
-  let seedZ = hash11(spawnId * 4.117 + 19.0);
-  let seedDepth = hash11(spawnId * 5.923 + 23.0);
+  let spawnKey = (instanceIndex + 1u)
+    ^ (u32(lifeGeneration) * 0x9e3779b9u);
+  let seedX = hashU32(spawnKey ^ 0xa511e9b3u);
+  let seedY = hashU32(spawnKey ^ 0x63d83595u);
+  let seedZ = hashU32(spawnKey ^ 0x9e3779b9u);
+  let seedDepth = hashU32(spawnKey ^ 0xc2b2ae35u);
   let seedSize = hash11(id * 7.731 + 31.0);
   let seedClass = hash11(id * 9.173 + 37.0);
   let seedEnergy = hash11(id * 11.917 + 43.0);

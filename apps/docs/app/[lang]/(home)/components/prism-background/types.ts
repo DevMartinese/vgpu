@@ -193,7 +193,7 @@ export const PRISM_GLASS_RANGES = {
 /** Practical optical-glass Cauchy ranges, widened for stylized experimentation. */
 export const PRISM_SPECTRAL_DISPERSION_RANGES = {
   base: { min: 1.2, max: 2.1, step: 0.001 },
-  strength: { min: 0, max: 0.06, step: 0.0005 },
+  strength: { min: 0, max: 0.2, step: 0.0005 },
 } as const;
 
 export const DEFAULT_GLASS_CONTROLS: GlassControls = {

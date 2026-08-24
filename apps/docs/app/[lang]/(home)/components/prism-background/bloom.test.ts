@@ -16,13 +16,13 @@ describe("multiscale bloom", () => {
   test("uses one progressively wider kernel per level", () => {
     expect(BLOOM_KERNEL_TAPS).toHaveLength(BLOOM_LEVELS);
     expect(BLOOM_LEVEL_FACTORS).toHaveLength(BLOOM_VISIBLE_LEVELS);
-    expect(BLOOM_KERNEL_TAPS).toEqual([6, 10, 18]);
-    expect(BLOOM_LEVEL_DIVISORS).toEqual([2, 4, 16]);
+    expect(BLOOM_KERNEL_TAPS).toEqual([6, 10, 14, 18]);
+    expect(BLOOM_LEVEL_DIVISORS).toEqual([2, 4, 8, 16]);
   });
 
   test("reserves only the 1/16 level for particle illumination", () => {
-    expect(BLOOM_VISIBLE_LEVELS).toBe(2);
-    expect(PARTICLE_LIGHT_FIRST_LEVEL).toBe(2);
+    expect(BLOOM_VISIBLE_LEVELS).toBe(3);
+    expect(PARTICLE_LIGHT_FIRST_LEVEL).toBe(3);
     expect(PARTICLE_LIGHT_LEVELS).toBe(1);
     expect(BLOOM_VISIBLE_LEVELS + PARTICLE_LIGHT_LEVELS).toBe(BLOOM_LEVELS);
   });

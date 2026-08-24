@@ -6,7 +6,7 @@
  * back-side glass and internal light in painter's order into one 4x MSAA HDR
  * target. A second pass lets the front interface refract that resolved image
  * without reading from its own render attachment. The result then feeds a
- * two visible bloom levels, one broad particle-light level, and the sole
+ * three visible bloom levels, one broad particle-light level, and the sole
  * tone-mapped presentation pass.
  */
 
@@ -137,9 +137,11 @@ interface BloomLevelEffects {
 type BloomTargets = readonly [
   BloomLevelTargets,
   BloomLevelTargets,
+  BloomLevelTargets,
   BloomLevelTargets
 ];
 type BloomBlurEffects = readonly [
+  BloomLevelEffects,
   BloomLevelEffects,
   BloomLevelEffects,
   BloomLevelEffects
@@ -1057,6 +1059,7 @@ function bind(
   scene.bloomComposite.set({
     level0Texture: bloomTargets[0].vertical,
     level1Texture: bloomTargets[1].vertical,
+    level2Texture: bloomTargets[2].vertical,
     levelSampler: scene.sceneSampler,
     params: {
       radius: bloomSpread(
@@ -1064,7 +1067,7 @@ function bind(
         PRISM_POSTPROCESS_RANGES.bloomRadius.min,
         PRISM_POSTPROCESS_RANGES.bloomRadius.max
       ),
-      factors: [...BLOOM_LEVEL_FACTORS, 0, 0],
+      factors: [...BLOOM_LEVEL_FACTORS, 0],
     },
   });
   scene.present.set({
@@ -1081,7 +1084,7 @@ function bind(
   scene.dust.set({
     params: dustUniforms(scene, time),
     colorTexture: bloomTargets[1].vertical,
-    lightTexture: bloomTargets[2].vertical,
+    lightTexture: bloomTargets[PARTICLE_LIGHT_FIRST_LEVEL].vertical,
     lightSampler: scene.sceneSampler,
   });
 }

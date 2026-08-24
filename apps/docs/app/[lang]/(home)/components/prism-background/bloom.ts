@@ -1,18 +1,18 @@
 /** Number of half-resolution steps used to represent the halo. */
-export const BLOOM_LEVELS = 3;
-export const BLOOM_VISIBLE_LEVELS = 2;
+export const BLOOM_LEVELS = 4;
+export const BLOOM_VISIBLE_LEVELS = 3;
 export const PARTICLE_LIGHT_FIRST_LEVEL = BLOOM_VISIBLE_LEVELS;
 export const PARTICLE_LIGHT_LEVELS = BLOOM_LEVELS - BLOOM_VISIBLE_LEVELS;
 
 /** Wider kernels are inexpensive on the progressively smaller targets. */
-export const BLOOM_KERNEL_TAPS = [6, 10, 18] as const;
+export const BLOOM_KERNEL_TAPS = [6, 10, 14, 18] as const;
 export const BLOOM_MAX_KERNEL_TAPS = BLOOM_KERNEL_TAPS.at(-1)!;
 
-/** The particle field intentionally skips the unused 1/8 scale. */
-export const BLOOM_LEVEL_DIVISORS = [2, 4, 16] as const;
+/** Three visible bloom scales followed by one particle-only light field. */
+export const BLOOM_LEVEL_DIVISORS = [2, 4, 8, 16] as const;
 
-/** Near-to-far scale weights for the two levels visible as bloom. */
-export const BLOOM_LEVEL_FACTORS = [1, 0.8] as const;
+/** Near-to-far scale weights for the three levels visible as bloom. */
+export const BLOOM_LEVEL_FACTORS = [1, 0.8, 0.55] as const;
 
 /**
  * Symmetric, energy-normalized half-kernel padded for one fixed WGSL layout.
