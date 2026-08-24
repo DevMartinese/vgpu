@@ -1,7 +1,12 @@
-import type { Frame, Gpu, Surface, Target } from 'vgpu';
-import { clock, frameLoop, surface } from 'vgpu';
+import type { Frame, Gpu, Surface, Target } from "vgpu";
+import { clock, frameLoop, surface } from "vgpu";
 
-import type { BrowserRendererOptions, ExampleRenderer, RenderSize, ThumbnailOptions } from '@/lib/example-renderer';
+import type {
+  BrowserRendererOptions,
+  ExampleRenderer,
+  RenderSize,
+  ThumbnailOptions,
+} from "@/lib/example-renderer";
 import {
   createScene,
   destroyScene,
@@ -9,21 +14,29 @@ import {
   presentScene,
   resizeScene,
   setControls,
+  setFramingViewport,
   setLampAim,
   setLampArc,
   setOrbit,
   type PrismScene,
-} from './scene';
+} from "./scene";
+import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
 import {
   CAMERA_ORBIT_LERP,
   DEFAULT_PRISM_CONTROLS,
   LAMP_AIM_LERP,
   PRISM_DEFAULT_ARC,
   type PrismControls,
-} from './types';
+} from "./types";
 
 export type PrismRenderer = ExampleRenderer<PrismControls>;
 const DUST_FPS = 30;
+
+export interface PrismBrowserRendererOptions
+  extends BrowserRendererOptions<PrismControls> {
+  /** DOM slot whose canvas-relative bounds should contain the prism. */
+  readonly framingElement?: HTMLElement;
+}
 
 export interface PrismThumbnailOptions extends ThumbnailOptions {
   readonly controls?: PrismControls;
@@ -31,10 +44,13 @@ export interface PrismThumbnailOptions extends ThumbnailOptions {
   readonly orbit?: readonly [number, number];
 }
 
-export function createRenderer(options: BrowserRendererOptions<PrismControls>): PrismRenderer {
+export function createRenderer(
+  options: PrismBrowserRendererOptions
+): PrismRenderer {
   let disposed = false;
   let reportedError = false;
-  let controls: PrismControls = options.initialControls ?? DEFAULT_PRISM_CONTROLS;
+  let controls: PrismControls =
+    options.initialControls ?? DEFAULT_PRISM_CONTROLS;
   let gpu: Gpu | undefined;
   let gpuClock: ReturnType<typeof clock> | undefined;
   let canvasSurface: Surface | undefined;
@@ -44,6 +60,8 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
   let observer: ResizeObserver | undefined;
   let resizeFrame = 0;
   let pendingSize: RenderSize | undefined;
+  let pendingFraming: NormalizedViewport | undefined;
+  let framingPending = false;
   /** Where the camera is being asked to look, and where it currently looks. */
   let orbitTarget: readonly [number, number] = [0, 0];
   let orbitCurrent: readonly [number, number] = [0, 0];
@@ -58,7 +76,11 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     if (disposed) return;
     if (!reportedError) {
       reportedError = true;
-      try { options.onError?.(error); } catch { /* reporting must not block teardown */ }
+      try {
+        options.onError?.(error);
+      } catch {
+        /* reporting must not block teardown */
+      }
     }
     dispose();
   };
@@ -66,7 +88,11 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
   const applyResize = () => {
     resizeFrame = 0;
     const size = pendingSize;
+    const framing = pendingFraming;
+    const shouldApplyFraming = framingPending;
     pendingSize = undefined;
+    pendingFraming = undefined;
+    framingPending = false;
     if (disposed || !size || !canvasSurface || !scene) return;
     try {
       canvasSurface.resize([
@@ -74,6 +100,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
         Math.max(1, Math.round(size.height * size.dpr)),
       ]);
       resizeScene(scene, canvasSurface.size);
+      if (shouldApplyFraming) setFramingViewport(scene, framing);
       pendingPresent = true;
     } catch (error) {
       handleFailure(error);
@@ -88,6 +115,13 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
 
   const measure = () => {
     const rect = options.canvas.getBoundingClientRect();
+    if (options.framingElement) {
+      pendingFraming = viewportWithinCanvas(
+        rect,
+        options.framingElement.getBoundingClientRect()
+      );
+      framingPending = true;
+    }
     resize({
       width: rect.width,
       height: rect.height,
@@ -127,7 +161,9 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     orbitFromPointer(event);
     aimFromPointer(event);
   };
-  const onPointerLeave = () => { orbitTarget = [0, 0]; };
+  const onPointerLeave = () => {
+    orbitTarget = [0, 0];
+  };
 
   /**
    * Eases the camera towards where the pointer left it. Returns whether it moved
@@ -137,11 +173,18 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     const dx = orbitTarget[0] - orbitCurrent[0];
     const dy = orbitTarget[1] - orbitCurrent[1];
     if (Math.abs(dx) < 1e-4 && Math.abs(dy) < 1e-4) {
-      if (orbitCurrent[0] === orbitTarget[0] && orbitCurrent[1] === orbitTarget[1]) return false;
+      if (
+        orbitCurrent[0] === orbitTarget[0] &&
+        orbitCurrent[1] === orbitTarget[1]
+      )
+        return false;
       orbitCurrent = orbitTarget;
       return true;
     }
-    orbitCurrent = [orbitCurrent[0] + dx * CAMERA_ORBIT_LERP, orbitCurrent[1] + dy * CAMERA_ORBIT_LERP];
+    orbitCurrent = [
+      orbitCurrent[0] + dx * CAMERA_ORBIT_LERP,
+      orbitCurrent[1] + dy * CAMERA_ORBIT_LERP,
+    ];
     return true;
   };
 
@@ -150,7 +193,8 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     const dArc = aimTarget[0] - aimCurrent[0];
     const dTarget = aimTarget[1] - aimCurrent[1];
     if (Math.abs(dArc) < 1e-4 && Math.abs(dTarget) < 1e-4) {
-      if (aimCurrent[0] === aimTarget[0] && aimCurrent[1] === aimTarget[1]) return false;
+      if (aimCurrent[0] === aimTarget[0] && aimCurrent[1] === aimTarget[1])
+        return false;
       aimCurrent = aimTarget;
       return true;
     }
@@ -169,7 +213,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     const dustTime = gpuClock
       ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS
       : 0;
-    const dustMoved = controls.view === 'glass' && dustTime !== lastDustTime;
+    const dustMoved = controls.view === "glass" && dustTime !== lastDustTime;
     if (!updateScene && !dustMoved) return;
     try {
       if (aimMoved) setLampAim(scene, aimCurrent[0], aimCurrent[1]);
@@ -190,11 +234,14 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
     resizeFrame = 0;
     pendingSize = undefined;
+    pendingFraming = undefined;
+    framingPending = false;
     observer?.disconnect();
     observer = undefined;
-    window.removeEventListener('pointermove', onPointerMove as EventListener);
-    window.removeEventListener('blur', onPointerLeave);
-    if (typeof window !== 'undefined') window.removeEventListener('resize', measure);
+    window.removeEventListener("pointermove", onPointerMove as EventListener);
+    window.removeEventListener("blur", onPointerLeave);
+    if (typeof window !== "undefined")
+      window.removeEventListener("resize", measure);
     if (scene) destroyScene(scene);
     scene = undefined;
     canvasSurface?.dispose();
@@ -205,7 +252,7 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
   }
 
   const initialize = async () => {
-    const { init } = await import('vgpu');
+    const { init } = await import("vgpu");
     if (disposed) return;
     const nextGpu = await init();
     if (disposed) {
@@ -214,13 +261,20 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
     }
     gpu = nextGpu;
     canvasSurface = surface(gpu, options.canvas, { dpr: [1, 2] });
-    scene = createScene(gpu, canvasSurface.size, 'prism-rainbow');
+    scene = createScene(gpu, canvasSurface.size, "prism-rainbow");
     setControls(scene, controls);
-    window.addEventListener('pointermove', onPointerMove as EventListener, { passive: true });
-    window.addEventListener('blur', onPointerLeave);
-    observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    window.addEventListener("pointermove", onPointerMove as EventListener, {
+      passive: true,
+    });
+    window.addEventListener("blur", onPointerLeave);
+    observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measure);
     observer?.observe(options.canvas);
-    window.addEventListener('resize', measure);
+    if (options.framingElement) observer?.observe(options.framingElement);
+    window.addEventListener("resize", measure);
+    measure();
     await prepareScene(scene, canvasSurface);
     if (disposed) return;
     prepared = true;
@@ -259,9 +313,9 @@ export function createRenderer(options: BrowserRendererOptions<PrismControls>): 
 export async function renderThumbnail(
   gpu: Gpu,
   output: Target,
-  options: PrismThumbnailOptions = {},
+  options: PrismThumbnailOptions = {}
 ): Promise<void> {
-  const scene = createScene(gpu, output.size, 'prism-rainbow-thumb');
+  const scene = createScene(gpu, output.size, "prism-rainbow-thumb");
   try {
     if (options.controls) setControls(scene, options.controls);
     if (options.lampArc !== undefined) setLampArc(scene, options.lampArc);

@@ -43,6 +43,15 @@ import {
 import glassBackWgsl from "./glass-back.wgsl";
 import glassWgsl from "./glass.wgsl";
 import {
+  applyProjectionFraming,
+  fitProjectionDistance,
+  framingCoverage,
+  IDENTITY_PROJECTION_FRAMING,
+  projectedBounds,
+  type NormalizedViewport,
+  type ProjectionFraming,
+} from "./framing";
+import {
   buildLightMesh,
   LIGHT_INTERNAL_QUADS,
   LIGHT_INTERNAL_SEGMENTS,
@@ -59,11 +68,16 @@ import {
 import lightWgsl from "./light.wgsl";
 import lightWireframeWgsl from "./light-wireframe.wgsl";
 import presentWgsl from "./present.wgsl";
-import { prismGeometry, prismWireframeGeometry } from "./prism-mesh";
+import {
+  prismGeometry,
+  prismMeshData,
+  prismWireframeGeometry,
+} from "./prism-mesh";
 import wallWgsl from "./wall.wgsl";
 import wireframeWgsl from "./wireframe.wgsl";
 import {
   DEFAULT_PRISM_CONTROLS,
+  CAMERA_DISTANCE,
   PRISM_BACK_Z,
   PRISM_BEAM_SLICES,
   PRISM_DEFAULT_ARC,
@@ -77,7 +91,6 @@ import {
   PRISM_SPECTRAL_DISPERSION_RANGES,
   PRISM_TRIANGLE,
   clampBeamWidth,
-  clampCameraDistance,
   clampCameraFov,
   lampForIncidence,
   type PrismControls,
@@ -88,6 +101,16 @@ type Output = Surface | Target;
 const ENVIRONMENT_ROTATION = rotationMatrix(PRISM_GLASS.environmentRotation);
 const BLOOM_LEVELS = 4;
 const DUST_PARTICLE_COUNT = 6000;
+const CAMERA_FIT_MIN_DISTANCE = PRISM_FRONT_Z + 0.1;
+const CAMERA_FIT_MAX_DISTANCE = 32;
+const PRISM_FRAME_POINTS = (() => {
+  const vertices = prismMeshData().vertices;
+  const points: [number, number, number][] = [];
+  for (let index = 0; index < vertices.length; index += 6) {
+    points.push([vertices[index]!, vertices[index + 1]!, vertices[index + 2]!]);
+  }
+  return points;
+})();
 type BloomTargets = readonly [Target, Target, Target, Target];
 type BloomEffects = readonly [Effect, Effect, Effect, Effect];
 type BloomUpsampleEffects = readonly [Effect, Effect, Effect];
@@ -122,6 +145,9 @@ export interface PrismScene {
   lampTarget: number;
   orbit: readonly [number, number];
   aspect: number;
+  cameraDistance: number;
+  framingViewport?: NormalizedViewport;
+  framing: ProjectionFraming;
   view: CameraView;
   readonly label: string;
 }
@@ -140,7 +166,7 @@ export function createScene(
     edgeFalloff: DEFAULT_PRISM_CONTROLS.lightFade.edgeFalloff,
     wallHalfExtent: wallExtent(
       aspect,
-      DEFAULT_PRISM_CONTROLS.cameraDistance,
+      CAMERA_DISTANCE,
       DEFAULT_PRISM_CONTROLS.cameraFov
     ),
   });
@@ -274,11 +300,13 @@ export function createScene(
     lampTarget: 0.5,
     orbit: [0, 0],
     aspect,
+    cameraDistance: CAMERA_DISTANCE,
+    framing: IDENTITY_PROJECTION_FRAMING,
     view: cameraView(
       aspect,
       0,
       0,
-      DEFAULT_PRISM_CONTROLS.cameraDistance,
+      CAMERA_DISTANCE,
       DEFAULT_PRISM_CONTROLS.cameraFov
     ),
     label,
@@ -286,13 +314,58 @@ export function createScene(
 }
 
 function refreshCamera(scene: PrismScene): void {
-  scene.view = cameraView(
+  const view = cameraView(
     scene.aspect,
     scene.orbit[0],
     scene.orbit[1],
-    scene.controls.cameraDistance,
+    scene.cameraDistance,
     scene.controls.cameraFov
   );
+  scene.view = {
+    ...view,
+    viewProjection: applyProjectionFraming(view.viewProjection, scene.framing),
+  };
+}
+
+/**
+ * Finds one stable fit for the camera's full pointer orbit. The projection can
+ * then rotate interactively without the prism breathing or re-centering.
+ */
+function refreshFraming(scene: PrismScene): void {
+  const viewport = scene.framingViewport;
+  if (!viewport) {
+    scene.cameraDistance = CAMERA_DISTANCE;
+    scene.framing = IDENTITY_PROJECTION_FRAMING;
+    return;
+  }
+  const fit = fitProjectionDistance(
+    viewport,
+    (distance) =>
+      projectedBounds(
+        framingMatrices(scene.aspect, distance, scene.controls.cameraFov),
+        PRISM_FRAME_POINTS
+      ),
+    CAMERA_FIT_MIN_DISTANCE,
+    CAMERA_FIT_MAX_DISTANCE
+  );
+  scene.cameraDistance = fit.distance;
+  scene.framing = fit.framing;
+}
+
+function framingMatrices(
+  aspect: number,
+  distance: number,
+  fov: number
+): Float32Array[] {
+  const matrices: Float32Array[] = [];
+  for (const orbitX of [-1, 0, 1]) {
+    for (const orbitY of [-1, 0, 1]) {
+      matrices.push(
+        cameraView(aspect, orbitX, orbitY, distance, fov).viewProjection
+      );
+    }
+  }
+  return matrices;
 }
 
 function refreshLightMesh(scene: PrismScene): void {
@@ -304,8 +377,9 @@ function refreshLightMesh(scene: PrismScene): void {
     edgeFalloff: scene.controls.lightFade.edgeFalloff,
     wallHalfExtent: wallExtent(
       scene.aspect,
-      scene.controls.cameraDistance,
-      scene.controls.cameraFov
+      scene.cameraDistance,
+      scene.controls.cameraFov,
+      scene.framing
     ),
   });
   scene.lightBuffer.write(mesh.vertices);
@@ -330,9 +404,6 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
   const next = {
     ...controls,
     // Runtime fallback keeps Fast Refresh safe across the control schema change.
-    cameraDistance: clampCameraDistance(
-      controls.cameraDistance ?? DEFAULT_PRISM_CONTROLS.cameraDistance
-    ),
     cameraFov: clampCameraFov(
       controls.cameraFov ?? DEFAULT_PRISM_CONTROLS.cameraFov
     ),
@@ -380,10 +451,7 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
         PRISM_LIGHT_FADE_RANGES.rainbowFalloff.max,
         Math.max(
           PRISM_LIGHT_FADE_RANGES.rainbowFalloff.min,
-          finite(
-            inputLightFade.rainbowFalloff,
-            defaultLightFade.rainbowFalloff
-          )
+          finite(inputLightFade.rainbowFalloff, defaultLightFade.rainbowFalloff)
         )
       ),
     },
@@ -403,14 +471,6 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
         finite(inputAbsorption[1], defaultGlass.absorption[1]),
         finite(inputAbsorption[2], defaultGlass.absorption[2]),
       ] as const,
-      iridescenceStrength: finite(
-        inputGlass.iridescenceStrength,
-        defaultGlass.iridescenceStrength
-      ),
-      iridescenceFrequency: finite(
-        inputGlass.iridescenceFrequency,
-        defaultGlass.iridescenceFrequency
-      ),
       environmentExposure: finite(
         inputGlass.environmentExposure,
         defaultGlass.environmentExposure
@@ -448,11 +508,12 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
       scene.controls.spectralDispersion?.strength ||
     next.beamWidth !== scene.controls.beamWidth ||
     next.lightFade.edgeFalloff !== scene.controls.lightFade.edgeFalloff;
-  const cameraChanged =
-    next.cameraDistance !== scene.controls.cameraDistance ||
-    next.cameraFov !== scene.controls.cameraFov;
+  const cameraChanged = next.cameraFov !== scene.controls.cameraFov;
   scene.controls = next;
-  if (cameraChanged) refreshCamera(scene);
+  if (cameraChanged) {
+    refreshFraming(scene);
+    refreshCamera(scene);
+  }
   if (opticsChanged || cameraChanged) refreshLightMesh(scene);
 }
 
@@ -478,6 +539,17 @@ export function setOrbit(scene: PrismScene, x: number, y: number): void {
   refreshCamera(scene);
 }
 
+export function setFramingViewport(
+  scene: PrismScene,
+  viewport: NormalizedViewport | undefined
+): void {
+  if (sameViewport(scene.framingViewport, viewport)) return;
+  scene.framingViewport = viewport;
+  refreshFraming(scene);
+  refreshCamera(scene);
+  refreshLightMesh(scene);
+}
+
 export function resizeScene(
   scene: PrismScene,
   output: readonly [number, number]
@@ -489,6 +561,7 @@ export function resizeScene(
   scene.bloomTargets?.forEach((bloomTarget, level) => {
     bloomTarget.resize(bloomLevelSize(output, level));
   });
+  refreshFraming(scene);
   refreshCamera(scene);
   refreshLightMesh(scene);
 }
@@ -511,11 +584,26 @@ export function lampAt(
 
 export function wallExtent(
   aspect: number,
-  cameraDistance = DEFAULT_PRISM_CONTROLS.cameraDistance,
-  cameraFov = DEFAULT_PRISM_CONTROLS.cameraFov
+  cameraDistance = CAMERA_DISTANCE,
+  cameraFov = DEFAULT_PRISM_CONTROLS.cameraFov,
+  framing: ProjectionFraming = IDENTITY_PROJECTION_FRAMING
 ): readonly [number, number] {
   const halfHeight = wallHalfHeight(aspect, cameraDistance, cameraFov);
-  return [halfHeight * aspect, halfHeight];
+  const coverage = framingCoverage(framing);
+  return [halfHeight * aspect * coverage[0], halfHeight * coverage[1]];
+}
+
+function sameViewport(
+  a: NormalizedViewport | undefined,
+  b: NormalizedViewport | undefined
+): boolean {
+  if (!a || !b) return a === b;
+  return (
+    Math.abs(a.left - b.left) < 1e-5 &&
+    Math.abs(a.top - b.top) < 1e-5 &&
+    Math.abs(a.right - b.right) < 1e-5 &&
+    Math.abs(a.bottom - b.bottom) < 1e-5
+  );
 }
 
 /** Kept as one shared block so wall, ribbons and glass cannot drift apart. */
@@ -524,11 +612,12 @@ export function sceneUniforms(scene: PrismScene): Record<string, unknown> {
     /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i
   );
   return {
-    viewProjection: scene.view.camera.viewProjection,
+    viewProjection: scene.view.viewProjection,
     wallHalfExtent: wallExtent(
       scene.aspect,
-      scene.controls.cameraDistance,
-      scene.controls.cameraFov
+      scene.cameraDistance,
+      scene.controls.cameraFov,
+      scene.framing
     ),
     wallColor: wallColor
       ? wallColor.slice(1).map((channel) => Number.parseInt(channel, 16) / 255)
@@ -548,7 +637,7 @@ export function sceneUniforms(scene: PrismScene): Record<string, unknown> {
 export function glassUniforms(scene: PrismScene): Record<string, unknown> {
   const glass = scene.controls.glass;
   return {
-    viewProjection: scene.view.camera.viewProjection,
+    viewProjection: scene.view.viewProjection,
     environmentRotation: ENVIRONMENT_ROTATION,
     cameraPosition: scene.view.position,
     absorption: glass.absorption,
@@ -560,8 +649,6 @@ export function glassUniforms(scene: PrismScene): Record<string, unknown> {
     backZ: PRISM_BACK_Z,
     ior: glass.ior,
     reflectionStrength: glass.reflectionStrength,
-    iridescenceStrength: glass.iridescenceStrength,
-    iridescenceFrequency: glass.iridescenceFrequency,
     environmentExposure: glass.environmentExposure,
     environmentDebug: scene.controls.environmentDebug ? 1 : 0,
     environmentTexelAngle: ENVIRONMENT_TEXEL_ANGLE,
@@ -573,15 +660,16 @@ export function dustUniforms(
   time: number
 ): Record<string, unknown> {
   return {
-    viewProjection: scene.view.camera.viewProjection,
+    viewProjection: scene.view.viewProjection,
     fieldHalfExtent: wallExtent(
       scene.aspect,
-      scene.controls.cameraDistance,
-      scene.controls.cameraFov
+      scene.cameraDistance,
+      scene.controls.cameraFov,
+      scene.framing
     ),
     outputSize: scene.outputSize,
     time,
-    cameraDistance: scene.controls.cameraDistance,
+    cameraDistance: scene.cameraDistance,
     lightPlaneZ: PRISM_LIGHT_PLANE_Z,
     exposure: scene.controls.postprocess.particleExposure,
   };
@@ -593,6 +681,7 @@ export async function prepareScene(
 ): Promise<void> {
   scene.outputSize = output.size;
   scene.aspect = output.size[0] / Math.max(1, output.size[1]);
+  refreshFraming(scene);
   refreshCamera(scene);
   refreshLightMesh(scene);
   const backgroundTarget =
@@ -786,7 +875,9 @@ function bind(
   const studioEnvironment = scene.studioEnvironment;
   const debugEnvironment = scene.debugEnvironment;
   if (!studioEnvironment || !debugEnvironment) {
-    throw new Error("Environment textures must exist before binding the scene.");
+    throw new Error(
+      "Environment textures must exist before binding the scene."
+    );
   }
   const values = sceneUniforms(scene);
   scene.light.set({ scene: values });
@@ -808,7 +899,7 @@ function bind(
     environmentSampler: scene.environmentSampler,
   });
   scene.wireframe.set({
-    params: { viewProjection: scene.view.camera.viewProjection },
+    params: { viewProjection: scene.view.viewProjection },
   });
   scene.bloomDownsample.forEach((bloom, level) => {
     const source = level === 0 ? sceneTarget : bloomTargets[level - 1]!;

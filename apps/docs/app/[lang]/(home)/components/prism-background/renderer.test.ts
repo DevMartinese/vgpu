@@ -53,6 +53,7 @@ import {
 } from "./light-mesh";
 import { wallExtent } from "./scene";
 import {
+  CAMERA_DISTANCE,
   DEFAULT_PRISM_CONTROLS,
   PRISM_DEFAULT_ARC,
   PRISM_LIGHT_PLANE_Z,
@@ -94,10 +95,11 @@ function browser() {
     vi.fn((id: number) => frames.delete(id))
   );
   const disconnect = vi.fn();
+  const observe = vi.fn();
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      observe = vi.fn();
+      observe = observe;
       disconnect = disconnect;
     }
   );
@@ -113,7 +115,23 @@ function browser() {
     hasPointerCapture: vi.fn((id: number) => captured.has(id)),
     releasePointerCapture: vi.fn((id: number) => captured.delete(id)),
   } as unknown as HTMLCanvasElement;
-  return { canvas, canvasListeners, windowListeners, frames, disconnect };
+  const framingElement = {
+    getBoundingClientRect: () => ({
+      left: 100,
+      top: 10,
+      width: 90,
+      height: 80,
+    }),
+  } as unknown as HTMLElement;
+  return {
+    canvas,
+    framingElement,
+    canvasListeners,
+    windowListeners,
+    frames,
+    observe,
+    disconnect,
+  };
 }
 
 function gpu() {
@@ -213,24 +231,22 @@ function gpu() {
       surface: vi.fn(() => surface),
       sampler: vi.fn(() => ({})),
       geometry: vi.fn(() => ({ destroy: vi.fn() })),
-      target: vi.fn((options: {
-        size: number[];
-        format?: string;
-        msaa?: boolean | 4;
-      }) => {
-        const created = {
-          size: [...options.size],
-          format: options.format ?? "bgra8unorm",
-          color: { gpu: {} },
-          msaa: options.msaa,
-          resize: vi.fn((size: number[]) => {
-            created.size = [...size];
-          }),
-          destroy: vi.fn(),
-        };
-        targets.push(created);
-        return created;
-      }),
+      target: vi.fn(
+        (options: { size: number[]; format?: string; msaa?: boolean | 4 }) => {
+          const created = {
+            size: [...options.size],
+            format: options.format ?? "bgra8unorm",
+            color: { gpu: {} },
+            msaa: options.msaa,
+            resize: vi.fn((size: number[]) => {
+              created.size = [...size];
+            }),
+            destroy: vi.fn(),
+          };
+          targets.push(created);
+          return created;
+        }
+      ),
       effect: vi.fn(() => pipeline(effects)),
       draw: vi.fn(() => pipeline(draws)),
       // The free functions are routed with `gpu` stripped, so these fakes see
@@ -482,10 +498,7 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   tick(live.loopFrame);
 
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(11);
-  expect(live.encodedPasses.at(-1)).toEqual([
-    live.effects[8],
-    live.draws[6],
-  ]);
+  expect(live.encodedPasses.at(-1)).toEqual([live.effects[8], live.draws[6]]);
   expect(live.draws[6]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({ time: 1 / 30 }),
@@ -766,7 +779,7 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
   renderer.dispose();
 });
 
-test("camera controls update the framing and its derived wall boundary", async () => {
+test("FOV updates the automatically distanced camera boundary", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
@@ -774,21 +787,48 @@ test("camera controls update the framing and its derived wall boundary", async (
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
-  const cameraDistance = 3.2;
   const cameraFov = 56;
 
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
-    cameraDistance,
     cameraFov,
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
   tick(live.loopFrame);
   expect(live.draws[1]!.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({
-      wallHalfExtent: wallExtent(2, cameraDistance, cameraFov),
+      wallHalfExtent: wallExtent(2, CAMERA_DISTANCE, cameraFov),
     }),
   });
+  renderer.dispose();
+});
+
+test("observes and frames the prism relative to its canvas-local DOM slot", async () => {
+  const env = browser();
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    framingElement: env.framingElement,
+  });
+  await renderer.ready;
+
+  expect(env.observe).toHaveBeenCalledWith(env.canvas);
+  expect(env.observe).toHaveBeenCalledWith(env.framingElement);
+  expect(env.frames.size).toBe(1);
+  [...env.frames.values()][0]?.(16);
+
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  tick(live.loopFrame);
+  const uniforms = live.draws[1]!.set.mock.lastCall?.[0] as {
+    scene: { viewProjection: Float32Array };
+  };
+  const matrix = uniforms.scene.viewProjection;
+  // A canvas-local slot on the right produces an off-axis projection, while
+  // the exact silhouette containment is covered by framing.test.ts.
+  expect(matrix[12]! / matrix[15]!).toBeGreaterThan(0);
+  expect(Number.isFinite(matrix[13]! / matrix[15]!)).toBe(true);
+
   renderer.dispose();
 });
 

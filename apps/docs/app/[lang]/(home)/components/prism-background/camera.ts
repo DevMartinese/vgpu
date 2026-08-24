@@ -40,6 +40,8 @@ let memoizedHalfHeight = 0;
 
 export interface CameraView {
   readonly camera: SceneCamera;
+  /** View-projection used by the hero draws; responsive framing may replace it. */
+  readonly viewProjection: Float32Array;
   readonly position: Vec3;
   /** Orthonormal basis: where the camera looks, and the frame's axes. */
   readonly forward: Vec3;
@@ -71,17 +73,19 @@ export function cameraView(
   ];
   const forward = normalize([-position[0], -position[1], -position[2]]);
   const right = normalize(cross(forward, [0, 1, 0]));
+  const camera = perspectiveCamera({
+    fov,
+    aspect,
+    // The whole scene sits between the wall at z = 0 and the glass in front of
+    // it, so the depth range only has to bracket a couple of units.
+    near: 0.05,
+    far: 4 * distance,
+    position,
+    target: [0, 0, 0],
+  });
   return {
-    camera: perspectiveCamera({
-      fov,
-      aspect,
-      // The whole scene sits between the wall at z = 0 and the glass in front of
-      // it, so the depth range only has to bracket a couple of units.
-      near: 0.05,
-      far: 4 * distance,
-      position,
-      target: [0, 0, 0],
-    }),
+    camera,
+    viewProjection: camera.viewProjection,
     position,
     forward,
     right,

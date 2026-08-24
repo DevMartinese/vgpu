@@ -110,10 +110,6 @@ export interface GlassControls {
   readonly reflectionStrength: number;
   /** Beer-Lambert absorption per scene unit, in linear RGB. */
   readonly absorption: readonly [number, number, number];
-  /** Strength of the angle-dependent spectral tint on reflections. */
-  readonly iridescenceStrength: number;
-  /** Spectral tint cycles across the Fresnel range. */
-  readonly iridescenceFrequency: number;
   /** Exposure applied to the studio environment before material response. */
   readonly environmentExposure: number;
 }
@@ -143,8 +139,6 @@ export interface PrismControls {
   /** Optional custom Cauchy coefficients; the selected preset is used when absent. */
   readonly spectralDispersion?: DispersionPreset;
   readonly view: PrismView;
-  /** Distance from the wall along the camera's orbit sphere, in scene units. */
-  readonly cameraDistance: number;
   /** Vertical field of view of the perspective camera, in degrees. */
   readonly cameraFov: number;
   /** Full beam width in scene units, measured perpendicular to its axis. */
@@ -183,18 +177,15 @@ export const PRISM_LIGHT_FADE_RANGES = {
 } as const;
 /** Vertical field of view of the camera looking at the wall, in degrees. */
 export const CAMERA_FOV_DEGREES = 48;
-/** How far the camera sits from the wall, in scene units. */
+/** Fallback camera distance before a DOM framing slot is available. */
 export const CAMERA_DISTANCE = 1.25;
 export const PRISM_CAMERA_RANGES = {
-  distance: { min: 1.25, max: 4, step: 0.01 },
   fov: { min: 20, max: 70, step: 1 },
 } as const;
 export const PRISM_GLASS_RANGES = {
   ior: { min: 1, max: 2.5, step: 0.001 },
   reflectionStrength: { min: 0, max: 3, step: 0.01 },
   absorption: { min: 0, max: 1, step: 0.005 },
-  iridescenceStrength: { min: 0, max: 1, step: 0.01 },
-  iridescenceFrequency: { min: 0, max: 8, step: 0.1 },
   environmentExposure: { min: 0, max: 4, step: 0.05 },
 } as const;
 
@@ -205,12 +196,10 @@ export const PRISM_SPECTRAL_DISPERSION_RANGES = {
 } as const;
 
 export const DEFAULT_GLASS_CONTROLS: GlassControls = {
-  ior: 1.244,
-  reflectionStrength: 2.21,
-  absorption: [0.58, 0.685, 0.15],
-  iridescenceStrength: 0.16,
-  iridescenceFrequency: 2,
-  environmentExposure: 1.55,
+  ior: 1.645,
+  reflectionStrength: 2.14,
+  absorption: [1, 1, 0.54],
+  environmentExposure: 2.3,
 };
 
 export const PRISM_POSTPROCESS_RANGES = {
@@ -221,8 +210,8 @@ export const PRISM_POSTPROCESS_RANGES = {
 } as const;
 
 export const DEFAULT_POSTPROCESS_CONTROLS: PostprocessControls = {
-  bloomStrength: 0.6,
-  bloomThreshold: 0.45,
+  bloomStrength: 0.5,
+  bloomThreshold: 0.5,
   bloomRadius: 1,
   particleExposure: 1,
 };
@@ -232,14 +221,6 @@ export function clampBeamWidth(width: number): number {
   return Math.min(
     PRISM_BEAM_WIDTH_RANGE.max,
     Math.max(PRISM_BEAM_WIDTH_RANGE.min, width)
-  );
-}
-
-export function clampCameraDistance(distance: number): number {
-  if (!Number.isFinite(distance)) return CAMERA_DISTANCE;
-  return Math.min(
-    PRISM_CAMERA_RANGES.distance.max,
-    Math.max(PRISM_CAMERA_RANGES.distance.min, distance)
   );
 }
 
@@ -254,7 +235,6 @@ export function clampCameraFov(fov: number): number {
 export const DEFAULT_PRISM_CONTROLS: PrismControls = {
   dispersion: "stylized",
   view: "glass",
-  cameraDistance: CAMERA_DISTANCE,
   cameraFov: CAMERA_FOV_DEGREES,
   beamWidth: PRISM_DEFAULT_BEAM_WIDTH,
   lightFade: DEFAULT_LIGHT_FADE_CONTROLS,
@@ -330,7 +310,9 @@ export function collimatedLightBetween(
   const offset: Vec2 = [target[0] - center[0], target[1] - center[1]];
   const distance = Math.hypot(offset[0], offset[1]);
   if (!Number.isFinite(distance) || distance <= 1e-8) {
-    throw new Error("A collimated light needs distinct finite center and target points.");
+    throw new Error(
+      "A collimated light needs distinct finite center and target points."
+    );
   }
   return {
     center,
@@ -409,7 +391,9 @@ export function lampForIncidence(
   const entryMargin = Math.min(
     0.45,
     clampedBeamWidth /
-      (2 * faceLength * Math.max(0.05, Math.abs(Math.cos(radians(incidenceDegrees))))) +
+      (2 *
+        faceLength *
+        Math.max(0.05, Math.abs(Math.cos(radians(incidenceDegrees))))) +
       1e-4
   );
   const entryPoint = prismEntryPoint(

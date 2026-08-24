@@ -18,8 +18,6 @@ export struct Glass {
   backZ: f32,
   ior: f32,
   reflectionStrength: f32,
-  iridescenceStrength: f32,
-  iridescenceFrequency: f32,
   environmentExposure: f32,
   environmentDebug: f32,
   environmentTexelAngle: f32,

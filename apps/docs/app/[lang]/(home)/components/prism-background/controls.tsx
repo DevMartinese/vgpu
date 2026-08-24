@@ -30,7 +30,6 @@ interface GuiValues {
   dispersionBase: number;
   dispersionStrength: number;
   view: PrismView;
-  cameraDistance: number;
   cameraFov: number;
   beamWidth: number;
   beamOpacity: number;
@@ -45,8 +44,6 @@ interface GuiValues {
   absorptionR: number;
   absorptionG: number;
   absorptionB: number;
-  iridescenceStrength: number;
-  iridescenceFrequency: number;
   environmentExposure: number;
   bloomStrength: number;
   bloomThreshold: number;
@@ -94,13 +91,10 @@ export function Controls({
       dispersionBase: spectralDispersion.base,
       dispersionStrength: spectralDispersion.strength,
       view: initialValue.view ?? DEFAULT_PRISM_CONTROLS.view,
-      cameraDistance:
-        initialValue.cameraDistance ?? DEFAULT_PRISM_CONTROLS.cameraDistance,
       cameraFov: initialValue.cameraFov ?? DEFAULT_PRISM_CONTROLS.cameraFov,
       beamWidth: initialValue.beamWidth ?? DEFAULT_PRISM_CONTROLS.beamWidth,
       beamOpacity:
-        lightFade.beamOpacity ??
-        DEFAULT_PRISM_CONTROLS.lightFade.beamOpacity,
+        lightFade.beamOpacity ?? DEFAULT_PRISM_CONTROLS.lightFade.beamOpacity,
       edgeFalloff:
         lightFade.edgeFalloff ?? DEFAULT_PRISM_CONTROLS.lightFade.edgeFalloff,
       rainbowFalloff:
@@ -120,12 +114,6 @@ export function Controls({
       absorptionR: absorption[0] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[0],
       absorptionG: absorption[1] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[1],
       absorptionB: absorption[2] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[2],
-      iridescenceStrength:
-        glass.iridescenceStrength ??
-        DEFAULT_PRISM_CONTROLS.glass.iridescenceStrength,
-      iridescenceFrequency:
-        glass.iridescenceFrequency ??
-        DEFAULT_PRISM_CONTROLS.glass.iridescenceFrequency,
       environmentExposure:
         glass.environmentExposure ??
         DEFAULT_PRISM_CONTROLS.glass.environmentExposure,
@@ -160,7 +148,6 @@ export function Controls({
           strength: values.dispersionStrength,
         },
         view: values.view,
-        cameraDistance: values.cameraDistance,
         cameraFov: values.cameraFov,
         beamWidth: values.beamWidth,
         lightFade: {
@@ -180,8 +167,6 @@ export function Controls({
             values.absorptionG,
             values.absorptionB,
           ],
-          iridescenceStrength: values.iridescenceStrength,
-          iridescenceFrequency: values.iridescenceFrequency,
           environmentExposure: values.environmentExposure,
         },
         postprocess: {
@@ -287,16 +272,6 @@ export function Controls({
       cameraFolder
         .add(
           values,
-          "cameraDistance",
-          PRISM_CAMERA_RANGES.distance.min,
-          PRISM_CAMERA_RANGES.distance.max,
-          PRISM_CAMERA_RANGES.distance.step
-        )
-        .name("distance")
-        .onChange(publish),
-      cameraFolder
-        .add(
-          values,
           "cameraFov",
           PRISM_CAMERA_RANGES.fov.min,
           PRISM_CAMERA_RANGES.fov.max,
@@ -363,26 +338,6 @@ export function Controls({
           PRISM_GLASS_RANGES.environmentExposure.step
         )
         .name("env exposure")
-        .onChange(publish),
-      reflectionFolder
-        .add(
-          values,
-          "iridescenceStrength",
-          PRISM_GLASS_RANGES.iridescenceStrength.min,
-          PRISM_GLASS_RANGES.iridescenceStrength.max,
-          PRISM_GLASS_RANGES.iridescenceStrength.step
-        )
-        .name("iridescence")
-        .onChange(publish),
-      reflectionFolder
-        .add(
-          values,
-          "iridescenceFrequency",
-          PRISM_GLASS_RANGES.iridescenceFrequency.min,
-          PRISM_GLASS_RANGES.iridescenceFrequency.max,
-          PRISM_GLASS_RANGES.iridescenceFrequency.step
-        )
-        .name("film frequency")
         .onChange(publish),
       postprocessFolder
         .add(

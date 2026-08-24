@@ -36,13 +36,15 @@ export function PrismBackground() {
 
   const setControls = useCallback((controls: PrismControls) => {
     const nextDebug = {
-      visible: controls.environmentDebug ?? DEFAULT_PRISM_CONTROLS.environmentDebug,
+      visible:
+        controls.environmentDebug ?? DEFAULT_PRISM_CONTROLS.environmentDebug,
       exposure:
-        controls.glass?.environmentExposure
-        ?? DEFAULT_PRISM_CONTROLS.glass.environmentExposure,
+        controls.glass?.environmentExposure ??
+        DEFAULT_PRISM_CONTROLS.glass.environmentExposure,
     };
     setEnvironmentDebug((current) =>
-      current.visible === nextDebug.visible && current.exposure === nextDebug.exposure
+      current.visible === nextDebug.visible &&
+      current.exposure === nextDebug.exposure
         ? current
         : nextDebug
     );
@@ -51,8 +53,13 @@ export function PrismBackground() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const heroContainer = canvas.closest<HTMLElement>("[data-hero-container]");
+    const framingElement = heroContainer?.querySelector<HTMLElement>(
+      "[data-triangle-container]"
+    );
     const renderer = createRenderer({
       canvas,
+      framingElement: framingElement ?? undefined,
       initialControls: DEFAULT_PRISM_CONTROLS,
       onError: reportError,
     });
@@ -78,14 +85,12 @@ export function PrismBackground() {
           <Controls onChange={setControls} />
         </Suspense>
       ) : null}
-      {environmentDebug.visible
-        ? (
-          <EnvironmentDebugCanvas
-            environmentExposure={environmentDebug.exposure}
-            onError={reportError}
-          />
-        )
-        : null}
+      {environmentDebug.visible ? (
+        <EnvironmentDebugCanvas
+          environmentExposure={environmentDebug.exposure}
+          onError={reportError}
+        />
+      ) : null}
     </div>
   );
 }
@@ -136,7 +141,7 @@ function EnvironmentDebugCanvas({
       },
       (error: unknown) => {
         if (!disposed) onErrorRef.current(error);
-      },
+      }
     );
 
     return () => {

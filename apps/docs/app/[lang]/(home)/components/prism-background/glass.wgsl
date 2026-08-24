@@ -192,31 +192,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     interiorHit.valid != 0u,
   );
   let reflected = reflectedEnvironment * params.reflectionStrength;
-
-  // A thin film changes the Fresnel reflectance per wavelength. Modeling that
-  // split directly makes the color visible even when the base dielectric F0 is
-  // very low, while keeping reflection and transmission energy complementary.
-  let iridescencePhase = (1.0 - facing) * params.iridescenceFrequency * 6.28318530718;
-  let spectralResponse = 0.5 + 0.5 * cos(vec3f(
-    iridescencePhase,
-    iridescencePhase + 2.09439510239,
-    iridescencePhase + 4.18879020479,
-  ));
   let grazingWeight = pow(1.0 - facing, 1.5);
-  let filmAmount = clamp(params.iridescenceStrength, 0.0, 1.0) * (0.25 + 0.75 * grazingWeight);
-  let filmReflectance = filmAmount * mix(vec3f(0.15), spectralResponse, 0.85);
-  let fresnelRgb = clamp(
-    vec3f(fresnel) + (1.0 - fresnel) * filmReflectance,
-    vec3f(0.0),
-    vec3f(1.0),
-  );
 
   // Bright studio panels need a visible footprint even on a low-IOR frontal
   // face. Reuse the environment sample to isolate them; the darker room stays
   // governed by physical Fresnel.
   let environmentLuminance = dot(reflectedEnvironment, vec3f(0.2126, 0.7152, 0.0722));
   let studioPanelMask = smoothstep(0.5, 0.82, environmentLuminance);
-  let physicalGlass = transmitted * (1.0 - fresnelRgb) + reflected * fresnelRgb;
+  let physicalGlass = transmitted * (1.0 - fresnel) + reflected * fresnel;
 
   // An energy-conserving mix alone can make a white panel disappear when the
   // transmitted scene is also bright. Add the isolated panel in linear HDR so
