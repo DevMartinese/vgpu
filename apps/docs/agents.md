@@ -12,6 +12,7 @@ Use these instructions when an AI coding agent edits this project.
 - Keep the React entry as a thin mount/cleanup wrapper. Infer renderer types locally and let the preview host observe asynchronous failures instead of importing example-specific reporting or renderer helpers.
 - Before simplifying, capture deterministic baselines for every control state, important interaction, and responsive layout. Make reductions in small tranches and require byte-exact parity after each tranche.
 - Remove unreachable themes, modes, passes, uniforms, configuration, CPU mirrors, and files before compressing active GPU arithmetic. Preserve resource teardown and stale-async cancellation.
+- Follow ownership boundaries during teardown. When a renderer owns its `Gpu`, let `gpu.dispose()` stop VGPU schedulers and release registered surfaces, resources, services, and the device; do not also dispose every VGPU child or clear every local reference. Explicitly clean only browser/DOM resources and children that must be released while a shared GPU remains alive.
 - Recheck thumbnails, focused tests, type safety, import boundaries, and bundle size after the implementation stabilizes.
 - When simplifying an existing example, migrate it to these rules as part of the simplification.
 

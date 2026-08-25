@@ -76,7 +76,7 @@ function setup(options: { failCompile?: boolean } = {}) {
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-test('coalesces resize work and cleans loop, observer, and pointer capture', async () => {
+test('coalesces resize work, cleans browser state, and delegates VGPU teardown', async () => {
   const env = setup();
   const renderer = createRenderer({ canvas: env.canvas });
   await renderer.ready;
@@ -100,14 +100,16 @@ test('coalesces resize work and cleans loop, observer, and pointer capture', asy
 
   renderer.dispose();
   renderer.dispose();
-  expect(env.stop).toHaveBeenCalledOnce();
+  expect(env.stop).not.toHaveBeenCalled();
   expect(env.disconnect).toHaveBeenCalledOnce();
   expect(env.canvas.releasePointerCapture).toHaveBeenCalledWith(7);
   expect(env.canvas.style.touchAction).toBe('pan-y');
   expect(env.canvasListeners.size).toBe(0);
   expect(env.windowListeners.size).toBe(0);
-  expect(env.surface.dispose).toHaveBeenCalledOnce();
-  for (const target of env.targetObjects) expect(target.destroy).toHaveBeenCalledOnce();
+  expect(env.surface.dispose).not.toHaveBeenCalled();
+  expect(env.gpu.dispose).toHaveBeenCalledOnce();
+  for (const target of env.targetObjects.slice(0, 3)) expect(target.destroy).toHaveBeenCalledOnce();
+  for (const target of env.targetObjects.slice(3)) expect(target.destroy).not.toHaveBeenCalled();
 });
 
 test('disposes a stale GPU initialization without creating resources', async () => {
@@ -123,13 +125,13 @@ test('disposes a stale GPU initialization without creating resources', async () 
   expect(env.gpu.fns.surface).not.toHaveBeenCalled();
 });
 
-test('initialization failure rejects after tearing down every resource', async () => {
+test('initialization failure delegates resource teardown to the GPU', async () => {
   const env = setup({ failCompile: true });
   const renderer = createRenderer({ canvas: env.canvas });
   await expect(renderer.ready).rejects.toThrow('compile failed');
-  expect(env.surface.dispose).toHaveBeenCalledOnce();
+  expect(env.surface.dispose).not.toHaveBeenCalled();
   expect(env.gpu.dispose).toHaveBeenCalledOnce();
-  for (const target of env.targetObjects) expect(target.destroy).toHaveBeenCalledOnce();
+  for (const target of env.targetObjects) expect(target.destroy).not.toHaveBeenCalled();
 });
 
 test('thumbnail destroys its target graph when prewarm fails', async () => {

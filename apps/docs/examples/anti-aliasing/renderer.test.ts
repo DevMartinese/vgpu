@@ -156,10 +156,12 @@ function expectSceneReleased(env: ReturnType<typeof setup>) {
   for (const target of env.targets) expect(target.destroy).toHaveBeenCalledOnce();
 }
 
-function expectRendererReleased(env: ReturnType<typeof setup>) {
-  expectSceneReleased(env);
-  expect(env.surface.dispose).toHaveBeenCalledOnce();
+function expectGpuTeardownDelegated(env: ReturnType<typeof setup>) {
   expect(env.gpu.dispose).toHaveBeenCalledOnce();
+  expect(env.stop).not.toHaveBeenCalled();
+  expect(env.surface.dispose).not.toHaveBeenCalled();
+  expect(env.mesh.destroy).not.toHaveBeenCalled();
+  for (const target of env.targets) expect(target.destroy).not.toHaveBeenCalled();
 }
 
 afterEach(() => {
@@ -168,7 +170,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test('renders GUI changes, resizes one generation, and releases owned resources', async () => {
+test('renders GUI changes, resizes once, and delegates VGPU teardown', async () => {
   const env = setup();
   const renderer = createRenderer({ canvas: env.canvas });
   await renderer.ready;
@@ -197,9 +199,8 @@ test('renders GUI changes, resizes one generation, and releases owned resources'
   renderer.dispose();
   renderer.dispose();
   expect(guiMocks.destroy).toHaveBeenCalledOnce();
-  expect(env.stop).toHaveBeenCalledOnce();
   expect(env.disconnect).toHaveBeenCalledOnce();
-  expectRendererReleased(env);
+  expectGpuTeardownDelegated(env);
 });
 
 test('disposes a GPU that resolves after initialization was cancelled', async () => {
@@ -229,7 +230,7 @@ test('disposal during prewarm releases resources and prevents a late mount', asy
 
   expect(guiMocks.change).toBeUndefined();
   expect(env.gpu.fns.frameLoop).not.toHaveBeenCalled();
-  expectRendererReleased(env);
+  expectGpuTeardownDelegated(env);
 });
 
 test('resize failure tears down before surfacing', async () => {
@@ -241,8 +242,7 @@ test('resize failure tears down before surfacing', async () => {
   });
 
   expect(env.flushResize).toThrow('resize failed');
-  expect(env.stop).toHaveBeenCalledOnce();
-  expectRendererReleased(env);
+  expectGpuTeardownDelegated(env);
 });
 
 test('thumbnail cleanup survives synchronous drain failures', async () => {
