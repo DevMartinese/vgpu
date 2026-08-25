@@ -1,6 +1,13 @@
 import { frame, type Gpu, type Target } from 'vgpu';
 
-import { createEffects, createTargets, destroyTargets, prewarm, renderChain, setBindings } from './pipeline';
+import {
+  createEffects,
+  createTargets,
+  destroyTargets,
+  prewarm,
+  renderChain,
+  setBindings,
+} from './pipeline';
 
 type ThumbOptions = {
   time?: number;
@@ -28,10 +35,18 @@ export async function renderThumbnail(
     };
     render(time + 7, [0, 0.05]);
     await gpu.gpu.queue.onSubmittedWorkDone();
-    await opts.onVariantRendered?.('time-delta', await colorTarget.read(), colorTarget.size);
+    await opts.onVariantRendered?.(
+      'time-delta',
+      await colorTarget.read(),
+      colorTarget.size,
+    );
     render(time, [0.72, 0.34]);
     await gpu.gpu.queue.onSubmittedWorkDone();
-    await opts.onVariantRendered?.('pointer-orbit', await colorTarget.read(), colorTarget.size);
+    await opts.onVariantRendered?.(
+      'pointer-orbit',
+      await colorTarget.read(),
+      colorTarget.size,
+    );
     render(time, [0, 0.05]);
   } finally {
     await Promise.allSettled([
