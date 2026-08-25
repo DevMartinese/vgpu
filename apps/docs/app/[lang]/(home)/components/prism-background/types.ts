@@ -89,7 +89,7 @@ export const PRISM_DISPERSION_LABELS: Record<PrismDispersion, string> = {
  */
 export type PrismView = "glass" | "back" | "wall" | "caustic";
 
-/** The two composed outputs exposed to lil-gui. */
+/** The two composed outputs retained for programmatic render isolation. */
 export const PRISM_VIEW_ORDER = [
   "glass",
   "back",
@@ -415,8 +415,7 @@ export const PRISM_INCIDENCE_ARC = {
 } as const;
 
 /** Incidence reached when the pointer crosses the viewport's vertical centre. */
-export const PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES =
-  PRISM_INCIDENCE_DEGREES;
+export const PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES = PRISM_INCIDENCE_DEGREES;
 
 /**
  * The lamp for a given angle of incidence on the entry face.

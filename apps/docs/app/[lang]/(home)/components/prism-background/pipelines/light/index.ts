@@ -10,7 +10,11 @@ import { PRISM_DEBUG_SOURCES } from "../../debug/sources";
 import { prepareRuntimeEnvironment } from "../../runtime/resources";
 import { resizeRuntime } from "../../runtime/state";
 import type { PrismRuntime } from "../../runtime/types";
-import type { PrismOutput, PrismPipeline } from "../types";
+import type {
+  PrismDebugTargetPreview,
+  PrismOutput,
+  PrismPipeline,
+} from "../types";
 import { bindLightGraph } from "./bind";
 import { recordLightBackdropBundle } from "./bundles";
 import { createLightGraph } from "./create-graph";
@@ -33,6 +37,7 @@ export interface LightPrismPipeline extends PrismPipeline {
     readonly backdropHDR?: Target;
     readonly sceneHDR?: Target;
   };
+  debugTarget(sourceId: string): PrismDebugTargetPreview | undefined;
   /** Dynamically imports preview shaders; never called by the production path. */
   createDebugDraws(): Promise<LightDebugDraws>;
 }
@@ -100,6 +105,9 @@ export function createLightPipeline(
       renderLightGraph(currentFrame, graph, runtime, output, renderOptions);
     },
     debugSources: () => PRISM_DEBUG_SOURCES,
+    debugTarget(sourceId) {
+      return resolveLightDebugTarget(graph, sourceId);
+    },
     async createDebugDraws() {
       if (destroyed)
         throw new Error(
@@ -137,6 +145,26 @@ export function createLightPipeline(
       graph.assets = undefined;
     },
   };
+}
+
+function resolveLightDebugTarget(
+  graph: LightPipelineGraph,
+  sourceId: string
+): PrismDebugTargetPreview | undefined {
+  const backdrop = graph.backdropHDR;
+  const scene = graph.sceneHDR;
+  if (sourceId === "backdrop-hdr" && backdrop) return { primary: backdrop };
+  if ((sourceId === "scene-hdr" || sourceId === "final-output") && scene)
+    return { primary: scene };
+  if (sourceId === "front-glass" && scene && backdrop) {
+    return {
+      primary: scene,
+      secondary: backdrop,
+      mode: "difference",
+      differenceGain: 5,
+    };
+  }
+  return undefined;
 }
 
 function compileGraph(

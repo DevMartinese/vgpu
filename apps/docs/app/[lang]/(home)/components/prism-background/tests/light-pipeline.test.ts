@@ -99,6 +99,7 @@ describe("light pipeline ownership", () => {
         backdropHDR: undefined,
         sceneHDR: undefined,
       });
+      expect(pipeline.debugTarget("backdrop-hdr")).toBeUndefined();
       pipeline.destroy();
     } finally {
       destroyPrismRuntime(runtime);
@@ -154,6 +155,19 @@ describe("light pipeline ownership", () => {
       frame(gpu, (currentFrame) => pipeline.render(currentFrame, output));
       expect(pipeline.targets.backdropHDR?.size).toEqual(output.size);
       expect(pipeline.targets.sceneHDR?.size).toEqual(output.size);
+      expect(pipeline.debugTarget("backdrop-hdr")?.primary).toBe(
+        pipeline.targets.backdropHDR
+      );
+      expect(pipeline.debugTarget("scene-hdr")?.primary).toBe(
+        pipeline.targets.sceneHDR
+      );
+      expect(pipeline.debugTarget("front-glass")).toEqual({
+        primary: pipeline.targets.sceneHDR,
+        secondary: pipeline.targets.backdropHDR,
+        mode: "difference",
+        differenceGain: 5,
+      });
+      expect(pipeline.debugTarget("missing")).toBeUndefined();
     } finally {
       pipeline.destroy();
       destroyPrismRuntime(runtime);

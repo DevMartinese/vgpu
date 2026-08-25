@@ -9,15 +9,9 @@ import {
   useState,
 } from "react";
 import { createRenderer, type PrismRenderer } from "./renderer";
-import type { EnvironmentDebugRenderer } from "./environment-debug";
 import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
-
-const Controls = lazy(() =>
-  import("./controls").then(({ Controls: Component }) => ({
-    default: Component,
-  }))
-);
+import type { PrismControlsUpdater } from "./debug/graph/control-context";
 
 const PrismDebugGraph = lazy(() =>
   import("./debug/graph").then(({ PrismDebugGraph: Component }) => ({
@@ -43,44 +37,32 @@ function currentPrismMode(): PrismPipelineMode {
     : "dark";
 }
 
-function environmentDebugState(
-  controls: PrismControls,
-  mode: PrismPipelineMode
-) {
-  return {
-    visible: controls.environmentDebug,
-    exposure: controls.glass.reflection[mode].environmentExposure,
-  };
-}
-
 export function PrismBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<PrismRenderer | null>(null);
   const controlsRef = useRef<PrismControls>(DEFAULT_PRISM_CONTROLS);
+  const controlsFrameRef = useRef(0);
   const [showDebug, setShowDebug] = useState(false);
   const [debugSources, setDebugSources] = useState<
     readonly PrismDebugSource[] | undefined
   >();
-  const [guiInitialControls, setGuiInitialControls] = useState<PrismControls>(
+  const [debugControls, setDebugControls] = useState<PrismControls>(
     DEFAULT_PRISM_CONTROLS
   );
-  const [environmentDebug, setEnvironmentDebug] = useState(() =>
-    environmentDebugState(DEFAULT_PRISM_CONTROLS, "dark")
-  );
+  const [debugMode, setDebugMode] = useState<PrismPipelineMode>("dark");
   const reportError = useCallback((error: unknown) => {
     console.error("Prism background failed to render.", error);
   }, []);
 
-  const setControls = useCallback((controls: PrismControls) => {
+  const updateControls = useCallback((updater: PrismControlsUpdater) => {
+    const controls = updater(controlsRef.current);
     controlsRef.current = controls;
-    const nextDebug = environmentDebugState(controls, currentPrismMode());
-    setEnvironmentDebug((current) =>
-      current.visible === nextDebug.visible &&
-      current.exposure === nextDebug.exposure
-        ? current
-        : nextDebug
-    );
-    rendererRef.current?.setControls?.(controls);
+    setDebugControls(controls);
+    if (controlsFrameRef.current) return;
+    controlsFrameRef.current = requestAnimationFrame(() => {
+      controlsFrameRef.current = 0;
+      rendererRef.current?.setControls?.(controlsRef.current);
+    });
   }, []);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -89,6 +71,8 @@ export function PrismBackground() {
       "debug"
     );
     setShowDebug(debugPreviews);
+    const initialMode = currentPrismMode();
+    setDebugMode(initialMode);
     const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
     const framingElement = hero?.querySelector<HTMLElement>(
       "[data-triangle-container]"
@@ -98,14 +82,11 @@ export function PrismBackground() {
       wallColor: heroBackgroundColor(canvas),
     };
     controlsRef.current = initialControls;
-    setGuiInitialControls(initialControls);
-    setEnvironmentDebug(
-      environmentDebugState(initialControls, currentPrismMode())
-    );
+    setDebugControls(initialControls);
     const renderer = createRenderer({
       canvas,
       framingElement: framingElement ?? undefined,
-      initialMode: currentPrismMode(),
+      initialMode,
       initialControls,
       debugPreviews,
       onError: reportError,
@@ -121,13 +102,19 @@ export function PrismBackground() {
       if (wallColor !== controlsRef.current.wallColor) {
         const nextControls = { ...controlsRef.current, wallColor };
         controlsRef.current = nextControls;
-        setGuiInitialControls(nextControls);
+        setDebugControls(nextControls);
         renderer.setControls?.(nextControls);
       }
-      setEnvironmentDebug(environmentDebugState(controlsRef.current, mode));
-      void renderer.setMode(mode).then(syncDebugSources, () => {
-        // The renderer reports mode preparation failures through onError.
-      });
+      void renderer.setMode(mode).then(
+        () => {
+          if (rendererRef.current !== renderer) return;
+          setDebugMode(mode);
+          syncDebugSources();
+        },
+        () => {
+          // The renderer reports mode preparation failures through onError.
+        }
+      );
     };
     const themeObserver = new MutationObserver(syncTheme);
     themeObserver.observe(document.documentElement, {
@@ -139,6 +126,9 @@ export function PrismBackground() {
     });
     return () => {
       themeObserver.disconnect();
+      if (controlsFrameRef.current)
+        cancelAnimationFrame(controlsFrameRef.current);
+      controlsFrameRef.current = 0;
       rendererRef.current = null;
       renderer.dispose();
     };
@@ -153,84 +143,15 @@ export function PrismBackground() {
       />
       {showDebug ? (
         <Suspense fallback={null}>
-          <Controls initialValue={guiInitialControls} onChange={setControls} />
           <PrismDebugGraph
             bridge={rendererRef.current?.debugBridge}
+            controls={debugControls}
+            mode={debugMode}
+            onControlsChange={updateControls}
             sources={debugSources}
           />
         </Suspense>
       ) : null}
-      {environmentDebug.visible ? (
-        <EnvironmentDebugCanvas
-          environmentExposure={environmentDebug.exposure}
-          onError={reportError}
-        />
-      ) : null}
     </div>
-  );
-}
-
-interface EnvironmentDebugCanvasProps {
-  readonly environmentExposure: number;
-  onError(error: unknown): void;
-}
-
-function EnvironmentDebugCanvas({
-  environmentExposure,
-  onError,
-}: EnvironmentDebugCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rendererRef = useRef<EnvironmentDebugRenderer | undefined>(undefined);
-  const onErrorRef = useRef(onError);
-  const exposureRef = useRef(environmentExposure);
-  onErrorRef.current = onError;
-  exposureRef.current = environmentExposure;
-
-  useEffect(() => {
-    rendererRef.current?.setEnvironmentExposure(environmentExposure);
-  }, [environmentExposure]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let disposed = false;
-    let renderer: EnvironmentDebugRenderer | undefined;
-
-    void import("./environment-debug").then(
-      ({ createEnvironmentDebugRenderer }) => {
-        if (disposed) return;
-        try {
-          renderer = createEnvironmentDebugRenderer({
-            canvas,
-            initialEnvironmentExposure: exposureRef.current,
-            onError: (error) => onErrorRef.current(error),
-          });
-          rendererRef.current = renderer;
-        } catch (error) {
-          onErrorRef.current(error);
-          return;
-        }
-        void renderer.ready.catch(() => {
-          // The renderer reports initialization failures through onError.
-        });
-      },
-      (error: unknown) => {
-        if (!disposed) onErrorRef.current(error);
-      }
-    );
-
-    return () => {
-      disposed = true;
-      renderer?.dispose();
-      if (rendererRef.current === renderer) rendererRef.current = undefined;
-    };
-  }, []);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      aria-label="Environment reflection debug"
-      className="absolute bottom-3 right-3 z-[3] block size-48 cursor-grab touch-none rounded-sm border border-white/20 bg-black active:cursor-grabbing sm:size-56"
-    />
   );
 }

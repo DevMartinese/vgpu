@@ -14,13 +14,28 @@ export interface PrismPipelineRenderOptions {
 export type PrismDebugSource = {
   readonly id: string;
   readonly label: string;
-  readonly kind: "asset" | "view" | "target" | "pass";
+  readonly kind: "asset" | "view" | "target" | "pass" | "control";
   readonly inputs: readonly {
     readonly source: string;
     readonly operation: string;
   }[];
-  readonly visualization: "srgb" | "linear" | "hdr" | "scalar" | "normal";
+  readonly visualization:
+    | "srgb"
+    | "linear"
+    | "hdr"
+    | "scalar"
+    | "normal"
+    | "none";
 };
+
+/** Existing pipeline texture(s) exposed read-only to the opt-in preview host. */
+export interface PrismDebugTargetPreview {
+  readonly primary: Target;
+  readonly secondary?: Target;
+  readonly mode?: "tone" | "difference";
+  readonly exposure?: number;
+  readonly differenceGain?: number;
+}
 
 /** Retained theme renderer. It observes, but never owns, shared runtime state. */
 export interface PrismPipeline {
@@ -34,5 +49,7 @@ export interface PrismPipeline {
     options?: PrismPipelineRenderOptions
   ): void;
   debugSources?(): readonly PrismDebugSource[];
+  /** Resolves retained production targets without allocating or re-rendering them. */
+  debugTarget?(sourceId: string): PrismDebugTargetPreview | undefined;
   destroy(): void;
 }

@@ -41,9 +41,9 @@ export interface EnvironmentDebugRendererOptions {
   readonly initialEnvironmentExposure?: number;
 }
 
-/** Optional mirror-ball inspector; constructed only while its lil-gui toggle is on. */
+/** Optional mirror-ball inspector retained for standalone diagnostics. */
 export function createEnvironmentDebugRenderer(
-  options: EnvironmentDebugRendererOptions,
+  options: EnvironmentDebugRendererOptions
 ): EnvironmentDebugRenderer {
   let disposed = false;
   let reportedError = false;
@@ -64,7 +64,7 @@ export function createEnvironmentDebugRenderer(
   let distance = INITIAL_ORBIT.distance;
   let environmentExposure = finiteExposure(
     options.initialEnvironmentExposure,
-    PRISM_GLASS.reflection.dark.environmentExposure,
+    PRISM_GLASS.reflection.dark.environmentExposure
   );
   let pendingPresent = true;
 
@@ -110,13 +110,17 @@ export function createEnvironmentDebugRenderer(
 
   const onWheel = (event: WheelEvent) => {
     event.preventDefault();
-    distance = clamp(distance + event.deltaY * 0.002, MIN_DISTANCE, MAX_DISTANCE);
+    distance = clamp(
+      distance + event.deltaY * 0.002,
+      MIN_DISTANCE,
+      MAX_DISTANCE
+    );
     invalidate();
   };
 
   const pointerListeners: readonly [
     "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
-    (event: PointerEvent) => void,
+    (event: PointerEvent) => void
   ][] = [
     ["pointerdown", onPointerDown],
     ["pointermove", onPointerMove],
@@ -132,13 +136,18 @@ export function createEnvironmentDebugRenderer(
     if (disposed) return;
     if (!reportedError) {
       reportedError = true;
-      try { options.onError?.(error); } catch { /* reporting must not block teardown */ }
+      try {
+        options.onError?.(error);
+      } catch {
+        /* reporting must not block teardown */
+      }
     }
     dispose();
   };
 
   const tick = (currentFrame: Frame) => {
-    if (disposed || !pendingPresent || !canvasSurface || !mirror || !axes) return;
+    if (disposed || !pendingPresent || !canvasSurface || !mirror || !axes)
+      return;
     try {
       const mirrorDraw = mirror;
       const axesDraw = axes;
@@ -170,10 +179,13 @@ export function createEnvironmentDebugRenderer(
           opacity: 0.95,
         },
       });
-      currentFrame.pass({ target: canvasSurface, clear: [0.008, 0.008, 0.012, 1] }, (pass) => {
-        pass.draw(mirrorDraw);
-        pass.draw(axesDraw);
-      });
+      currentFrame.pass(
+        { target: canvasSurface, clear: [0.008, 0.008, 0.012, 1] },
+        (pass) => {
+          pass.draw(mirrorDraw);
+          pass.draw(axesDraw);
+        }
+      );
       pendingPresent = false;
     } catch (error) {
       handleFailure(error);
@@ -198,11 +210,14 @@ export function createEnvironmentDebugRenderer(
     );
     await prepareEnvironmentTexture(gpu, environment, environmentSampler);
     if (disposed) return;
-    mirrorGeometry = geometry(gpu, sphere({
-      radius: SPHERE_RADIUS,
-      widthSegments: 48,
-      heightSegments: 24,
-    }));
+    mirrorGeometry = geometry(
+      gpu,
+      sphere({
+        radius: SPHERE_RADIUS,
+        widthSegments: 48,
+        heightSegments: 24,
+      })
+    );
     axesGeometry = createAxesGeometry(gpu);
     mirror = draw(gpu, {
       shader: environmentDebugWgsl,
@@ -246,7 +261,10 @@ export function createEnvironmentDebugRenderer(
       options.canvas.removeEventListener(name, listener);
     }
     options.canvas.removeEventListener("wheel", onWheel);
-    if (pointerId !== undefined && options.canvas.hasPointerCapture(pointerId)) {
+    if (
+      pointerId !== undefined &&
+      options.canvas.hasPointerCapture(pointerId)
+    ) {
       options.canvas.releasePointerCapture(pointerId);
     }
     pointerId = undefined;
@@ -290,8 +308,12 @@ function finiteExposure(value: number | undefined, fallback: number): number {
 function createAxesGeometry(gpu: Gpu): Geometry {
   const vertices: number[] = [];
   const corners = [
-    [0, -1], [0, 1], [1, 1],
-    [0, -1], [1, 1], [1, -1],
+    [0, -1],
+    [0, 1],
+    [1, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
   ] as const;
   const axes = [
     { end: [AXIS_LENGTH, 0, 0], color: [1, 0.08, 0.05] },
@@ -305,23 +327,25 @@ function createAxesGeometry(gpu: Gpu): Geometry {
   }
   return geometry(gpu, {
     label: "prism-environment-debug-axes-geometry",
-    buffers: [{
-      data: new Float32Array(vertices),
-      stride: 44,
-      attributes: {
-        lineStart: "float32x3",
-        lineEnd: "float32x3",
-        axisColor: "float32x3",
-        corner: "float32x2",
+    buffers: [
+      {
+        data: new Float32Array(vertices),
+        stride: 44,
+        attributes: {
+          lineStart: "float32x3",
+          lineEnd: "float32x3",
+          axisColor: "float32x3",
+          corner: "float32x2",
+        },
       },
-    }],
+    ],
   });
 }
 
 function orbitPosition(
   yaw: number,
   pitch: number,
-  distance: number,
+  distance: number
 ): readonly [number, number, number] {
   const cosPitch = Math.cos(pitch);
   return [

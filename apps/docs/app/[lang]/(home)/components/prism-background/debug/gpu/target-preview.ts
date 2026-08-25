@@ -1,19 +1,17 @@
 import type { Effect, Frame, Gpu, Target } from "vgpu";
 import { effect } from "vgpu";
 
+import type { PrismDebugTargetPreview } from "../../pipelines/types";
 import type { PrismRuntime } from "../../runtime/types";
-import type { PrismDebugSourceId } from "../sources";
 import previewWgsl from "./preview.wgsl";
-import type { DebuggableLightPipeline } from "./types";
 
 export interface TargetPreviewRenderer {
-  drawableFor(sourceId: PrismDebugSourceId): Effect;
+  drawableFor(preview: PrismDebugTargetPreview): Effect;
   render(
     current: Frame,
     output: Target,
-    sourceId: PrismDebugSourceId,
-    pipeline: DebuggableLightPipeline
-  ): boolean;
+    preview: PrismDebugTargetPreview
+  ): void;
 }
 
 export function createTargetPreviewRenderer(
@@ -27,51 +25,26 @@ export function createTargetPreviewRenderer(
     label: "prism.debug.target-preview.difference",
   });
   return {
-    drawableFor(sourceId) {
-      return sourceId === "front-glass" ? difference : tone;
+    drawableFor(preview) {
+      return preview.mode === "difference" ? difference : tone;
     },
-    render(current, output, sourceId, pipeline) {
-      const input = targetInputs(sourceId, pipeline);
-      if (!input) return false;
-      const drawable = input.difference ? difference : tone;
+    render(current, output, preview) {
+      const isDifference = preview.mode === "difference";
+      const drawable = isDifference ? difference : tone;
       drawable.set({
-        primaryTexture: input.primary,
-        secondaryTexture: input.secondary,
+        primaryTexture: preview.primary,
+        secondaryTexture: preview.secondary ?? preview.primary,
         previewSampler: runtime.sceneSampler,
         params: {
-          mode: input.difference ? 1 : 0,
-          exposure: input.exposure,
-          differenceGain: input.difference ? 5 : 1,
+          mode: isDifference ? 1 : 0,
+          exposure: preview.exposure ?? 1,
+          differenceGain: preview.differenceGain ?? (isDifference ? 5 : 1),
           _padding: 0,
         },
       });
       current.pass({ target: output, clear: [0, 0, 0, 1] }, (pass) => {
         pass.draw(drawable);
       });
-      return true;
     },
   };
-}
-
-function targetInputs(
-  sourceId: PrismDebugSourceId,
-  pipeline: DebuggableLightPipeline
-): {
-  readonly primary: Target;
-  readonly secondary: Target;
-  readonly difference: boolean;
-  readonly exposure: number;
-} | undefined {
-  const backdrop = pipeline.targets.backdropHDR;
-  const scene = pipeline.targets.sceneHDR;
-  if (sourceId === "backdrop-hdr" && backdrop) {
-    return { primary: backdrop, secondary: backdrop, difference: false, exposure: 1 };
-  }
-  if ((sourceId === "scene-hdr" || sourceId === "final-output") && scene) {
-    return { primary: scene, secondary: scene, difference: false, exposure: 1 };
-  }
-  if (sourceId === "front-glass" && scene && backdrop) {
-    return { primary: scene, secondary: backdrop, difference: true, exposure: 1 };
-  }
-  return undefined;
 }

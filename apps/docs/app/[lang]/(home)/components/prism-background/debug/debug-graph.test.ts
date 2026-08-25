@@ -6,45 +6,79 @@ import {
   type PrismDebugPreviewBridge,
 } from "./preview-bridge";
 import {
+  PRISM_DARK_DEBUG_SOURCES,
+  PRISM_DARK_DEBUG_SOURCE_IDS,
   PRISM_DEBUG_SOURCES,
   PRISM_DEBUG_SOURCE_IDS,
 } from "./sources";
 import { createDebugGraphModel } from "./graph/model";
+import { DEFAULT_PRISM_CONTROLS } from "../types";
 
 describe("prism debug graph descriptors", () => {
-  it("keeps ids unique and every dependency resolvable", () => {
-    const ids = PRISM_DEBUG_SOURCES.map(({ id }) => id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual(PRISM_DEBUG_SOURCE_IDS);
+  it("keeps separate light and dark graphs internally resolvable", () => {
+    expectGraph(PRISM_DEBUG_SOURCES, PRISM_DEBUG_SOURCE_IDS);
+    expectGraph(PRISM_DARK_DEBUG_SOURCES, PRISM_DARK_DEBUG_SOURCE_IDS);
+  });
 
-    const known = new Set(ids);
-    for (const source of PRISM_DEBUG_SOURCES) {
-      for (const input of source.inputs) {
-        expect(known.has(input.source), `${source.id} <- ${input.source}`).toBe(
-          true
+  it.each([
+    ["light", PRISM_DEBUG_SOURCES],
+    ["dark", PRISM_DARK_DEBUG_SOURCES],
+  ] as const)(
+    "lays %s dependencies left of their consumers",
+    (mode, sources) => {
+      const { edges, nodes } = createDebugGraphModel(
+        sources,
+        NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+        mode
+      );
+      const xById = new Map(nodes.map((node) => [node.id, node.position.x]));
+
+      expect(edges).toHaveLength(
+        sources.reduce((count, source) => count + source.inputs.length, 0)
+      );
+      for (const edge of edges) {
+        expect(edge.label).toEqual(expect.any(String));
+        expect(xById.get(edge.source)).toBeLessThan(
+          xById.get(edge.target) ?? 0
         );
       }
     }
-  });
+  );
 
-  it("lays dependencies left of their consumers and labels every edge", () => {
-    const { edges, nodes } = createDebugGraphModel(
+  it("keeps production controls out of preview node data", () => {
+    const { nodes } = createDebugGraphModel(
       PRISM_DEBUG_SOURCES,
-      NOOP_PRISM_DEBUG_PREVIEW_BRIDGE
+      NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+      "light"
     );
-    const xById = new Map(nodes.map((node) => [node.id, node.position.x]));
-
-    expect(edges).toHaveLength(
-      PRISM_DEBUG_SOURCES.reduce(
-        (count, source) => count + source.inputs.length,
-        0
-      )
-    );
-    for (const edge of edges) {
-      expect(edge.label).toEqual(expect.any(String));
-      expect(xById.get(edge.source)).toBeLessThan(xById.get(edge.target) ?? 0);
+    for (const node of nodes) {
+      expect(node.data).not.toHaveProperty("controls");
+      expect(node.data).not.toHaveProperty("onControlsChange");
     }
+    expect(DEFAULT_PRISM_CONTROLS.view).toBe("glass");
+    expect(DEFAULT_PRISM_CONTROLS.wireframe).toBe(false);
+    expect(DEFAULT_PRISM_CONTROLS.lightWireframe).toBe(false);
+    expect(DEFAULT_PRISM_CONTROLS.environmentDebug).toBe(false);
   });
+
+  it.each([
+    ["light", PRISM_DEBUG_SOURCES],
+    ["dark", PRISM_DARK_DEBUG_SOURCES],
+  ] as const)(
+    "keeps %s nodes pointer-interactive without enabling drag",
+    (mode, sources) => {
+      const { nodes } = createDebugGraphModel(
+        sources,
+        NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+        mode
+      );
+
+      for (const node of nodes) {
+        expect(node.style?.pointerEvents).toBe("all");
+        expect(node.draggable).toBe(false);
+      }
+    }
+  );
 });
 
 describe("prism debug preview bridge", () => {
@@ -107,3 +141,20 @@ describe("prism debug preview bridge", () => {
     expect(secondDetach).toHaveBeenCalledOnce();
   });
 });
+
+function expectGraph(
+  sources: typeof PRISM_DEBUG_SOURCES | typeof PRISM_DARK_DEBUG_SOURCES,
+  expectedIds: readonly string[]
+): void {
+  const ids = sources.map(({ id }) => id);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids).toEqual(expectedIds);
+  const known = new Set(ids);
+  for (const source of sources) {
+    for (const input of source.inputs) {
+      expect(known.has(input.source), `${source.id} <- ${input.source}`).toBe(
+        true
+      );
+    }
+  }
+}

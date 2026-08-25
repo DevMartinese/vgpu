@@ -1,7 +1,10 @@
-import type { Draw, Effect, Frame, Gpu, Target } from "vgpu";
+import type { Draw, Effect, Frame, Gpu } from "vgpu";
 
 import type { PrismRuntime } from "../../runtime/types";
-import type { PrismPipeline } from "../../pipelines/types";
+import type {
+  PrismDebugTargetPreview,
+  PrismPipeline,
+} from "../../pipelines/types";
 import type { PrismDebugPreviewBridge } from "../preview-bridge";
 import type { PrismDebugSourceId } from "../sources";
 
@@ -15,12 +18,12 @@ export interface PrismDebugDrawSet {
   bind?(): void;
 }
 
-export interface DebuggableLightPipeline extends PrismPipeline {
+export interface DebuggableTargetPipeline extends PrismPipeline {
+  debugTarget(sourceId: string): PrismDebugTargetPreview | undefined;
+}
+
+export interface DebuggableLightPipeline extends DebuggableTargetPipeline {
   readonly mode: "light";
-  readonly targets: {
-    readonly backdropHDR?: Target;
-    readonly sceneHDR?: Target;
-  };
   createDebugDraws(): Promise<PrismDebugDrawSet>;
 }
 
@@ -40,4 +43,3 @@ export interface PrismDebugPreviewHost {
   invalidate(): void;
   dispose(): void;
 }
-

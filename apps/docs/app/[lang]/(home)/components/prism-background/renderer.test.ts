@@ -44,6 +44,7 @@ vi.mock("vgpu", () => ({
 }));
 
 import { createRenderer } from "./renderer";
+import { PRISM_DARK_DEBUG_SOURCE_IDS } from "./debug/sources";
 import {
   LIGHT_INTERNAL_FIRST_VERTEX,
   LIGHT_INTERNAL_VERTICES,
@@ -1126,7 +1127,7 @@ test("a stale async theme switch cannot replace the latest active mode", async (
   } as Response);
   await Promise.all([switchToLight, keepDark]);
 
-  expect(renderer.debugSources()[0]?.id).toBe("dark-backdrop-hdr");
+  expect(renderer.debugSources()[0]?.id).toBe(PRISM_DARK_DEBUG_SOURCE_IDS[0]);
   expect(renderer.debugBridge).toBe(debugBridge);
   expect(live.targets[0]!.destroy).not.toHaveBeenCalled();
   expect(live.targets[1]!.destroy).not.toHaveBeenCalled();
@@ -1158,7 +1159,7 @@ test("a failed theme candidate preserves the active pipeline and can recover", a
   await expect(renderer.setMode("light")).rejects.toThrow(
     "light shader failed"
   );
-  expect(renderer.debugSources()[0]?.id).toBe("dark-backdrop-hdr");
+  expect(renderer.debugSources()[0]?.id).toBe(PRISM_DARK_DEBUG_SOURCE_IDS[0]);
   expect(onError).toHaveBeenCalledWith(
     expect.objectContaining({ message: "light shader failed" })
   );

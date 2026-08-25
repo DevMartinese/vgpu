@@ -8,6 +8,7 @@ import type { PrismDebugSource } from "../../pipelines/types";
 import { createPrismDebugPreviewHost } from "./host";
 import type {
   DebuggableLightPipeline,
+  DebuggableTargetPipeline,
   PrismDebugDrawSet,
 } from "./types";
 
@@ -106,16 +107,20 @@ describe("GPU debug preview host", () => {
     dispose(gpu, host);
   });
 
-  test("clears attached canvases once and otherwise no-ops in dark mode", async () => {
+  test("renders dark targets through the same preview path", async () => {
     const gpu = await init();
-    const dark = darkPipeline();
+    const dark = darkPipeline(gpu);
     const host = createHost(gpu, () => dark);
     const canvas = canvasLike();
-    host.bridge.attachPreview({ canvas, source: debugSource("final-output") });
+    host.bridge.attachPreview({
+      canvas,
+      source: debugSource("dark-scene-hdr"),
+    });
 
     renderHost(gpu, host, 0);
-    renderHost(gpu, host, 1);
-    expect(contextOf(canvas).getCurrentTexture).toHaveBeenCalledTimes(1);
+    await settle();
+    renderHost(gpu, host, 0);
+    expect(contextOf(canvas).getCurrentTexture).toHaveBeenCalledTimes(2);
 
     host.dispose();
     expect(contextOf(canvas).unconfigure).toHaveBeenCalledTimes(1);
@@ -126,8 +131,14 @@ describe("GPU debug preview host", () => {
     const gpu = await init();
     const firstResult = deferred<PrismDebugDrawSet>();
     const secondResult = deferred<PrismDebugDrawSet>();
-    const first = lightPipeline(gpu, vi.fn(() => firstResult.promise));
-    const second = lightPipeline(gpu, vi.fn(() => secondResult.promise));
+    const first = lightPipeline(
+      gpu,
+      vi.fn(() => firstResult.promise)
+    );
+    const second = lightPipeline(
+      gpu,
+      vi.fn(() => secondResult.promise)
+    );
     let active: PrismPipeline = first;
     const requestRender = vi.fn();
     const host = createHost(gpu, () => active, requestRender);
@@ -199,7 +210,19 @@ function lightPipeline(
   const sceneHDR = target(gpu, { size: [16, 9], format: "rgba16float" });
   return {
     mode: "light",
-    targets: { backdropHDR, sceneHDR },
+    debugTarget(sourceId) {
+      if (sourceId === "backdrop-hdr") return { primary: backdropHDR };
+      if (sourceId === "front-glass") {
+        return {
+          primary: sceneHDR,
+          secondary: backdropHDR,
+          mode: "difference",
+        };
+      }
+      if (sourceId === "scene-hdr" || sourceId === "final-output")
+        return { primary: sceneHDR };
+      return undefined;
+    },
     createDebugDraws,
     prepare: async () => {},
     resize: () => {},
@@ -209,9 +232,12 @@ function lightPipeline(
   };
 }
 
-function darkPipeline(): PrismPipeline {
+function darkPipeline(gpu: Gpu): DebuggableTargetPipeline {
+  const scene = target(gpu, { size: [16, 9], format: "rgba16float" });
   return {
     mode: "dark",
+    debugTarget: (sourceId) =>
+      sourceId === "dark-scene-hdr" ? { primary: scene } : undefined,
     prepare: async () => {},
     resize: () => {},
     bind: () => {},

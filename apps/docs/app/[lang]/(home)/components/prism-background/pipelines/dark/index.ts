@@ -1,11 +1,16 @@
 import type { Target } from "vgpu";
 
 import { BLOOM_VISIBLE_LEVELS, PARTICLE_LIGHT_FIRST_LEVEL } from "../../bloom";
+import { PRISM_DARK_DEBUG_SOURCES } from "../../debug/sources";
 import { prepareRuntimeEnvironment } from "../../runtime/resources";
 import { settleAllOrThrow } from "../../runtime/settle";
 import { resizeRuntime } from "../../runtime/state";
 import type { PrismRuntime } from "../../runtime/types";
-import type { PrismDebugSource, PrismOutput, PrismPipeline } from "../types";
+import type {
+  PrismDebugTargetPreview,
+  PrismOutput,
+  PrismPipeline,
+} from "../types";
 import { bindDarkGraph } from "./bind";
 import { recordDarkBackdropBundle } from "./bundles";
 import { createDarkGraph } from "./create-graph";
@@ -23,6 +28,7 @@ export interface DarkPrismPipeline extends PrismPipeline {
     readonly backdropHDR?: Target;
     readonly sceneHDR?: Target;
   };
+  debugTarget(sourceId: string): PrismDebugTargetPreview | undefined;
 }
 
 export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
@@ -57,11 +63,44 @@ export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
     render(currentFrame, output, options) {
       renderDarkGraph(currentFrame, graph, runtime, output, options);
     },
-    debugSources,
+    debugSources: () => PRISM_DARK_DEBUG_SOURCES,
+    debugTarget(sourceId) {
+      return resolveDarkDebugTarget(graph, sourceId);
+    },
     destroy() {
       destroyDarkTargets(graph);
     },
   };
+}
+
+function resolveDarkDebugTarget(
+  graph: DarkPipelineGraph,
+  sourceId: string
+): PrismDebugTargetPreview | undefined {
+  const backdrop = graph.backgroundTarget;
+  const scene = graph.sceneTarget;
+  const bloom = graph.bloomTargets;
+  if (sourceId === "dark-backdrop-hdr" && backdrop)
+    return { primary: backdrop };
+  if (sourceId === "dark-scene-hdr" && scene) return { primary: scene };
+  if (sourceId === "dark-front-glass" && scene && backdrop) {
+    return {
+      primary: scene,
+      secondary: backdrop,
+      mode: "difference",
+      differenceGain: 5,
+    };
+  }
+  if (sourceId === "dark-bloom-composite" && bloom)
+    return { primary: bloom[0].horizontal };
+  if (sourceId === "dark-particle-light" && bloom)
+    return { primary: bloom[PARTICLE_LIGHT_FIRST_LEVEL].vertical };
+
+  const level = /^dark-bloom-(\d+)$/.exec(sourceId)?.[1];
+  const index = level === undefined ? -1 : Number.parseInt(level, 10);
+  if (bloom && index >= 0 && index < BLOOM_VISIBLE_LEVELS)
+    return { primary: bloom[index]!.vertical };
+  return undefined;
 }
 
 function compileGraph(
@@ -93,27 +132,3 @@ function compileGraph(
     graph.present.compile(outputSignature),
   ];
 }
-
-const debugSources = (): readonly PrismDebugSource[] => [
-  {
-    id: "dark-backdrop-hdr",
-    label: "Dark backdrop HDR",
-    kind: "target",
-    inputs: [],
-    visualization: "hdr",
-  },
-  {
-    id: "dark-scene-hdr",
-    label: "Dark scene HDR",
-    kind: "target",
-    inputs: [{ source: "dark-backdrop-hdr", operation: "front transmission" }],
-    visualization: "hdr",
-  },
-  ...Array.from({ length: BLOOM_VISIBLE_LEVELS }, (_, level) => ({
-    id: `dark-bloom-${level}`,
-    label: `Dark bloom ${level}`,
-    kind: "pass" as const,
-    inputs: [{ source: "dark-scene-hdr", operation: "threshold + blur" }],
-    visualization: "hdr" as const,
-  })),
-];

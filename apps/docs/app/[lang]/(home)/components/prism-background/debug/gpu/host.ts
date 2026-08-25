@@ -3,7 +3,7 @@ import type { Frame } from "vgpu";
 import type { PrismPipeline } from "../../pipelines/types";
 import { createPreviewCompileCache } from "./compile-cache";
 import {
-  clearDarkPreviews,
+  clearUnavailablePreviews,
   hasDirectRegistration,
   renderPreviewEntry,
 } from "./render-entry";
@@ -11,6 +11,7 @@ import { createPreviewRegistry } from "./registrations";
 import { createTargetPreviewRenderer } from "./target-preview";
 import type {
   DebuggableLightPipeline,
+  DebuggableTargetPipeline,
   PrismDebugDrawSet,
   PrismDebugPreviewHost,
   PrismDebugPreviewHostOptions,
@@ -24,7 +25,10 @@ export function createPrismDebugPreviewHost(
   const requestRender = options.invalidate ?? (() => {});
   const reportError = options.onError ?? (() => {});
   const registry = createPreviewRegistry(options.gpu, requestRender);
-  const targetPreview = createTargetPreviewRenderer(options.gpu, options.runtime);
+  const targetPreview = createTargetPreviewRenderer(
+    options.gpu,
+    options.runtime
+  );
   let disposed = false;
   const compileCache = createPreviewCompileCache(
     () => {
@@ -58,7 +62,8 @@ export function createPrismDebugPreviewHost(
   }
 
   function ensureDebugDraws(pipeline: DebuggableLightPipeline): void {
-    if (activeDraws || !hasDirectRegistration(registry.values())) return;
+    if (activeDraws || !hasDirectRegistration(registry.values(), pipeline))
+      return;
     let pending = drawCache.get(pipeline);
     if (!pending) {
       pending = pipeline.createDebugDraws();
@@ -90,11 +95,11 @@ export function createPrismDebugPreviewHost(
     if (disposed) return;
     const pipeline = options.getPipeline();
     syncPipeline(pipeline);
-    if (!isDebuggableLightPipeline(pipeline)) {
-      clearDarkPreviews(current, registry.values());
+    if (!isDebuggableTargetPipeline(pipeline)) {
+      clearUnavailablePreviews(current, registry.values());
       return;
     }
-    ensureDebugDraws(pipeline);
+    if (isDebuggableLightPipeline(pipeline)) ensureDebugDraws(pipeline);
     if (activeDraws && boundRevision !== runtimeRevision) {
       activeDraws.bind?.();
       boundRevision = runtimeRevision;
@@ -133,10 +138,7 @@ export function createPrismDebugPreviewHost(
   function scheduleDynamicWake(now: number): void {
     if (dynamicWake !== undefined) return;
     const elapsed = Math.max(0, now - lastDynamicTime);
-    const delay = Math.max(
-      0,
-      (DYNAMIC_INTERVAL_SECONDS - elapsed) * 1_000
-    );
+    const delay = Math.max(0, (DYNAMIC_INTERVAL_SECONDS - elapsed) * 1_000);
     dynamicWake = setTimeout(() => {
       dynamicWake = undefined;
       if (!disposed) requestRender();
@@ -173,10 +175,15 @@ export function createPrismDebugPreviewHost(
 function isDebuggableLightPipeline(
   pipeline: PrismPipeline | undefined
 ): pipeline is DebuggableLightPipeline {
-  if (pipeline?.mode !== "light") return false;
+  if (!isDebuggableTargetPipeline(pipeline) || pipeline.mode !== "light")
+    return false;
   const candidate = pipeline as Partial<DebuggableLightPipeline>;
-  return (
-    typeof candidate.createDebugDraws === "function" &&
-    typeof candidate.targets === "object"
-  );
+  return typeof candidate.createDebugDraws === "function";
+}
+
+function isDebuggableTargetPipeline(
+  pipeline: PrismPipeline | undefined
+): pipeline is DebuggableTargetPipeline {
+  const candidate = pipeline as Partial<DebuggableTargetPipeline> | undefined;
+  return typeof candidate?.debugTarget === "function";
 }

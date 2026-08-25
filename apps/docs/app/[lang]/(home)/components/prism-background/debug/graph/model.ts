@@ -1,10 +1,15 @@
 import type { Edge, Node } from "@xyflow/react";
 
-import type { PrismDebugSource } from "../../pipelines/types";
+import type {
+  PrismDebugSource,
+  PrismPipelineMode,
+} from "../../pipelines/types";
 import type { PrismDebugPreviewBridge } from "../preview-bridge";
+import { controlGroupsForSource } from "./control-schema";
 
 export type PrismDebugNodeData = {
   readonly bridge: PrismDebugPreviewBridge;
+  readonly mode: PrismPipelineMode;
   readonly source: PrismDebugSource;
 };
 
@@ -16,29 +21,45 @@ export type PrismDebugGraphModel = {
   readonly edges: PrismDebugFlowEdge[];
 };
 
-const COLUMN_GAP = 300;
-const ROW_GAP = 190;
+const COLUMN_GAP = 340;
+const CONTROL_COLUMNS = 2;
+const NODE_GAP = 24;
+const PREVIEW_NODE_HEIGHT = 190;
+const CONTROL_ROW_HEIGHT = 46;
+const CONTROL_GROUP_HEIGHT = 28;
+const CONTROL_NODE_BASE_HEIGHT = 58;
 
 /** Builds a deterministic left-to-right layout without React-owned graph state. */
 export function createDebugGraphModel(
   sources: readonly PrismDebugSource[],
-  bridge: PrismDebugPreviewBridge
+  bridge: PrismDebugPreviewBridge,
+  mode: PrismPipelineMode
 ): PrismDebugGraphModel {
   const knownIds = new Set(sources.map(({ id }) => id));
   const depthOf = createDepthResolver(sources);
-  const rowsByDepth = new Map<number, number>();
+  const controlPositions = layoutControlNodes(sources, mode);
+  const nextYByDepth = new Map<number, number>();
 
   const nodes = sources.map<PrismDebugFlowNode>((source) => {
     const depth = depthOf(source.id);
-    const row = rowsByDepth.get(depth) ?? 0;
-    rowsByDepth.set(depth, row + 1);
+    const controlPosition = controlPositions.get(source.id);
+    const y = controlPosition?.y ?? nextYByDepth.get(depth) ?? 0;
+    if (!controlPosition)
+      nextYByDepth.set(depth, y + estimatedNodeHeight(source, mode) + NODE_GAP);
     return {
       id: source.id,
       type: "prismDebug",
-      position: { x: depth * COLUMN_GAP, y: row * ROW_GAP },
-      data: { bridge, source },
+      position: controlPosition ?? {
+        x: (depth + CONTROL_COLUMNS) * COLUMN_GAP,
+        y,
+      },
+      data: { bridge, mode, source },
       draggable: false,
       selectable: false,
+      // XYFlow disables pointer hit-testing when a node is neither draggable
+      // nor selectable. Keep the node interactive so its `nopan` controls can
+      // receive the gesture without making the node itself draggable.
+      style: { pointerEvents: "all" },
     };
   });
 
@@ -60,6 +81,46 @@ export function createDebugGraphModel(
   );
 
   return { nodes, edges };
+}
+
+function layoutControlNodes(
+  sources: readonly PrismDebugSource[],
+  mode: PrismPipelineMode
+): ReadonlyMap<string, { readonly x: number; readonly y: number }> {
+  const controls = sources.filter(({ kind }) => kind === "control");
+  const positions = new Map<
+    string,
+    { readonly x: number; readonly y: number }
+  >();
+  let y = 0;
+  for (let index = 0; index < controls.length; index += CONTROL_COLUMNS) {
+    const row = controls.slice(index, index + CONTROL_COLUMNS);
+    row.forEach((source, column) => {
+      positions.set(source.id, { x: column * COLUMN_GAP, y });
+    });
+    y +=
+      Math.max(...row.map((source) => estimatedNodeHeight(source, mode))) +
+      NODE_GAP;
+  }
+  return positions;
+}
+
+function estimatedNodeHeight(
+  source: PrismDebugSource,
+  mode: PrismPipelineMode
+): number {
+  const groups = controlGroupsForSource(source.id, mode);
+  const controlCount = groups.reduce(
+    (count, group) => count + group.controls.length,
+    0
+  );
+  return (
+    (source.visualization === "none"
+      ? CONTROL_NODE_BASE_HEIGHT
+      : PREVIEW_NODE_HEIGHT) +
+    groups.length * CONTROL_GROUP_HEIGHT +
+    controlCount * CONTROL_ROW_HEIGHT
+  );
 }
 
 function createDepthResolver(sources: readonly PrismDebugSource[]) {

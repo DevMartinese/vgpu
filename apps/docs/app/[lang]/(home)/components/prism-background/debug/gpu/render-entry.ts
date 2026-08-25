@@ -6,10 +6,9 @@ import {
 } from "../../light-mesh";
 import type { PrismDebugSourceId } from "../sources";
 import type { PreviewRegistration } from "./registrations";
-import { isTargetPreview } from "./source-policy";
 import type { TargetPreviewRenderer } from "./target-preview";
 import type {
-  DebuggableLightPipeline,
+  DebuggableTargetPipeline,
   PrismDebugDrawable,
   PrismDebugDrawSet,
 } from "./types";
@@ -17,7 +16,7 @@ import type {
 export function renderPreviewEntry(
   current: Frame,
   entry: PreviewRegistration,
-  pipeline: DebuggableLightPipeline,
+  pipeline: DebuggableTargetPipeline,
   draws: PrismDebugDrawSet | undefined,
   targetPreview: TargetPreviewRenderer,
   compiled: (
@@ -28,9 +27,12 @@ export function renderPreviewEntry(
 ): boolean {
   try {
     const id = entry.source.id as PrismDebugSourceId;
-    if (isTargetPreview(id)) {
-      if (!compiled(targetPreview.drawableFor(id), entry.output)) return false;
-      return targetPreview.render(current, entry.output, id, pipeline);
+    const target = pipeline.debugTarget(id);
+    if (target) {
+      if (!compiled(targetPreview.drawableFor(target), entry.output))
+        return false;
+      targetPreview.render(current, entry.output, target);
+      return true;
     }
     const drawable = draws?.sources[id];
     if (!drawable || !compiled(drawable, entry.output)) return false;
@@ -51,7 +53,7 @@ export function renderPreviewEntry(
   }
 }
 
-export function clearDarkPreviews(
+export function clearUnavailablePreviews(
   current: Frame,
   entries: IterableIterator<PreviewRegistration>
 ): void {
@@ -63,11 +65,11 @@ export function clearDarkPreviews(
 }
 
 export function hasDirectRegistration(
-  entries: IterableIterator<PreviewRegistration>
+  entries: IterableIterator<PreviewRegistration>,
+  pipeline: DebuggableTargetPipeline
 ): boolean {
   for (const entry of entries) {
-    if (!isTargetPreview(entry.source.id)) return true;
+    if (!pipeline.debugTarget(entry.source.id)) return true;
   }
   return false;
 }
-
