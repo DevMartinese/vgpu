@@ -14,9 +14,7 @@ const forbiddenPackages = new Set([
 const legacyCrossDirectoryExamples = new Set([
   'agent-radiance-cascades',
   'air-painting',
-  'anti-aliasing',
   'batch-rendering',
-  'black-hole',
   'clipping',
   'depth-estimation',
   'earth',
