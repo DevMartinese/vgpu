@@ -135,7 +135,7 @@ export function HeroTabs() {
       */}
       <div
         aria-hidden
-        className="mb-2 mt-5 h-px w-full bg-[linear-gradient(to_right,transparent,#4D4D4D_10%,transparent)]"
+        className="mb-2 mt-5 h-px w-full bg-[linear-gradient(to_right,transparent,#FFF_10%,transparent)]"
       />
 
       <button
