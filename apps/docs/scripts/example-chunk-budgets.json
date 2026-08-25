@@ -7,9 +7,8 @@
   },
   "examples": {
     "gradient": 49625,
-    "triangle-led-front": 89822,
+    "triangle-led-front": 74798,
     "anti-aliasing": 53081,
-    "post-processing": 53581,
     "black-hole": 55332,
     "optimized-black-hole": 57817,
     "fluid": 57872,

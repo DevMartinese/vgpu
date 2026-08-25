@@ -10,7 +10,6 @@ const slugs = [
   'gradient',
   'triangle-led-front',
   'anti-aliasing',
-  'post-processing',
   'black-hole',
   'fluid',
   'instanced-rendering',

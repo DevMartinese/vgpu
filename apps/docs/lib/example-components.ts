@@ -11,7 +11,6 @@ export const exampleComponentLoaders = {
   gradient: () => import('../examples/gradient/index'),
   'triangle-led-front': () => import('../examples/triangle-led-front/index'),
   'anti-aliasing': () => import('../examples/anti-aliasing/index'),
-  'post-processing': () => import('../examples/post-processing/index'),
   'black-hole': () => import('../examples/black-hole/index'),
   'optimized-black-hole': () => import('../examples/optimized-black-hole/index'),
   earth: () => import('../examples/earth/index'),
