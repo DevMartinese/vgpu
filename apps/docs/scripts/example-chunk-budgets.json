@@ -8,8 +8,8 @@
   "examples": {
     "gradient": 49625,
     "triangle-led-front": 82811,
-    "anti-aliasing": 53081,
-    "black-hole": 55332,
+    "anti-aliasing": 63836,
+    "black-hole": 54710,
     "optimized-black-hole": 57817,
     "fluid": 57872,
     "instanced-rendering": 60234,
