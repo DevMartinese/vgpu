@@ -92,20 +92,22 @@ import {
   DEFAULT_PRISM_CONTROLS,
   CAMERA_DISTANCE,
   PRISM_BACK_Z,
+  PRISM_BEAM_MOUSE_Y_RANGES,
   PRISM_BEAM_SLICES,
   PRISM_DEFAULT_ARC,
   PRISM_DISPERSION_PRESETS,
   PRISM_FRONT_Z,
   PRISM_GLASS,
-  PRISM_INCIDENCE_ARC,
   PRISM_LIGHT_PLANE_Z,
   PRISM_LIGHT_FADE_RANGES,
+  PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES,
   PRISM_POSTPROCESS_RANGES,
   PRISM_SPECTRAL_DISPERSION_RANGES,
   PRISM_TRIANGLE,
   clampBeamWidth,
   clampCameraFov,
   lampForIncidence,
+  type BeamMouseYControls,
   type PrismControls,
   type CollimatedLight,
 } from "./types";
@@ -193,7 +195,12 @@ export function createScene(
 ): PrismScene {
   const aspect = output[0] / Math.max(1, output[1]);
   const initialMesh = buildLightMesh({
-    light: lampAt(PRISM_DEFAULT_ARC, DEFAULT_PRISM_CONTROLS.beamWidth),
+    light: lampAt(
+      PRISM_DEFAULT_ARC,
+      DEFAULT_PRISM_CONTROLS.beamWidth,
+      0.5,
+      DEFAULT_PRISM_CONTROLS.beamMouseY
+    ),
     dispersion:
       DEFAULT_PRISM_CONTROLS.spectralDispersion ??
       PRISM_DISPERSION_PRESETS[DEFAULT_PRISM_CONTROLS.dispersion],
@@ -401,7 +408,12 @@ function framingMatrices(
 
 function refreshLightMesh(scene: PrismScene): void {
   const mesh = buildLightMesh({
-    light: lampAt(scene.lampArc, scene.controls.beamWidth, scene.lampTarget),
+    light: lampAt(
+      scene.lampArc,
+      scene.controls.beamWidth,
+      scene.lampTarget,
+      scene.controls.beamMouseY
+    ),
     dispersion:
       scene.controls.spectralDispersion ??
       PRISM_DISPERSION_PRESETS[scene.controls.dispersion],
@@ -421,9 +433,11 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
   const defaultGlass = DEFAULT_PRISM_CONTROLS.glass;
   const defaultPostprocess = DEFAULT_PRISM_CONTROLS.postprocess;
   const defaultLightFade = DEFAULT_PRISM_CONTROLS.lightFade;
+  const defaultBeamMouseY = DEFAULT_PRISM_CONTROLS.beamMouseY;
   const inputGlass = controls.glass ?? defaultGlass;
   const inputPostprocess = controls.postprocess ?? defaultPostprocess;
   const inputLightFade = controls.lightFade ?? defaultLightFade;
+  const inputBeamMouseY = controls.beamMouseY ?? defaultBeamMouseY;
   const legacyLightFade = inputLightFade as typeof inputLightFade & {
     rainbowFalloff?: number;
   };
@@ -444,6 +458,22 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
     beamWidth: clampBeamWidth(
       controls.beamWidth ?? DEFAULT_PRISM_CONTROLS.beamWidth
     ),
+    beamMouseY: {
+      top: Math.min(
+        PRISM_BEAM_MOUSE_Y_RANGES.top.max,
+        Math.max(
+          PRISM_BEAM_MOUSE_Y_RANGES.top.min,
+          finite(inputBeamMouseY.top, defaultBeamMouseY.top)
+        )
+      ),
+      bottom: Math.min(
+        PRISM_BEAM_MOUSE_Y_RANGES.bottom.max,
+        Math.max(
+          PRISM_BEAM_MOUSE_Y_RANGES.bottom.min,
+          finite(inputBeamMouseY.bottom, defaultBeamMouseY.bottom)
+        )
+      ),
+    },
     spectralDispersion: {
       base: Math.min(
         PRISM_SPECTRAL_DISPERSION_RANGES.base.max,
@@ -544,6 +574,8 @@ export function setControls(scene: PrismScene, controls: PrismControls): void {
     next.spectralDispersion.strength !==
       scene.controls.spectralDispersion?.strength ||
     next.beamWidth !== scene.controls.beamWidth ||
+    next.beamMouseY.top !== scene.controls.beamMouseY.top ||
+    next.beamMouseY.bottom !== scene.controls.beamMouseY.bottom ||
     next.lightFade.edgeFalloff !== scene.controls.lightFade.edgeFalloff;
   const cameraChanged = next.cameraFov !== scene.controls.cameraFov;
   scene.controls = next;
@@ -605,20 +637,38 @@ export function resizeScene(
   refreshLightMesh(scene);
 }
 
-export function incidenceAt(position: number): number {
+export function incidenceAt(
+  position: number,
+  beamMouseY: BeamMouseYControls = DEFAULT_PRISM_CONTROLS.beamMouseY
+): number {
   const clamped = Math.min(1, Math.max(0, position));
+  if (clamped <= 0.5) {
+    return (
+      beamMouseY.top +
+      (PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES - beamMouseY.top) *
+        clamped *
+        2
+    );
+  }
   return (
-    PRISM_INCIDENCE_ARC.min +
-    (PRISM_INCIDENCE_ARC.max - PRISM_INCIDENCE_ARC.min) * clamped
+    PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES +
+    (beamMouseY.bottom - PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES) *
+      (clamped - 0.5) *
+      2
   );
 }
 
 export function lampAt(
   position: number,
   beamWidth = DEFAULT_PRISM_CONTROLS.beamWidth,
-  targetPosition = 0.5
+  targetPosition = 0.5,
+  beamMouseY: BeamMouseYControls = DEFAULT_PRISM_CONTROLS.beamMouseY
 ): CollimatedLight {
-  return lampForIncidence(incidenceAt(position), beamWidth, targetPosition);
+  return lampForIncidence(
+    incidenceAt(position, beamMouseY),
+    beamWidth,
+    targetPosition
+  );
 }
 
 export function wallExtent(

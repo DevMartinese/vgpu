@@ -28,12 +28,13 @@ import {
   prismPlanes,
   prismWireframeIndices,
 } from "./prism-mesh";
-import { lampAt } from "./scene";
+import { incidenceAt, lampAt } from "./scene";
 import { prismSilhouette } from "./validation";
 import {
   PRISM_BACK_Z,
   PRISM_DEFAULT_ARC,
   PRISM_FRONT_Z,
+  PRISM_INCIDENCE_DEGREES,
   PRISM_LIGHT_PLANE_Z,
   PRISM_SIDE,
   PRISM_TRIANGLE,
@@ -326,6 +327,21 @@ describe("the extruded prism", () => {
 describe("the camera", () => {
   /** Canvas shapes from a phone in portrait to a very wide desktop hero. */
   const ASPECTS = [0.4, 0.56, 0.75, 1, 1.33, 16 / 9, 2.4, 4];
+
+  test("maps the pointer Y axis between configurable beam angles", () => {
+    const beamMouseY = { top: -52, bottom: 68 };
+    expect(incidenceAt(0, beamMouseY)).toBe(-52);
+    expect(incidenceAt(0.25, beamMouseY)).toBe(4);
+    expect(incidenceAt(0.5, beamMouseY)).toBe(60);
+    expect(incidenceAt(0.75, beamMouseY)).toBe(64);
+    expect(incidenceAt(1, beamMouseY)).toBe(68);
+    expect(incidenceAt(-1, beamMouseY)).toBe(-52);
+    expect(incidenceAt(2, beamMouseY)).toBe(68);
+    expect(incidenceAt(PRISM_DEFAULT_ARC)).toBeCloseTo(
+      PRISM_INCIDENCE_DEGREES,
+      8
+    );
+  });
 
   test("never sees past the wall, at any canvas shape or pointer position", () => {
     for (const aspect of ASPECTS) {

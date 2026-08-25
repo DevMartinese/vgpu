@@ -9,7 +9,7 @@ import {
   lightVertexCount,
   traceSpectralBand,
 } from "./light-mesh";
-import { wavelengthToLinearRgb } from "./optics";
+import { wavelengthToBeamRgb } from "./optics";
 import {
   PRISM_DISPERSION_PRESETS,
   PRISM_CENTROID,
@@ -136,9 +136,9 @@ describe("finite spectral beam", () => {
       PRISM_DISPERSION_PRESETS.stylized,
       PRISM_WAVELENGTHS.max
     )!;
-    expect(angle(violet.lower.direction)).toBeGreaterThan(
-      angle(red.lower.direction)
-    );
+    const angularDelta =
+      angle(violet.lower.direction) - angle(red.lower.direction);
+    expect(Math.atan2(Math.sin(angularDelta), Math.cos(angularDelta))).toBeGreaterThan(0);
   });
 
   test("uses fixed-size GPU geometry and accepts the whole default spectrum", () => {
@@ -169,7 +169,7 @@ describe("finite spectral beam", () => {
       if (wavelength >= 0) {
         const intensity = mesh.vertices[offset + 4]!;
         radiances.push(
-          intensity * Math.max(...wavelengthToLinearRgb(wavelength))
+          intensity * Math.max(...wavelengthToBeamRgb(wavelength))
         );
       }
     }
@@ -245,7 +245,7 @@ describe("finite spectral beam", () => {
     );
   });
 
-  test("keeps the collimated source constant while fading the outgoing spectrum", () => {
+  test("ramps the incoming beam while fading the outgoing spectrum", () => {
     const mesh = buildLightMesh({
       ...defaultOptions,
       samples: 3,
@@ -254,7 +254,20 @@ describe("finite spectral beam", () => {
     const attribute = (vertex: number, offset: number) =>
       mesh.vertices[vertex * LIGHT_VERTEX_FLOATS + offset];
 
-    // A collimated source does not lose radiance over this scene-scale distance.
+    // The visible input starts dark at the canvas boundary and reaches its full
+    // configured radiance exactly where it meets the glass.
+    expect(
+      Array.from({ length: 6 }, (_, vertex) => attribute(vertex, 4))
+    ).toEqual([
+      0,
+      0,
+      INPUT_BEAM_RADIANCE,
+      0,
+      INPUT_BEAM_RADIANCE,
+      INPUT_BEAM_RADIANCE,
+    ]);
+
+    // The input ramp does not share the outgoing-distance attenuation channel.
     expect(
       Array.from({ length: 6 }, (_, vertex) => attribute(vertex, 5))
     ).toEqual([0, 0, 0, 0, 0, 0]);

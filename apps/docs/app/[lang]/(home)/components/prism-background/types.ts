@@ -133,6 +133,13 @@ export interface LightFadeControls {
   readonly rainbowFalloffPower: number;
 }
 
+export interface BeamMouseYControls {
+  /** Beam incidence in degrees when the pointer is at the top of the viewport. */
+  readonly top: number;
+  /** Beam incidence in degrees when the pointer is at the bottom of the viewport. */
+  readonly bottom: number;
+}
+
 export interface PrismControls {
   readonly dispersion: PrismDispersion;
   /** Optional custom Cauchy coefficients; the selected preset is used when absent. */
@@ -142,6 +149,8 @@ export interface PrismControls {
   readonly cameraFov: number;
   /** Full beam width in scene units, measured perpendicular to its axis. */
   readonly beamWidth: number;
+  /** Incidence-angle endpoints controlled by the pointer's vertical position. */
+  readonly beamMouseY: BeamMouseYControls;
   /** Visual attenuation of the finite light sheet. */
   readonly lightFade: LightFadeControls;
   /** CSS hex color, interpreted as sRGB before the additive light is applied. */
@@ -158,11 +167,19 @@ export interface PrismControls {
   readonly postprocess: PostprocessControls;
 }
 
-export const PRISM_DEFAULT_BEAM_WIDTH = 0.01;
+export const PRISM_DEFAULT_BEAM_WIDTH = 0.025;
 export const PRISM_BEAM_WIDTH_RANGE = {
   min: 0.01,
   max: 0.2,
   step: 0.005,
+} as const;
+export const DEFAULT_BEAM_MOUSE_Y_CONTROLS: BeamMouseYControls = {
+  top: -35,
+  bottom: 75,
+};
+export const PRISM_BEAM_MOUSE_Y_RANGES = {
+  top: { min: -85, max: 85, step: 1 },
+  bottom: { min: -85, max: 85, step: 1 },
 } as const;
 export const DEFAULT_LIGHT_FADE_CONTROLS: LightFadeControls = {
   beamOpacity: 1,
@@ -210,8 +227,8 @@ export const PRISM_POSTPROCESS_RANGES = {
 } as const;
 
 export const DEFAULT_POSTPROCESS_CONTROLS: PostprocessControls = {
-  bloomStrength: 0.5,
-  bloomThreshold: 0.5,
+  bloomStrength: 1,
+  bloomThreshold: 0.05,
   bloomRadius: 1,
 };
 
@@ -233,9 +250,11 @@ export function clampCameraFov(fov: number): number {
 
 export const DEFAULT_PRISM_CONTROLS: PrismControls = {
   dispersion: "stylized",
+  spectralDispersion: { base: 1.2, strength: 0.1 },
   view: "glass",
   cameraFov: CAMERA_FOV_DEGREES,
   beamWidth: PRISM_DEFAULT_BEAM_WIDTH,
+  beamMouseY: DEFAULT_BEAM_MOUSE_Y_CONTROLS,
   lightFade: DEFAULT_LIGHT_FADE_CONTROLS,
   wallColor: "#000000",
   wireframe: false,
@@ -344,11 +363,11 @@ export const PRISM_LAMP_DISTANCE = 6.5;
  * through the base instead, on a completely different heading, which drains that
  * wavelength out of the fan. Measured, the switch happens below 44 degrees for
  * the stylized glass and below 48 for dense flint, whose higher index has a
- * shallower critical angle. 50 degrees keeps every preset's whole spectrum on the
- * exit face with a couple of degrees to spare, and still sits well off minimum
- * deviation, where the fan is widest: 16.2 degrees of spread against 13.2 at 60.
+ * shallower critical angle. 60 degrees keeps every preset's whole spectrum on
+ * the exit face with a comfortable margin and is the neutral midpoint of the
+ * homepage's pointer motion.
  */
-export const PRISM_INCIDENCE_DEGREES = 50;
+export const PRISM_INCIDENCE_DEGREES = 60;
 
 /**
  * The arc the pointer can swing the lamp along, in degrees of incidence.
@@ -356,9 +375,16 @@ export const PRISM_INCIDENCE_DEGREES = 50;
  * The homepage uses a deliberately broad sweep so the source can travel from
  * above the frame to below it. The negative minimum deliberately makes a
  * top-positioned pointer send the beam steeply down through the prism and out
- * through its base. The default remains at 50 degrees.
+ * through its base. The default remains at 60 degrees.
  */
-export const PRISM_INCIDENCE_ARC = { min: -35, max: 75 } as const;
+export const PRISM_INCIDENCE_ARC = {
+  min: DEFAULT_BEAM_MOUSE_Y_CONTROLS.top,
+  max: DEFAULT_BEAM_MOUSE_Y_CONTROLS.bottom,
+} as const;
+
+/** Incidence reached when the pointer crosses the viewport's vertical centre. */
+export const PRISM_MOUSE_Y_MIDPOINT_INCIDENCE_DEGREES =
+  PRISM_INCIDENCE_DEGREES;
 
 /**
  * The lamp for a given angle of incidence on the entry face.
@@ -413,10 +439,8 @@ export const PRISM_LIGHT: CollimatedLight = lampForIncidence(
   PRISM_INCIDENCE_DEGREES
 );
 
-/** Where `PRISM_INCIDENCE_DEGREES` sits on `PRISM_INCIDENCE_ARC`, in [0, 1]. */
-export const PRISM_DEFAULT_ARC =
-  (PRISM_INCIDENCE_DEGREES - PRISM_INCIDENCE_ARC.min) /
-  (PRISM_INCIDENCE_ARC.max - PRISM_INCIDENCE_ARC.min);
+/** The neutral 60-degree shot sits at the vertical centre of the viewport. */
+export const PRISM_DEFAULT_ARC = 0.5;
 
 /** Visible wavelength range the continuous spectral mesh subdivides, in nanometres. */
 export const PRISM_WAVELENGTHS = { min: 400, max: 700 } as const;

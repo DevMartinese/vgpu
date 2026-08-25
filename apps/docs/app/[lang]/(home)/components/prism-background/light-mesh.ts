@@ -12,7 +12,7 @@ import {
   intersectTriangle,
   iorAt,
   tracePrismDetailed,
-  wavelengthToLinearRgb,
+  wavelengthToBeamRgb,
   type DetailedPrismPath,
 } from "./optics";
 import {
@@ -304,18 +304,61 @@ function pushQuad(
   lowerEnd: Vec2,
   upperEnd: Vec2,
   wavelength: number,
-  intensity: number,
+  startIntensity: number,
   startTravel = 0,
   endTravel = 0,
   lowerProfile = -1,
-  upperProfile = 1
+  upperProfile = 1,
+  endIntensity = startIntensity
 ): void {
-  pushVertex(output, lowerStart, wavelength, lowerProfile, intensity, startTravel);
-  pushVertex(output, upperStart, wavelength, upperProfile, intensity, startTravel);
-  pushVertex(output, upperEnd, wavelength, upperProfile, intensity, endTravel);
-  pushVertex(output, lowerStart, wavelength, lowerProfile, intensity, startTravel);
-  pushVertex(output, upperEnd, wavelength, upperProfile, intensity, endTravel);
-  pushVertex(output, lowerEnd, wavelength, lowerProfile, intensity, endTravel);
+  pushVertex(
+    output,
+    lowerStart,
+    wavelength,
+    lowerProfile,
+    startIntensity,
+    startTravel
+  );
+  pushVertex(
+    output,
+    upperStart,
+    wavelength,
+    upperProfile,
+    startIntensity,
+    startTravel
+  );
+  pushVertex(
+    output,
+    upperEnd,
+    wavelength,
+    upperProfile,
+    endIntensity,
+    endTravel
+  );
+  pushVertex(
+    output,
+    lowerStart,
+    wavelength,
+    lowerProfile,
+    startIntensity,
+    startTravel
+  );
+  pushVertex(
+    output,
+    upperEnd,
+    wavelength,
+    upperProfile,
+    endIntensity,
+    endTravel
+  );
+  pushVertex(
+    output,
+    lowerEnd,
+    wavelength,
+    lowerProfile,
+    endIntensity,
+    endTravel
+  );
 }
 
 /** A cell whose two rails carry neighbouring wavelengths and intensities. */
@@ -493,11 +536,12 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
         lower.entry,
         upper.entry,
         -1,
-        INPUT_BEAM_RADIANCE,
+        0,
         0,
         0,
         lower.profile,
-        upper.profile
+        upper.profile,
+        INPUT_BEAM_RADIANCE
       );
     } else {
       const centerProfile = (lower.profile + upper.profile) * 0.5;
@@ -597,7 +641,7 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
   const internalRgbSum = nodes.reduce<[number, number, number]>(
     (sum, node) => {
       if (!node) return sum;
-      const rgb = wavelengthToLinearRgb(node.wavelength);
+      const rgb = wavelengthToBeamRgb(node.wavelength);
       return [sum[0] + rgb[0], sum[1] + rgb[1], sum[2] + rgb[2]];
     },
     [0, 0, 0]

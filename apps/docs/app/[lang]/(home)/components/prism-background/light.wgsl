@@ -29,16 +29,51 @@ fn cieZ(wavelength: f32) -> f32 {
   return 1.217 * exp(-0.5 * t1 * t1) + 0.681 * exp(-0.5 * t2 * t2);
 }
 
-fn wavelengthToLinearRgb(wavelength: f32) -> vec3f {
-  let xyz = vec3f(cieX(wavelength), cieY(wavelength), cieZ(wavelength));
-  return max(
-    vec3f(
-      3.2406 * xyz.x - 1.5372 * xyz.y - 0.4986 * xyz.z,
-      -0.9689 * xyz.x + 1.8758 * xyz.y + 0.0415 * xyz.z,
-      0.0557 * xyz.x - 0.2040 * xyz.y + 1.0570 * xyz.z,
-    ),
-    vec3f(0.0),
+// CIE standard illuminant D65, 400–700 nm in 10 nm steps. The complete
+// spectrum shares one exposure; individual wavelengths are never normalized.
+fn d65SpectralPower(wavelength: f32) -> f32 {
+  let values = array<f32, 31>(
+    82.7549, 91.486, 93.4318, 86.6823, 104.865, 117.008, 117.812,
+    114.861, 115.923, 108.811, 109.354, 107.802, 104.79, 107.689,
+    104.405, 104.046, 100.0, 96.3342, 95.788, 88.6856, 90.0062,
+    89.5991, 87.6987, 83.2886, 83.6992, 80.0268, 80.2146, 82.2778,
+    78.2842, 69.7213, 71.6091,
   );
+  let coordinate = clamp((wavelength - 400.0) / 10.0, 0.0, 30.0);
+  let lower = min(u32(coordinate), 29u);
+  let fraction = coordinate - f32(lower);
+  return mix(values[lower], values[lower + 1u], fraction) * 0.01;
+}
+
+fn wavelengthToBeamRgb(wavelength: f32) -> vec3f {
+  let clampedWavelength = clamp(wavelength, 400.0, 700.0);
+  let xyz = vec3f(
+    cieX(clampedWavelength),
+    cieY(clampedWavelength),
+    cieZ(clampedWavelength),
+  );
+  let linearRgb = vec3f(
+    3.2406 * xyz.x - 1.5372 * xyz.y - 0.4986 * xyz.z,
+    -0.9689 * xyz.x + 1.8758 * xyz.y + 0.0415 * xyz.z,
+    0.0557 * xyz.x - 0.2040 * xyz.y + 1.0570 * xyz.z,
+  );
+  // Monochromatic colors leave the sRGB gamut. Moving the whole triplet toward
+  // the neutral axis makes it positive; normalizing it then separates hue from
+  // the smooth photopic energy envelope, avoiding display-primary dark bands.
+  let neutralOffset = min(min(linearRgb.r, linearRgb.g), min(linearRgb.b, 0.0));
+  let positiveRgb = linearRgb - vec3f(neutralOffset);
+  let hue = positiveRgb
+    / max(max(positiveRgb.r, positiveRgb.g), max(positiveRgb.b, 1.0e-6));
+  let relativePhotopicPower = d65SpectralPower(clampedWavelength)
+    * xyz.y
+    / 1.0347;
+  let spectralExposure = 4.5;
+  let displayPower = (1.0 - exp(-spectralExposure * relativePhotopicPower))
+    / (1.0 - exp(-spectralExposure));
+  // One global chromatic adaptation keeps all overlapping wavelengths neutral;
+  // unlike the removed hue ramp, it never normalizes wavelengths independently.
+  let whiteBalance = vec3f(1.1868, 1.0, 2.2495);
+  return hue * displayPower * whiteBalance;
 }
 
 @group(0) @binding(0) var<uniform> scene: Scene;
@@ -61,7 +96,7 @@ fn vs_main(
 ) -> VertexOut {
   var out: VertexOut;
   out.position = scene.viewProjection * vec4f(position, scene.lightPlaneZ, 1.0);
-  let spectral = wavelengthToLinearRgb(max(wavelength, 400.0));
+  let spectral = wavelengthToBeamRgb(max(wavelength, 400.0));
   out.color = select(spectral, vec3f(1.0), wavelength < 0.0);
   out.profile = profile;
   out.intensity = intensity;

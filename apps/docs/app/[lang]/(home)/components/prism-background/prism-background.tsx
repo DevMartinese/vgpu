@@ -80,6 +80,11 @@ export function PrismBackground() {
         aria-hidden="true"
         className="block h-full w-full touch-none"
       />
+      <div
+        data-prism-edge-fade
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+      />
       {showDebug ? (
         <Suspense fallback={null}>
           <Controls onChange={setControls} />

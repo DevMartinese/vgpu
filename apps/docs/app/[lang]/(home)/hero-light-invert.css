@@ -9,6 +9,13 @@ html.light [data-hero-invert] {
   background-color: #050505;
 }
 
+/* `background-200` resolves to oklch(0.984 0 0), visually #fafafa. Since the
+   entire hero is inverted in light mode, author #050505 here to land on that
+   exact page color after compositing. */
+html.light [data-hero-invert] [data-prism-edge-fade] {
+  --prism-edge-fade-color: 5 5 5;
+}
+
 /* The dark-mode foot fade is composited before the section inversion. Match
    its light-mode source color to the pre-inverted canvas so it cannot lift the
    last pixels of the hero back toward pure white. */

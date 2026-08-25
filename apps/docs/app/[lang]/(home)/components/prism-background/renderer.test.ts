@@ -782,6 +782,12 @@ test("only optical controls rebuild the light mesh", async () => {
     view: "caustic",
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 3);
+  // The two pointer-Y endpoints change the incidence used to retrace the beam.
+  renderer.setControls?.({
+    ...DEFAULT_PRISM_CONTROLS,
+    beamMouseY: { top: -52, bottom: 68 },
+  });
+  expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 4);
   renderer.dispose();
 });
 

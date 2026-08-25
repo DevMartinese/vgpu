@@ -3,6 +3,7 @@ import GUI, { type Controller } from "lil-gui";
 
 import {
   DEFAULT_PRISM_CONTROLS,
+  PRISM_BEAM_MOUSE_Y_RANGES,
   PRISM_BEAM_WIDTH_RANGE,
   PRISM_CAMERA_RANGES,
   PRISM_DISPERSION_LABELS,
@@ -33,6 +34,8 @@ interface GuiValues {
   view: GuiView;
   cameraFov: number;
   beamWidth: number;
+  beamMouseYTop: number;
+  beamMouseYBottom: number;
   beamOpacity: number;
   edgeFalloff: number;
   rainbowFalloffRate: number;
@@ -84,6 +87,8 @@ export function Controls({
       initialValue.postprocess ?? DEFAULT_PRISM_CONTROLS.postprocess;
     const lightFade =
       initialValue.lightFade ?? DEFAULT_PRISM_CONTROLS.lightFade;
+    const beamMouseY =
+      initialValue.beamMouseY ?? DEFAULT_PRISM_CONTROLS.beamMouseY;
     const legacyLightFade = lightFade as typeof lightFade & {
       rainbowFalloff?: number;
     };
@@ -103,6 +108,10 @@ export function Controls({
       view: guiView(initialValue.view),
       cameraFov: initialValue.cameraFov ?? DEFAULT_PRISM_CONTROLS.cameraFov,
       beamWidth: initialValue.beamWidth ?? DEFAULT_PRISM_CONTROLS.beamWidth,
+      beamMouseYTop:
+        beamMouseY.top ?? DEFAULT_PRISM_CONTROLS.beamMouseY.top,
+      beamMouseYBottom:
+        beamMouseY.bottom ?? DEFAULT_PRISM_CONTROLS.beamMouseY.bottom,
       beamOpacity:
         lightFade.beamOpacity ?? DEFAULT_PRISM_CONTROLS.lightFade.beamOpacity,
       edgeFalloff:
@@ -161,6 +170,10 @@ export function Controls({
         view: values.view,
         cameraFov: values.cameraFov,
         beamWidth: values.beamWidth,
+        beamMouseY: {
+          top: values.beamMouseYTop,
+          bottom: values.beamMouseYBottom,
+        },
         lightFade: {
           beamOpacity: values.beamOpacity,
           edgeFalloff: values.edgeFalloff,
@@ -190,6 +203,7 @@ export function Controls({
 
     const sceneFolder = gui.addFolder("Scene");
     const spectralFolder = sceneFolder.addFolder("Spectral optics");
+    const lightPositionFolder = gui.addFolder("Light position");
     const lightFolder = gui.addFolder("Light fade");
     const cameraFolder = gui.addFolder("Camera");
     const glassFolder = gui.addFolder("Glass");
@@ -245,6 +259,26 @@ export function Controls({
           PRISM_BEAM_WIDTH_RANGE.step
         )
         .name("beam width")
+        .onChange(publish),
+      lightPositionFolder
+        .add(
+          values,
+          "beamMouseYTop",
+          PRISM_BEAM_MOUSE_Y_RANGES.top.min,
+          PRISM_BEAM_MOUSE_Y_RANGES.top.max,
+          PRISM_BEAM_MOUSE_Y_RANGES.top.step
+        )
+        .name("mouse top (deg)")
+        .onChange(publish),
+      lightPositionFolder
+        .add(
+          values,
+          "beamMouseYBottom",
+          PRISM_BEAM_MOUSE_Y_RANGES.bottom.min,
+          PRISM_BEAM_MOUSE_Y_RANGES.bottom.max,
+          PRISM_BEAM_MOUSE_Y_RANGES.bottom.step
+        )
+        .name("mouse bottom (deg)")
         .onChange(publish),
       sceneFolder
         .addColor(values, "wallColor")

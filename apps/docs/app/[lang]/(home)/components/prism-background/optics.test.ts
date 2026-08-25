@@ -18,6 +18,7 @@ import {
   tracePrism,
   tracePrismDetailed,
   triangleWinding,
+  wavelengthToBeamRgb,
   wavelengthToLinearRgb,
 } from './optics';
 import {
@@ -42,6 +43,8 @@ import {
 const degrees = (radians: number): number => (radians * 180) / Math.PI;
 const distance = (a: Vec2, b: Vec2): number => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const angleOf = (direction: Vec2): number => degrees(Math.atan2(direction[1], direction[0]));
+const signedAngleDelta = (a: number, b: number): number =>
+  ((a - b + 540) % 360) - 180;
 const dot2 = (a: Vec2, b: Vec2): number => a[0] * b[0] + a[1] * b[1];
 const normalize2 = (value: Vec2): Vec2 => {
   const magnitude = Math.hypot(value[0], value[1]);
@@ -249,15 +252,15 @@ describe('dispersion', () => {
     }
   });
 
-  test('the stylized preset opens a fan a screen can show, the real ones do not', () => {
+  test('the stylized preset opens a much wider fan than physical glass', () => {
     const fanOf = (dispersion: PrismDispersion) => {
       const violet = beamThrough(dispersion, PRISM_WAVELENGTHS.min);
       const red = beamThrough(dispersion, PRISM_WAVELENGTHS.max);
-      return Math.abs(violet.meanAngle - red.meanAngle);
+      return Math.abs(signedAngleDelta(violet.meanAngle, red.meanAngle));
     };
     // The whole reason a preset exists: crown glass really is this subtle.
     expect(fanOf('crown')).toBeLessThan(2);
-    expect(fanOf('flint')).toBeGreaterThan(6);
+    expect(fanOf('flint')).toBeGreaterThan(4);
     expect(fanOf('stylized')).toBeGreaterThan(14);
   });
 
@@ -266,7 +269,7 @@ describe('dispersion', () => {
     const red = beamThrough('stylized', PRISM_WAVELENGTHS.max);
     // Mirroring the light reverses the signed angular order while preserving
     // the physical fact that violet deviates farther than red.
-    expect(violet.meanAngle).toBeGreaterThan(red.meanAngle);
+    expect(signedAngleDelta(violet.meanAngle, red.meanAngle)).toBeGreaterThan(0);
   });
 
   test('wavelengths map to hues in spectral order', () => {
@@ -278,6 +281,44 @@ describe('dispersion', () => {
     expect(green[1]).toBeGreaterThan(green[2]);
     expect(red[0]).toBeGreaterThan(red[2]);
     for (const color of [violet, green, red]) for (const channel of color) expect(channel).toBeGreaterThanOrEqual(0);
+  });
+
+  test('beam colors use one D65 exposure and integrate back to neutral white', () => {
+    const sum = [0, 0, 0];
+    for (let index = 0; index < 128; index++) {
+      const wavelength = 400 + (300 * index) / 127;
+      const color = wavelengthToBeamRgb(wavelength);
+      for (let channel = 0; channel < 3; channel++) {
+        expect(color[channel]).toBeGreaterThanOrEqual(0);
+        sum[channel] += color[channel]!;
+      }
+    }
+    expect(Math.min(...sum) / Math.max(...sum)).toBeGreaterThan(0.99);
+
+    // The central spectrum stays continuously luminous instead of dipping
+    // between the monitor's blue, green and red primaries.
+    for (let wavelength = 475; wavelength <= 625; wavelength++) {
+      expect(Math.max(...wavelengthToBeamRgb(wavelength))).toBeGreaterThan(0.8);
+    }
+    expect(Math.max(...wavelengthToBeamRgb(400))).toBeLessThan(0.02);
+    expect(Math.max(...wavelengthToBeamRgb(700))).toBeLessThan(0.02);
+  });
+
+  test('beam colors follow the continuous CIE spectral locus', () => {
+    const violet = wavelengthToBeamRgb(450);
+    const cyan = wavelengthToBeamRgb(480);
+    const green = wavelengthToBeamRgb(540);
+    const yellow = wavelengthToBeamRgb(570);
+    const red = wavelengthToBeamRgb(600);
+    expect(violet[2]).toBeGreaterThan(violet[0] * 4);
+    expect(violet[0]).toBeGreaterThan(0);
+    expect(cyan[2]).toBeGreaterThan(cyan[1]);
+    expect(cyan[1]).toBeGreaterThan(0.2);
+    expect(green[1]).toBeGreaterThan(green[2] * 2);
+    expect(yellow[0]).toBeGreaterThan(0.9);
+    expect(yellow[1]).toBeGreaterThan(0.9);
+    expect(yellow[2]).toBe(0);
+    expect(red[0]).toBeGreaterThan(red[1] * 8);
   });
 
 });

@@ -11,3 +11,50 @@
     text-align: left;
   }
 }
+
+/* The GPU surface stays opaque; this final CSS layer eases its four edges into
+   the page rather than making the renderer theme-aware. Keep these dimensions
+   as custom properties so the amount of edge blending remains easy to tune. */
+[data-prism-edge-fade] {
+  --prism-edge-fade-color: 0 0 0;
+  --prism-edge-fade-x: clamp(2.5rem, 7vw, 7rem);
+  --prism-edge-fade-y: clamp(2.5rem, 8svh, 6rem);
+
+  background:
+    linear-gradient(
+        to right,
+        rgb(var(--prism-edge-fade-color) / 1) 0%,
+        rgb(var(--prism-edge-fade-color) / 0.72) 28%,
+        rgb(var(--prism-edge-fade-color) / 0.38) 54%,
+        rgb(var(--prism-edge-fade-color) / 0.12) 78%,
+        rgb(var(--prism-edge-fade-color) / 0) 100%
+      )
+      left / var(--prism-edge-fade-x) 100% no-repeat,
+    linear-gradient(
+        to left,
+        rgb(var(--prism-edge-fade-color) / 1) 0%,
+        rgb(var(--prism-edge-fade-color) / 0.72) 28%,
+        rgb(var(--prism-edge-fade-color) / 0.38) 54%,
+        rgb(var(--prism-edge-fade-color) / 0.12) 78%,
+        rgb(var(--prism-edge-fade-color) / 0) 100%
+      )
+      right / var(--prism-edge-fade-x) 100% no-repeat,
+    linear-gradient(
+        to bottom,
+        rgb(var(--prism-edge-fade-color) / 1) 0%,
+        rgb(var(--prism-edge-fade-color) / 0.72) 28%,
+        rgb(var(--prism-edge-fade-color) / 0.38) 54%,
+        rgb(var(--prism-edge-fade-color) / 0.12) 78%,
+        rgb(var(--prism-edge-fade-color) / 0) 100%
+      )
+      top / 100% var(--prism-edge-fade-y) no-repeat,
+    linear-gradient(
+        to top,
+        rgb(var(--prism-edge-fade-color) / 1) 0%,
+        rgb(var(--prism-edge-fade-color) / 0.72) 28%,
+        rgb(var(--prism-edge-fade-color) / 0.38) 54%,
+        rgb(var(--prism-edge-fade-color) / 0.12) 78%,
+        rgb(var(--prism-edge-fade-color) / 0) 100%
+      )
+      bottom / 100% var(--prism-edge-fade-y) no-repeat;
+}

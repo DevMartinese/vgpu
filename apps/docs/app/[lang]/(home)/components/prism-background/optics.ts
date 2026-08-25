@@ -8,6 +8,7 @@
 
 import {
   PRISM_MAX_INTERNAL_BOUNCES,
+  PRISM_WAVELENGTHS,
   type Triangle,
   type Vec2,
 } from './types';
@@ -266,5 +267,87 @@ export function wavelengthToLinearRgb(wavelengthNm: number): Vec3 {
     Math.max(0, 3.2406 * x - 1.5372 * y - 0.4986 * z),
     Math.max(0, -0.9689 * x + 1.8758 * y + 0.0415 * z),
     Math.max(0, 0.0557 * x - 0.2040 * y + 1.0570 * z),
+  ];
+}
+
+/**
+ * CIE standard illuminant D65 at 10 nm intervals from 400 through 700 nm.
+ * Linear interpolation is enough at the mesh's 128 wavelength vertices while
+ * keeping the shader lookup compact. Source: CIE.DS.hjfjmt59.
+ */
+const D65_SPECTRAL_POWER = [
+  82.7549, 91.486, 93.4318, 86.6823, 104.865, 117.008, 117.812,
+  114.861, 115.923, 108.811, 109.354, 107.802, 104.79, 107.689,
+  104.405, 104.046, 100, 96.3342, 95.788, 88.6856, 90.0062,
+  89.5991, 87.6987, 83.2886, 83.6992, 80.0268, 80.2146, 82.2778,
+  78.2842, 69.7213, 71.6091,
+] as const;
+
+/** Peak of D65(lambda) * CIE y-bar(lambda) over the rendered 400–700 nm range. */
+const D65_PHOTOPIC_PEAK = 1.0347;
+/** One photographic shoulder shared by every wavelength. */
+const SPECTRAL_EXPOSURE = 4.5;
+/** Global adaptation that makes the complete gamut-mapped D65 spectrum white. */
+const SPECTRAL_WHITE_BALANCE: Vec3 = [1.1868, 1, 2.2495];
+
+function d65SpectralPower(wavelengthNm: number): number {
+  const coordinate = Math.min(
+    D65_SPECTRAL_POWER.length - 1,
+    Math.max(0, (wavelengthNm - PRISM_WAVELENGTHS.min) / 10)
+  );
+  const lower = Math.min(
+    D65_SPECTRAL_POWER.length - 2,
+    Math.floor(coordinate)
+  );
+  const fraction = coordinate - lower;
+  return (
+    (D65_SPECTRAL_POWER[lower]! * (1 - fraction) +
+      D65_SPECTRAL_POWER[lower + 1]! * fraction) /
+    100
+  );
+}
+
+/**
+ * Positive linear-sRGB radiance for one wavelength under daylight D65.
+ *
+ * The CIE response determines both hue and relative brightness. Monochromatic
+ * colors lie outside sRGB, so shifting every triplet toward the neutral axis is
+ * the smallest positive gamut mapping that preserves its ordering. Crucially,
+ * that operation happens before one shared exposure: integrating these values
+ * across 400–700 nm reconstructs D65 white instead of giving every wavelength
+ * the same peak energy.
+ *
+ * Fresnel transmission is deliberately absent here because the ray tracer has
+ * already folded the actual entry/exit losses into each mesh vertex intensity.
+ */
+export function wavelengthToBeamRgb(wavelengthNm: number): Vec3 {
+  const wavelength = Math.min(
+    PRISM_WAVELENGTHS.max,
+    Math.max(PRISM_WAVELENGTHS.min, wavelengthNm)
+  );
+  const x = cieX(wavelength);
+  const y = cieY(wavelength);
+  const z = cieZ(wavelength);
+  const linearRgb: Vec3 = [
+    3.2406 * x - 1.5372 * y - 0.4986 * z,
+    -0.9689 * x + 1.8758 * y + 0.0415 * z,
+    0.0557 * x - 0.2040 * y + 1.0570 * z,
+  ];
+  const neutralOffset = Math.min(0, ...linearRgb);
+  const positiveRgb: Vec3 = [
+    linearRgb[0] - neutralOffset,
+    linearRgb[1] - neutralOffset,
+    linearRgb[2] - neutralOffset,
+  ];
+  const huePeak = Math.max(...positiveRgb, Number.EPSILON);
+  const relativePhotopicPower =
+    (d65SpectralPower(wavelength) * y) / D65_PHOTOPIC_PEAK;
+  const displayPower =
+    (1 - Math.exp(-SPECTRAL_EXPOSURE * relativePhotopicPower)) /
+    (1 - Math.exp(-SPECTRAL_EXPOSURE));
+  return [
+    (positiveRgb[0] / huePeak) * displayPower * SPECTRAL_WHITE_BALANCE[0],
+    (positiveRgb[1] / huePeak) * displayPower * SPECTRAL_WHITE_BALANCE[1],
+    (positiveRgb[2] / huePeak) * displayPower * SPECTRAL_WHITE_BALANCE[2],
   ];
 }
