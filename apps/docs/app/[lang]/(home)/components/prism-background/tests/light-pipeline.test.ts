@@ -60,7 +60,7 @@ describe("light pipeline ownership", () => {
           microNormalStrength: 1.05,
           ambient: 0.5,
           lightDirection: [-0.48, 0.56, 0.68],
-          ambientLightStrength: 4,
+          ambientLightStrength: 1.35,
           prismShadowStrength: 0,
         })
       );

@@ -89,8 +89,8 @@ export function PrismBackground() {
       "debug"
     );
     setShowDebug(debugPreviews);
-    const heroContainer = canvas.closest<HTMLElement>("[data-hero-container]");
-    const framingElement = heroContainer?.querySelector<HTMLElement>(
+    const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
+    const framingElement = hero?.querySelector<HTMLElement>(
       "[data-triangle-container]"
     );
     const initialControls = {
@@ -150,11 +150,6 @@ export function PrismBackground() {
         ref={canvasRef}
         aria-hidden="true"
         className="block h-full w-full touch-none"
-      />
-      <div
-        data-prism-edge-fade
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
       />
       {showDebug ? (
         <Suspense fallback={null}>

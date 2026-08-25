@@ -6,7 +6,7 @@ export const LIGHT_PIPELINE_TUNING = Object.freeze({
     microNormalFrequency: 7,
     microNormalStrength: 1.05,
     ambient: 0.5,
-    ambientLightStrength: 4,
+    ambientLightStrength: 1.35,
     prismShadowStrength: 1,
     prismAoStrength: 1,
     groundingScale: 2,

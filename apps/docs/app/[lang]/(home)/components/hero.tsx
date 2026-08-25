@@ -18,37 +18,28 @@ export function Hero() {
     <HeroTabProvider>
       <section
         data-hero-theme
-        className="relative h-[calc(100svh-4rem)] max-h-[50em] overflow-hidden"
+        className="relative -mt-16 h-svh max-h-[50em] overflow-hidden"
       >
+        <PrismBackground />
+
+        {/* Only the lower edge dissolves into the regular page surface. The
+          canvas itself spans the full hero, including the space behind the
+          transparent navbar. */}
+        <div
+          data-hero-overlay
+          data-hero-foot-fade
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[16%]"
+        />
+
         <div
           data-hero-container
-          className="relative mx-auto h-full w-full max-w-[1448px] overflow-hidden"
+          className="relative z-10 mx-auto h-full w-full max-w-[1448px] overflow-hidden"
         >
-          <PrismBackground />
-
-          {/* Foot fade. This was a tall, near-opaque band back when the setup
-            snippet was pinned to the bottom and needed contrast; the snippet
-            now sits centred with the tagline, so that job is gone and the band
-            was only costing us the lower crescent. What remains is the other
-            job it was doing: the hero ends mid-starfield, and cutting straight
-            to the black page below leaves a visible seam. Short and gentle is
-            enough to hide it.
-
-            Multi-stop rather than a plain two-stop fade: alpha interpolates
-            linearly while perceived luminance does not, so `black -> transparent`
-            leaves a visible ledge around its midpoint. These stops approximate
-            an ease-out curve, which reads as haze instead of a band. */}
-          <div
-            data-hero-overlay
-            data-hero-foot-fade
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[16%]"
-          />
-
           {/* The HTML takes a fixed content column on desktop; the invisible
-            triangle container receives every remaining pixel inside this same
-            bounded hero container. Both it and the canvas are therefore
-            measured in one coordinate system, including on very wide screens.
+            triangle container receives every remaining pixel inside this
+            bounded container. Its viewport-relative bounds position the prism
+            on the full-bleed canvas, including on very wide screens.
 
             The overlay is pointer-events-none so it never eats clicks over the
             rest of the hero, but the content opts back IN. */}

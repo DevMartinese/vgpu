@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 
+import { PNG } from "pngjs";
 import { describe, expect, test, vi } from "vitest";
 import type { Gpu } from "vgpu";
 import type { Texture } from "vgpu/core";
@@ -12,7 +13,11 @@ import spectralWgsl from "../materials/shared/spectral.wgsl";
 import wallCommonWgsl from "../materials/light/wall-common.wgsl";
 import wallDebugWgsl from "../materials/light/wall-debug.wgsl";
 import { generateCausticProfile } from "../assets/light/generate-caustic";
-import { generateLightAsset } from "../assets/light/generate";
+import {
+  applyGlobalLightMask,
+  generateLightAsset,
+  globalLightMaskEdgeMax,
+} from "../assets/light/generate";
 import {
   generateWallLighting,
   generateWallMaterial,
@@ -90,9 +95,29 @@ describe("light pipeline baked assets", () => {
       expect(parsed.levels).toHaveLength(levels);
       expect(parsed.levels[0]).toMatchObject({ width, height });
       expect(parsed.levels.at(-1)).toMatchObject({ width: 1, height: 1 });
-      expect(hash(parsed.levels[0]!.data)).toBe(
-        hash(generateLightAsset(name).pixels)
-      );
+      const baked = parsed.levels[0]!.data;
+      const generated = generateLightAsset(name).pixels;
+      if (name === "wall-lighting") {
+        const mask = PNG.sync.read(
+          await readFile(
+            resolve(
+              process.cwd(),
+              "apps/docs/assets/prism-light/wall-global-light-mask.png"
+            )
+          )
+        );
+        expect(mask.width / mask.height).toBeCloseTo(1.5);
+        applyGlobalLightMask(
+          { width, height, pixels: generated },
+          mask.data,
+          mask.width,
+          mask.height
+        );
+        expect(
+          globalLightMaskEdgeMax(generated, width, height, 1)
+        ).toBeLessThanOrEqual(2);
+      }
+      expect(hash(baked)).toBe(hash(generated));
     }
   );
 
@@ -133,6 +158,25 @@ describe("light pipeline baked assets", () => {
     expect(wallCommonWgsl.wgsl).toContain("params.microNormalFrequency");
     expect(wallCommonWgsl.wgsl).toContain("params.microNormalStrength");
     expect(wallCommonWgsl.wgsl).toContain("textureSampleBias");
+    expect(wallCommonWgsl.wgsl).toContain("GLOBAL_LIGHT_MASK_ASPECT = 1.5");
+    expect(wallCommonWgsl.wgsl).toMatch(
+      /wallAspect \/ \w*GLOBAL_LIGHT_MASK_ASPECT/
+    );
+    expect(wallCommonWgsl.wgsl).toMatch(
+      /screenUv\.y \* \w*GLOBAL_LIGHT_MASK_ASPECT \/ wallAspect/
+    );
+    expect(wallCommonWgsl.wgsl).toContain(
+      "material.r * globalDiffuse"
+    );
+    expect(wallCommonWgsl.wgsl).toContain("mix(0.25, 1.0, lightFacing)");
+    expect(wallCommonWgsl.wgsl).toContain("GLOBAL_LIGHT_TRANSFER = 2.2");
+    expect(wallCommonWgsl.wgsl).toContain("globalLightLinear");
+    expect(wallCommonWgsl.wgsl).toContain("globalBaseExposure");
+    expect(wallCommonWgsl.wgsl).toContain(
+      "direct * globalBaseExposure + globalIllumination"
+    );
+    expect(wallCommonWgsl.wgsl).toContain("globalSurfaceResponse");
+    expect(wallCommonWgsl.wgsl).not.toContain("albedo * globalLight");
     expect(wallCommonWgsl.wgsl).not.toContain(
       "textureSample(wallMaterial, materialSampler, screenUv)"
     );

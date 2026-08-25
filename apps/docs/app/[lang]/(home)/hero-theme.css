@@ -3,13 +3,13 @@
 :root {
   --home-hero-background: #000000;
   --home-hero-foreground: #ffffff;
-  --home-header-scrolled-background: #000000;
+  --home-page-background: #000000;
 }
 
 html.light {
-  --home-hero-background: #d8d2c8;
+  --home-hero-background: #d2ccc2;
   --home-hero-foreground: #111111;
-  --home-header-scrolled-background: #fafafa;
+  --home-page-background: #fafafa;
 }
 
 [data-hero-theme],
@@ -19,6 +19,10 @@ html.light {
 
 [data-hero-theme] {
   color: var(--home-hero-foreground);
+}
+
+body:has([data-hero-theme]) {
+  background-color: var(--home-page-background);
 }
 
 /* The package navbar is outside the home layout, so the home marker cannot
@@ -36,7 +40,7 @@ html[data-scrolled]
   body:has([data-hero-theme])
   [data-geistdocs-container]
   > header {
-  background-color: var(--home-header-scrolled-background);
+  background-color: var(--home-page-background);
 }
 
 @media (prefers-reduced-motion: reduce) {

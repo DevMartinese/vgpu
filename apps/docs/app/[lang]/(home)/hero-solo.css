@@ -12,62 +12,14 @@
   }
 }
 
-/* Ease the resolved scene into the hero surface before the section meets the
-   rest of the page. The same declaration works for black and light gray. */
+/* Ease only the bottom of the GPU scene into the regular page surface. */
 [data-hero-foot-fade] {
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--home-hero-background) 72%, transparent) 0%,
-    color-mix(in srgb, var(--home-hero-background) 52%, transparent) 24%,
-    color-mix(in srgb, var(--home-hero-background) 30%, transparent) 48%,
-    color-mix(in srgb, var(--home-hero-background) 13%, transparent) 72%,
+    var(--home-page-background) 0%,
+    color-mix(in srgb, var(--home-page-background) 72%, transparent) 24%,
+    color-mix(in srgb, var(--home-page-background) 38%, transparent) 52%,
+    color-mix(in srgb, var(--home-page-background) 14%, transparent) 76%,
     transparent 100%
   );
-}
-
-/* The GPU surface stays opaque; this final CSS layer eases its four edges into
-   the page rather than making the renderer theme-aware. Keep these dimensions
-   as custom properties so the amount of edge blending remains easy to tune. */
-[data-prism-edge-fade] {
-  --prism-edge-fade-color: var(--home-hero-background);
-  --prism-edge-fade-x: clamp(2.5rem, 7vw, 7rem);
-  --prism-edge-fade-y: clamp(2.5rem, 8svh, 6rem);
-
-  background:
-    linear-gradient(
-        to right,
-        var(--prism-edge-fade-color) 0%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 72%, transparent) 28%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 38%, transparent) 54%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 12%, transparent) 78%,
-        transparent 100%
-      )
-      left / var(--prism-edge-fade-x) 100% no-repeat,
-    linear-gradient(
-        to left,
-        var(--prism-edge-fade-color) 0%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 72%, transparent) 28%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 38%, transparent) 54%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 12%, transparent) 78%,
-        transparent 100%
-      )
-      right / var(--prism-edge-fade-x) 100% no-repeat,
-    linear-gradient(
-        to bottom,
-        var(--prism-edge-fade-color) 0%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 72%, transparent) 28%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 38%, transparent) 54%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 12%, transparent) 78%,
-        transparent 100%
-      )
-      top / 100% var(--prism-edge-fade-y) no-repeat,
-    linear-gradient(
-        to top,
-        var(--prism-edge-fade-color) 0%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 72%, transparent) 28%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 38%, transparent) 54%,
-        color-mix(in srgb, var(--prism-edge-fade-color) 12%, transparent) 78%,
-        transparent 100%
-      )
-      bottom / 100% var(--prism-edge-fade-y) no-repeat;
 }
