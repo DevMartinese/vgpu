@@ -50,4 +50,5 @@ export type DebugControl =
 export interface DebugControlGroup {
   readonly label: string;
   readonly controls: readonly DebugControl[];
+  readonly themeScoped?: boolean;
 }

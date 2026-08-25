@@ -1,16 +1,6 @@
 import type { PrismDebugSource, PrismPipelineMode } from "../pipelines/types";
 
-const COMMON_CONTROL_SOURCE_IDS = [
-  "scene-controls",
-  "beam-controls",
-  "spectral-controls",
-  "light-appearance",
-  "glass-transmission",
-  "environment-reflection",
-] as const;
-
 export const PRISM_DEBUG_SOURCE_IDS = [
-  ...COMMON_CONTROL_SOURCE_IDS,
   "wall-material",
   "wall-normal",
   "wall-roughness",
@@ -27,7 +17,6 @@ export const PRISM_DEBUG_SOURCE_IDS = [
 ] as const;
 
 export const PRISM_DARK_DEBUG_SOURCE_IDS = [
-  ...COMMON_CONTROL_SOURCE_IDS,
   "dark-wall",
   "dark-backdrop-hdr",
   "dark-front-glass",
@@ -43,20 +32,8 @@ export type PrismDebugSourceId =
   | (typeof PRISM_DEBUG_SOURCE_IDS)[number]
   | (typeof PRISM_DARK_DEBUG_SOURCE_IDS)[number];
 
-const CONTROL_SOURCES = [
-  source("scene-controls", "Camera / framing", "control", "none"),
-  source("beam-controls", "Beam geometry", "control", "none"),
-  source("spectral-controls", "Spectral optics", "control", "none"),
-  source("light-appearance", "Light appearance", "control", "none"),
-  source("glass-transmission", "Glass transmission", "control", "none"),
-  source("environment-reflection", "Environment reflection", "control", "none"),
-] as const satisfies readonly PrismDebugSource[];
-
 export const PRISM_DEBUG_SOURCES = [
-  ...CONTROL_SOURCES,
-  source("wall-material", "Wall material / albedo", "asset", "srgb", [
-    input("scene-controls", "wall color / projection"),
-  ]),
+  source("wall-material", "Wall material / albedo", "asset", "srgb"),
   source("wall-normal", "Wall normal", "view", "normal", [
     input("wall-material", "unpack GB"),
   ]),
@@ -69,9 +46,6 @@ export const PRISM_DEBUG_SOURCES = [
   source("raw-caustic", "Raw spectral caustic", "asset", "hdr"),
   source("projected-caustic", "Projected caustic", "view", "hdr", [
     input("raw-caustic", "project onto wall"),
-    input("beam-controls", "trace beam"),
-    input("spectral-controls", "refract spectrum"),
-    input("light-appearance", "attenuate radiance"),
   ]),
   source("composed-wall", "Composed wall", "pass", "hdr", [
     input("wall-material", "base color"),
@@ -84,13 +58,9 @@ export const PRISM_DEBUG_SOURCES = [
   ]),
   source("backdrop-hdr", "Backdrop HDR", "target", "hdr", [
     input("composed-wall", "Pass L0"),
-    input("glass-transmission", "back interface"),
-    input("environment-reflection", "back reflection"),
   ]),
   source("front-glass", "Front glass", "pass", "hdr", [
     input("backdrop-hdr", "transmit / reflect"),
-    input("glass-transmission", "IOR / absorption"),
-    input("environment-reflection", "studio cubemap"),
   ]),
   source("scene-hdr", "Scene HDR", "target", "hdr", [
     input("backdrop-hdr", "copy background"),
@@ -102,22 +72,12 @@ export const PRISM_DEBUG_SOURCES = [
 ] as const satisfies readonly PrismDebugSource[];
 
 export const PRISM_DARK_DEBUG_SOURCES = [
-  ...CONTROL_SOURCES,
-  source("dark-wall", "Dark wall", "pass", "none", [
-    input("scene-controls", "wall color / projection"),
-  ]),
+  source("dark-wall", "Dark wall", "pass", "none"),
   source("dark-backdrop-hdr", "Backdrop HDR", "target", "hdr", [
     input("dark-wall", "base wall"),
-    input("beam-controls", "trace beam"),
-    input("spectral-controls", "refract spectrum"),
-    input("light-appearance", "attenuate radiance"),
-    input("glass-transmission", "back interface"),
-    input("environment-reflection", "back reflection"),
   ]),
   source("dark-front-glass", "Front glass", "pass", "hdr", [
     input("dark-backdrop-hdr", "transmit / reflect"),
-    input("glass-transmission", "IOR / absorption"),
-    input("environment-reflection", "studio cubemap"),
   ]),
   source("dark-scene-hdr", "Scene HDR", "target", "hdr", [
     input("dark-backdrop-hdr", "copy background"),

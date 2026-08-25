@@ -186,7 +186,8 @@ const WALL_CONTROLS: readonly DebugControlGroup[] = [
 
 const TRANSMISSION_CONTROLS: readonly DebugControlGroup[] = [
   {
-    label: "Active theme",
+    label: "Transmission",
+    themeScoped: true,
     controls: [
       range(
         "glass-ior",
@@ -213,7 +214,8 @@ const TRANSMISSION_CONTROLS: readonly DebugControlGroup[] = [
 
 const REFLECTION_CONTROLS: readonly DebugControlGroup[] = [
   {
-    label: "Active theme",
+    label: "Environment reflection",
+    themeScoped: true,
     controls: [
       range(
         "reflection-strength",
@@ -272,21 +274,25 @@ export function controlGroupsForSource(
   mode: PrismTheme
 ): readonly DebugControlGroup[] {
   switch (sourceId) {
-    case "scene-controls":
+    case "scene-hdr":
+    case "dark-scene-hdr":
       return SCENE_CONTROLS;
-    case "beam-controls":
-      return BEAM_CONTROLS;
-    case "spectral-controls":
-      return SPECTRAL_CONTROLS;
-    case "light-appearance":
+    case "projected-caustic":
+      return [...BEAM_CONTROLS, ...SPECTRAL_CONTROLS];
+    case "backdrop-hdr":
       return LIGHT_APPEARANCE_CONTROLS;
+    case "dark-backdrop-hdr":
+      return [
+        ...BEAM_CONTROLS,
+        ...SPECTRAL_CONTROLS,
+        ...LIGHT_APPEARANCE_CONTROLS,
+      ];
     case "wall-material":
     case "dark-wall":
       return WALL_CONTROLS;
-    case "glass-transmission":
-      return TRANSMISSION_CONTROLS;
-    case "environment-reflection":
-      return REFLECTION_CONTROLS;
+    case "front-glass":
+    case "dark-front-glass":
+      return [...TRANSMISSION_CONTROLS, ...REFLECTION_CONTROLS];
     case "dark-bloom-composite":
       return mode === "dark" ? BLOOM_CONTROLS : [];
     default:

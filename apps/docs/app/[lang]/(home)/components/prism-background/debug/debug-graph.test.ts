@@ -20,6 +20,15 @@ describe("prism debug graph descriptors", () => {
     expectGraph(PRISM_DARK_DEBUG_SOURCES, PRISM_DARK_DEBUG_SOURCE_IDS);
   });
 
+  it("embeds controls into meaningful render nodes", () => {
+    expect(PRISM_DEBUG_SOURCES.some(({ kind }) => kind === "control")).toBe(
+      false
+    );
+    expect(
+      PRISM_DARK_DEBUG_SOURCES.some(({ kind }) => kind === "control")
+    ).toBe(false);
+  });
+
   it.each([
     ["light", PRISM_DEBUG_SOURCES],
     ["dark", PRISM_DARK_DEBUG_SOURCES],

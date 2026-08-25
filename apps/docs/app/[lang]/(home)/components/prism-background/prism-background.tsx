@@ -49,6 +49,8 @@ export function PrismBackground() {
   const [debugControls, setDebugControls] = useState<PrismControls>(
     DEFAULT_PRISM_CONTROLS
   );
+  const [debugBaselineControls, setDebugBaselineControls] =
+    useState<PrismControls>(DEFAULT_PRISM_CONTROLS);
   const [debugMode, setDebugMode] = useState<PrismPipelineMode>("dark");
   const reportError = useCallback((error: unknown) => {
     console.error("Prism background failed to render.", error);
@@ -83,6 +85,7 @@ export function PrismBackground() {
     };
     controlsRef.current = initialControls;
     setDebugControls(initialControls);
+    setDebugBaselineControls(initialControls);
     const renderer = createRenderer({
       canvas,
       framingElement: framingElement ?? undefined,
@@ -99,6 +102,11 @@ export function PrismBackground() {
     const syncTheme = () => {
       const mode = currentPrismMode();
       const wallColor = heroBackgroundColor(canvas);
+      setDebugBaselineControls((current) =>
+        current.wallColor === wallColor
+          ? current
+          : { ...DEFAULT_PRISM_CONTROLS, wallColor }
+      );
       if (wallColor !== controlsRef.current.wallColor) {
         const nextControls = { ...controlsRef.current, wallColor };
         controlsRef.current = nextControls;
@@ -144,6 +152,7 @@ export function PrismBackground() {
       {showDebug ? (
         <Suspense fallback={null}>
           <PrismDebugGraph
+            baselineControls={debugBaselineControls}
             bridge={rendererRef.current?.debugBridge}
             controls={debugControls}
             mode={debugMode}

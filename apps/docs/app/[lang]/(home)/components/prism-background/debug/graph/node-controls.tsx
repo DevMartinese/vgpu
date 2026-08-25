@@ -30,7 +30,7 @@ function ControlGroups({ groups, mode, sourceId }: ControlGroupsProps) {
 
   return (
     <div
-      className="nodrag nopan nowheel prism-debug-node__controls"
+      className="nodrag nopan prism-debug-node__controls"
       data-debug-controls={sourceId}
       onPointerDown={stopPropagation}
     >
@@ -38,7 +38,7 @@ function ControlGroups({ groups, mode, sourceId }: ControlGroupsProps) {
         <fieldset key={group.label}>
           <legend>
             {group.label}
-            {group.label === "Active theme" ? <span>{mode}</span> : null}
+            {group.themeScoped ? <span>{mode}</span> : null}
           </legend>
           {group.controls.map((control) => (
             <Control

@@ -22,12 +22,11 @@ export type PrismDebugGraphModel = {
 };
 
 const COLUMN_GAP = 340;
-const CONTROL_COLUMNS = 2;
 const NODE_GAP = 24;
 const PREVIEW_NODE_HEIGHT = 190;
+const NON_PREVIEW_NODE_HEIGHT = 58;
 const CONTROL_ROW_HEIGHT = 46;
 const CONTROL_GROUP_HEIGHT = 28;
-const CONTROL_NODE_BASE_HEIGHT = 58;
 
 /** Builds a deterministic left-to-right layout without React-owned graph state. */
 export function createDebugGraphModel(
@@ -37,22 +36,16 @@ export function createDebugGraphModel(
 ): PrismDebugGraphModel {
   const knownIds = new Set(sources.map(({ id }) => id));
   const depthOf = createDepthResolver(sources);
-  const controlPositions = layoutControlNodes(sources, mode);
   const nextYByDepth = new Map<number, number>();
 
   const nodes = sources.map<PrismDebugFlowNode>((source) => {
     const depth = depthOf(source.id);
-    const controlPosition = controlPositions.get(source.id);
-    const y = controlPosition?.y ?? nextYByDepth.get(depth) ?? 0;
-    if (!controlPosition)
-      nextYByDepth.set(depth, y + estimatedNodeHeight(source, mode) + NODE_GAP);
+    const y = nextYByDepth.get(depth) ?? 0;
+    nextYByDepth.set(depth, y + estimatedNodeHeight(source, mode) + NODE_GAP);
     return {
       id: source.id,
       type: "prismDebug",
-      position: controlPosition ?? {
-        x: (depth + CONTROL_COLUMNS) * COLUMN_GAP,
-        y,
-      },
+      position: { x: depth * COLUMN_GAP, y },
       data: { bridge, mode, source },
       draggable: false,
       selectable: false,
@@ -83,28 +76,6 @@ export function createDebugGraphModel(
   return { nodes, edges };
 }
 
-function layoutControlNodes(
-  sources: readonly PrismDebugSource[],
-  mode: PrismPipelineMode
-): ReadonlyMap<string, { readonly x: number; readonly y: number }> {
-  const controls = sources.filter(({ kind }) => kind === "control");
-  const positions = new Map<
-    string,
-    { readonly x: number; readonly y: number }
-  >();
-  let y = 0;
-  for (let index = 0; index < controls.length; index += CONTROL_COLUMNS) {
-    const row = controls.slice(index, index + CONTROL_COLUMNS);
-    row.forEach((source, column) => {
-      positions.set(source.id, { x: column * COLUMN_GAP, y });
-    });
-    y +=
-      Math.max(...row.map((source) => estimatedNodeHeight(source, mode))) +
-      NODE_GAP;
-  }
-  return positions;
-}
-
 function estimatedNodeHeight(
   source: PrismDebugSource,
   mode: PrismPipelineMode
@@ -116,7 +87,7 @@ function estimatedNodeHeight(
   );
   return (
     (source.visualization === "none"
-      ? CONTROL_NODE_BASE_HEIGHT
+      ? NON_PREVIEW_NODE_HEIGHT
       : PREVIEW_NODE_HEIGHT) +
     groups.length * CONTROL_GROUP_HEIGHT +
     controlCount * CONTROL_ROW_HEIGHT

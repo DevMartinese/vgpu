@@ -28,12 +28,13 @@ export function PreviewCanvas({ bridge, source }: PreviewCanvasProps) {
       detach = undefined;
     };
 
-    if (typeof IntersectionObserver === "undefined") {
+    const Observer = canvas.ownerDocument.defaultView?.IntersectionObserver;
+    if (!Observer) {
       attach();
       return release;
     }
 
-    const observer = new IntersectionObserver(
+    const observer = new Observer(
       ([entry]) => (entry?.isIntersecting ? attach() : release()),
       {
         root: canvas.closest<HTMLElement>(".react-flow"),

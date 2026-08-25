@@ -13,28 +13,26 @@ import type {
   DebugSelectControl,
 } from "./control-types";
 
-const COMMON_CONTROL_NODES = [
-  "scene-controls",
-  "beam-controls",
-  "spectral-controls",
-  "light-appearance",
+const LIGHT_CONTROL_NODES = [
+  "scene-hdr",
+  "projected-caustic",
+  "backdrop-hdr",
   "wall-material",
-  "glass-transmission",
-  "environment-reflection",
+  "front-glass",
+];
+
+const DARK_CONTROL_NODES = [
+  "dark-scene-hdr",
+  "dark-backdrop-hdr",
+  "dark-wall",
+  "dark-front-glass",
+  "dark-bloom-composite",
 ];
 
 describe("React Flow prism controls", () => {
   test("splits shared, theme material, and dark-only bloom controls", () => {
-    const light = controlIds(COMMON_CONTROL_NODES, "light");
-    const dark = controlIds(
-      [
-        ...COMMON_CONTROL_NODES.slice(0, 4),
-        "dark-wall",
-        ...COMMON_CONTROL_NODES.slice(5),
-        "dark-bloom-composite",
-      ],
-      "dark"
-    );
+    const light = controlIds(LIGHT_CONTROL_NODES, "light");
+    const dark = controlIds(DARK_CONTROL_NODES, "dark");
 
     expect(light).toHaveLength(18);
     expect(dark).toHaveLength(21);
@@ -57,9 +55,12 @@ describe("React Flow prism controls", () => {
   });
 
   test("shows custom coefficients honestly and restores complete presets", () => {
-    const preset = selectControl("spectral-controls", "dispersion-preset");
-    const base = rangeControl("spectral-controls", "dispersion-base");
-    const strength = rangeControl("spectral-controls", "dispersion-strength");
+    const preset = selectControl("projected-caustic", "dispersion-preset");
+    const base = rangeControl("projected-caustic", "dispersion-base");
+    const strength = rangeControl(
+      "projected-caustic",
+      "dispersion-strength"
+    );
     expect(preset.read(DEFAULT_PRISM_CONTROLS, "dark")).toBe("custom");
 
     const flint: PrismControls = {
@@ -81,12 +82,9 @@ describe("React Flow prism controls", () => {
 
   test("edits only the active glass theme without mutating defaults", () => {
     const before = structuredClone(DEFAULT_PRISM_CONTROLS);
-    const ior = rangeControl("glass-transmission", "glass-ior");
-    const absorption = rangeControl("glass-transmission", "absorption-b");
-    const reflection = rangeControl(
-      "environment-reflection",
-      "reflection-strength"
-    );
+    const ior = rangeControl("front-glass", "glass-ior");
+    const absorption = rangeControl("front-glass", "absorption-b");
+    const reflection = rangeControl("front-glass", "reflection-strength");
 
     let next = ior.write(DEFAULT_PRISM_CONTROLS, "light", 1.81);
     next = absorption.write(next, "light", 0.25);
@@ -107,17 +105,14 @@ describe("React Flow prism controls", () => {
   });
 
   test("clamps manually entered numbers to the former GUI ranges", () => {
-    const reflection = rangeControl(
-      "environment-reflection",
-      "reflection-strength"
-    );
+    const reflection = rangeControl("front-glass", "reflection-strength");
     expect(clampDebugRangeValue(reflection, 999)).toBe(reflection.max);
     expect(clampDebugRangeValue(reflection, -999)).toBe(reflection.min);
   });
 
   test("functional patches preserve the latest theme-derived wall color", () => {
-    const width = rangeControl("beam-controls", "beam-width");
-    const opacity = rangeControl("light-appearance", "beam-opacity");
+    const width = rangeControl("projected-caustic", "beam-width");
+    const opacity = rangeControl("backdrop-hdr", "beam-opacity");
     let current: PrismControls = {
       ...DEFAULT_PRISM_CONTROLS,
       wallColor: "#d2ccc2",
