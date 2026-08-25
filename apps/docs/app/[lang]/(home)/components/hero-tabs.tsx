@@ -82,7 +82,7 @@ export function HeroTabs() {
   return (
     // No `gap` on the column: the rule carries its own asymmetric margins (see
     // below), and a gap would add to both sides equally.
-    <div className="flex w-full flex-col">
+    <div data-hero-tabs className="flex w-full flex-col">
       <div
         data-hero-tabs-list
         role="tablist"
@@ -92,7 +92,7 @@ export function HeroTabs() {
         {tabs.map((tab, index) => (
           <Fragment key={tab}>
             {index > 0 && (
-              <span aria-hidden className="px-2 text-white">
+              <span aria-hidden className="px-2">
                 ·
               </span>
             )}
@@ -101,11 +101,11 @@ export function HeroTabs() {
               role="tab"
               aria-selected={activeTab === tab}
               onClick={() => selectTab(tab)}
-              className={
+              className={`text-current transition-opacity ${
                 activeTab === tab
-                  ? "text-white"
-                  : "text-white/50 hover:text-white/80"
-              }
+                  ? "opacity-100"
+                  : "opacity-50 hover:opacity-80"
+              }`}
             >
               {tab}
             </button>
@@ -134,8 +134,9 @@ export function HeroTabs() {
         roughly 25/14px of measured ink-to-ink spacing.
       */}
       <div
+        data-hero-tabs-rule
         aria-hidden
-        className="mb-2 mt-5 h-px w-full bg-[linear-gradient(to_right,transparent,#FFF_10%,transparent)]"
+        className="mb-2 mt-5 h-px w-full"
       />
 
       <button
@@ -143,7 +144,7 @@ export function HeroTabs() {
         type="button"
         onClick={copy}
         aria-label={copied ? "Copied" : `Copy: ${stripBackticks(content)}`}
-        className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-white/90 transition-opacity hover:text-white lg:text-[16px]"
+        className="group relative w-full px-7 text-center text-[15px] leading-relaxed text-current opacity-90 transition-opacity hover:opacity-100 lg:text-[16px]"
       >
         {/*
           Every snippet is rendered, stacked in one grid cell, and crossfaded.

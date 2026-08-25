@@ -2,6 +2,18 @@ import { useEffect, useRef } from "react";
 import GUI, { type Controller } from "lil-gui";
 
 import {
+  addReflectionFolders,
+  reflectionGuiValues,
+  type ReflectionGuiValuesByTheme,
+} from "./controls/reflection";
+import {
+  addTransmissionFolders,
+  transmissionFromGui,
+  transmissionGuiValues,
+  type TransmissionGuiValuesByTheme,
+} from "./controls/transmission";
+import { normalizeControls } from "./runtime/normalize-controls";
+import {
   DEFAULT_PRISM_CONTROLS,
   PRISM_BEAM_MOUSE_Y_RANGES,
   PRISM_BEAM_WIDTH_RANGE,
@@ -9,7 +21,6 @@ import {
   PRISM_DISPERSION_LABELS,
   PRISM_DISPERSION_ORDER,
   PRISM_DISPERSION_PRESETS,
-  PRISM_GLASS_RANGES,
   PRISM_LIGHT_FADE_RANGES,
   PRISM_POSTPROCESS_RANGES,
   PRISM_SPECTRAL_DISPERSION_RANGES,
@@ -44,12 +55,8 @@ interface GuiValues {
   wireframe: boolean;
   lightWireframe: boolean;
   environmentDebug: boolean;
-  ior: number;
-  reflectionStrength: number;
-  absorptionR: number;
-  absorptionG: number;
-  absorptionB: number;
-  environmentExposure: number;
+  transmission: TransmissionGuiValuesByTheme;
+  reflection: ReflectionGuiValuesByTheme;
   bloomStrength: number;
   bloomThreshold: number;
   bloomRadius: number;
@@ -82,7 +89,7 @@ export function Controls({
 
     // Fall back per-field as well as per-object so Fast Refresh can safely
     // cross control-schema changes without rebuilding the renderer.
-    const glass = initialValue.glass ?? DEFAULT_PRISM_CONTROLS.glass;
+    const glass = normalizeControls(initialValue).glass;
     const postprocess =
       initialValue.postprocess ?? DEFAULT_PRISM_CONTROLS.postprocess;
     const lightFade =
@@ -92,8 +99,6 @@ export function Controls({
     const legacyLightFade = lightFade as typeof lightFade & {
       rainbowFalloff?: number;
     };
-    const absorption =
-      glass.absorption ?? DEFAULT_PRISM_CONTROLS.glass.absorption;
     const spectralDispersion =
       initialValue.spectralDispersion ??
       PRISM_DISPERSION_PRESETS[
@@ -130,16 +135,8 @@ export function Controls({
       environmentDebug:
         initialValue.environmentDebug ??
         DEFAULT_PRISM_CONTROLS.environmentDebug,
-      ior: glass.ior ?? DEFAULT_PRISM_CONTROLS.glass.ior,
-      reflectionStrength:
-        glass.reflectionStrength ??
-        DEFAULT_PRISM_CONTROLS.glass.reflectionStrength,
-      absorptionR: absorption[0] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[0],
-      absorptionG: absorption[1] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[1],
-      absorptionB: absorption[2] ?? DEFAULT_PRISM_CONTROLS.glass.absorption[2],
-      environmentExposure:
-        glass.environmentExposure ??
-        DEFAULT_PRISM_CONTROLS.glass.environmentExposure,
+      transmission: transmissionGuiValues(glass.transmission),
+      reflection: reflectionGuiValues(glass.reflection),
       bloomStrength:
         postprocess.bloomStrength ??
         DEFAULT_PRISM_CONTROLS.postprocess.bloomStrength,
@@ -185,14 +182,14 @@ export function Controls({
         lightWireframe: values.lightWireframe,
         environmentDebug: values.environmentDebug,
         glass: {
-          ior: values.ior,
-          reflectionStrength: values.reflectionStrength,
-          absorption: [
-            values.absorptionR,
-            values.absorptionG,
-            values.absorptionB,
-          ],
-          environmentExposure: values.environmentExposure,
+          transmission: {
+            dark: transmissionFromGui(values.transmission.dark),
+            light: transmissionFromGui(values.transmission.light),
+          },
+          reflection: {
+            dark: { ...values.reflection.dark },
+            light: { ...values.reflection.light },
+          },
         },
         postprocess: {
           bloomStrength: values.bloomStrength,
@@ -207,8 +204,16 @@ export function Controls({
     const lightFolder = gui.addFolder("Light fade");
     const cameraFolder = gui.addFolder("Camera");
     const glassFolder = gui.addFolder("Glass");
-    const transmissionFolder = glassFolder.addFolder("Transmission");
-    const reflectionFolder = glassFolder.addFolder("Reflection");
+    const transmissionControllers = addTransmissionFolders(
+      glassFolder,
+      values.transmission,
+      publish
+    );
+    const reflectionControllers = addReflectionFolders(
+      glassFolder,
+      values.reflection,
+      publish
+    );
     const postprocessFolder = gui.addFolder("Postprocessing");
     const debugFolder = gui.addFolder("Debug");
     const dispersionPresetController = spectralFolder
@@ -334,66 +339,8 @@ export function Controls({
         )
         .name("FOV")
         .onChange(publish),
-      transmissionFolder
-        .add(
-          values,
-          "ior",
-          PRISM_GLASS_RANGES.ior.min,
-          PRISM_GLASS_RANGES.ior.max,
-          PRISM_GLASS_RANGES.ior.step
-        )
-        .name("surface IOR")
-        .onChange(publish),
-      transmissionFolder
-        .add(
-          values,
-          "absorptionR",
-          PRISM_GLASS_RANGES.absorption.min,
-          PRISM_GLASS_RANGES.absorption.max,
-          PRISM_GLASS_RANGES.absorption.step
-        )
-        .name("absorption R")
-        .onChange(publish),
-      transmissionFolder
-        .add(
-          values,
-          "absorptionG",
-          PRISM_GLASS_RANGES.absorption.min,
-          PRISM_GLASS_RANGES.absorption.max,
-          PRISM_GLASS_RANGES.absorption.step
-        )
-        .name("absorption G")
-        .onChange(publish),
-      transmissionFolder
-        .add(
-          values,
-          "absorptionB",
-          PRISM_GLASS_RANGES.absorption.min,
-          PRISM_GLASS_RANGES.absorption.max,
-          PRISM_GLASS_RANGES.absorption.step
-        )
-        .name("absorption B")
-        .onChange(publish),
-      reflectionFolder
-        .add(
-          values,
-          "reflectionStrength",
-          PRISM_GLASS_RANGES.reflectionStrength.min,
-          PRISM_GLASS_RANGES.reflectionStrength.max,
-          PRISM_GLASS_RANGES.reflectionStrength.step
-        )
-        .name("strength")
-        .onChange(publish),
-      reflectionFolder
-        .add(
-          values,
-          "environmentExposure",
-          PRISM_GLASS_RANGES.environmentExposure.min,
-          PRISM_GLASS_RANGES.environmentExposure.max,
-          PRISM_GLASS_RANGES.environmentExposure.step
-        )
-        .name("env exposure")
-        .onChange(publish),
+      ...transmissionControllers,
+      ...reflectionControllers,
       postprocessFolder
         .add(
           values,

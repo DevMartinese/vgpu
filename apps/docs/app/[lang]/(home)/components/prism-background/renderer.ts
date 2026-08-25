@@ -5,48 +5,64 @@ import type {
   BrowserRendererOptions,
   ExampleRenderer,
   RenderSize,
-  ThumbnailOptions,
 } from "@/lib/example-renderer";
 import {
-  createScene,
-  destroyScene,
-  prepareScene,
-  presentScene,
-  resizeScene,
-  setControls,
-  setFramingViewport,
-  setLampAim,
-  setLampArc,
-  setOrbit,
-  type PrismScene,
-} from "./scene";
+  createPrismDebugPreviewRelay,
+  NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+} from "./debug/preview-bridge";
+import type { PrismDebugPreviewBridge } from "./debug/preview-bridge";
+import type { PrismDebugPreviewHost } from "./debug/gpu";
 import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
+import { createPrismPipelineController } from "./pipeline-controller";
+import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
+import { createPrismInteraction } from "./runtime/interaction";
+import { createPrismRuntime, destroyPrismRuntime } from "./runtime/resources";
 import {
-  CAMERA_ORBIT_LERP,
-  DEFAULT_PRISM_CONTROLS,
-  LAMP_AIM_LERP,
-  PRISM_DEFAULT_ARC,
-  type PrismControls,
-} from "./types";
+  setRuntimeControls,
+  setRuntimeFramingViewport,
+  setRuntimeLampAim,
+  setRuntimeOrbit,
+} from "./runtime/state";
+import type { PrismRuntime } from "./runtime/types";
+import type { PrismThumbnailOptions } from "./thumbnail";
+import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
 
-export type PrismRenderer = ExampleRenderer<PrismControls>;
+export type { PrismThumbnailOptions } from "./thumbnail";
+
+/** Keep thumbnail-only scene code outside the interactive homepage chunk. */
+export async function renderThumbnail(
+  gpu: Gpu,
+  output: Target,
+  options: PrismThumbnailOptions = {}
+): Promise<void> {
+  const thumbnail = await import("./thumbnail");
+  return thumbnail.renderThumbnail(gpu, output, options);
+}
+
+export interface PrismRenderer extends ExampleRenderer<PrismControls> {
+  /** Stable bridge identity; GPU-backed previews can replace its internals. */
+  readonly debugBridge: PrismDebugPreviewBridge;
+  debugSources(): readonly PrismDebugSource[];
+  setMode(mode: PrismPipelineMode): Promise<void>;
+}
 const DUST_FPS = 30;
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
   /** DOM slot whose canvas-relative bounds should contain the prism. */
   readonly framingElement?: HTMLElement;
-}
-
-export interface PrismThumbnailOptions extends ThumbnailOptions {
-  readonly controls?: PrismControls;
-  readonly lampArc?: number;
-  readonly orbit?: readonly [number, number];
+  /** Explicit theme selected by the React integration layer. */
+  readonly initialMode: PrismPipelineMode;
+  /** Loads preview-only WebGPU code; must only be enabled for `?debug`. */
+  readonly debugPreviews?: boolean;
 }
 
 export function createRenderer(
   options: PrismBrowserRendererOptions
 ): PrismRenderer {
+  const debugRelay = options.debugPreviews
+    ? createPrismDebugPreviewRelay()
+    : undefined;
   let disposed = false;
   let reportedError = false;
   let controls: PrismControls =
@@ -54,23 +70,26 @@ export function createRenderer(
   let gpu: Gpu | undefined;
   let gpuClock: ReturnType<typeof clock> | undefined;
   let canvasSurface: Surface | undefined;
-  let scene: PrismScene | undefined;
-  let prepared = false;
+  let runtime: PrismRuntime | undefined;
+  let pipelineController:
+    | ReturnType<typeof createPrismPipelineController>
+    | undefined;
+  let debugHost: PrismDebugPreviewHost | undefined;
+  let requestedMode = options.initialMode;
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
   let resizeFrame = 0;
   let pendingSize: RenderSize | undefined;
   let pendingFraming: NormalizedViewport | undefined;
   let framingPending = false;
-  /** Where the camera is being asked to look, and where it currently looks. */
-  let orbitTarget: readonly [number, number] = [0, 0];
-  let orbitCurrent: readonly [number, number] = [0, 0];
-  /** Requested and rendered lamp positions, both normalized to the viewport. */
-  let aimTarget: readonly [number, number] = [PRISM_DEFAULT_ARC, 0.5];
-  let aimCurrent: readonly [number, number] = [PRISM_DEFAULT_ARC, 0.5];
   /** Set whenever the picture would differ from the frame already on screen. */
   let pendingPresent = true;
+  /** Wakes preview-only passes without forcing the production scene to redraw. */
+  let debugPending = false;
   let lastDustTime = -1;
+  const interaction = createPrismInteraction(options.canvas, () => {
+    pendingPresent = true;
+  });
 
   const handleFailure = (error: unknown) => {
     if (disposed) return;
@@ -85,6 +104,15 @@ export function createRenderer(
     dispose();
   };
 
+  const reportRecoverableFailure = (error: unknown) => {
+    if (disposed) return;
+    try {
+      options.onError?.(error);
+    } catch {
+      /* reporting a recoverable failure must not affect the active renderer */
+    }
+  };
+
   const applyResize = () => {
     resizeFrame = 0;
     const size = pendingSize;
@@ -93,14 +121,16 @@ export function createRenderer(
     pendingSize = undefined;
     pendingFraming = undefined;
     framingPending = false;
-    if (disposed || !size || !canvasSurface || !scene) return;
+    if (disposed || !size || !canvasSurface || !pipelineController || !runtime)
+      return;
     try {
       canvasSurface.resize([
         Math.max(1, Math.round(size.width * size.dpr)),
         Math.max(1, Math.round(size.height * size.dpr)),
       ]);
-      resizeScene(scene, canvasSurface.size);
-      if (shouldApplyFraming) setFramingViewport(scene, framing);
+      pipelineController.resize(canvasSurface.size);
+      if (shouldApplyFraming) setRuntimeFramingViewport(runtime, framing);
+      debugHost?.invalidate();
       pendingPresent = true;
     } catch (error) {
       handleFailure(error);
@@ -129,100 +159,39 @@ export function createRenderer(
     });
   };
 
-  /** Pointer height swings the source; pointer width chooses its point of impact. */
-  const aimFromPointer = (event: PointerEvent) => {
-    const rect = options.canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const clampUnit = (value: number) => Math.min(1, Math.max(0, value));
-    aimTarget = [
-      clampUnit((event.clientY - rect.top) / rect.height),
-      clampUnit((event.clientX - rect.left) / rect.width),
-    ];
-    pendingPresent = true;
-  };
-
-  /**
-   * Hovering tilts the camera a couple of degrees. It never touches the
-   * light mesh: it already lives on a world-space plane inside the prism, so
-   * only its camera projection changes.
-   */
-  const orbitFromPointer = (event: PointerEvent) => {
-    const rect = options.canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const clampOrbit = (value: number) => Math.min(1, Math.max(-1, value));
-    orbitTarget = [
-      clampOrbit(((event.clientX - rect.left) / rect.width) * 2 - 1),
-      clampOrbit(((event.clientY - rect.top) / rect.height) * 2 - 1),
-    ];
-  };
-
-  const onPointerMove = (event: PointerEvent) => {
-    if (event.isPrimary === false) return;
-    orbitFromPointer(event);
-    aimFromPointer(event);
-  };
-  const onPointerLeave = () => {
-    orbitTarget = [0, 0];
-  };
-
-  /**
-   * Eases the camera towards where the pointer left it. Returns whether it moved
-   * far enough to be worth redrawing.
-   */
-  const stepOrbit = (): boolean => {
-    const dx = orbitTarget[0] - orbitCurrent[0];
-    const dy = orbitTarget[1] - orbitCurrent[1];
-    if (Math.abs(dx) < 1e-4 && Math.abs(dy) < 1e-4) {
-      if (
-        orbitCurrent[0] === orbitTarget[0] &&
-        orbitCurrent[1] === orbitTarget[1]
-      )
-        return false;
-      orbitCurrent = orbitTarget;
-      return true;
-    }
-    orbitCurrent = [
-      orbitCurrent[0] + dx * CAMERA_ORBIT_LERP,
-      orbitCurrent[1] + dy * CAMERA_ORBIT_LERP,
-    ];
-    return true;
-  };
-
-  /** Eases both the source angle and its point of impact towards the pointer. */
-  const stepAim = (): boolean => {
-    const dArc = aimTarget[0] - aimCurrent[0];
-    const dTarget = aimTarget[1] - aimCurrent[1];
-    if (Math.abs(dArc) < 1e-4 && Math.abs(dTarget) < 1e-4) {
-      if (aimCurrent[0] === aimTarget[0] && aimCurrent[1] === aimTarget[1])
-        return false;
-      aimCurrent = aimTarget;
-      return true;
-    }
-    aimCurrent = [
-      aimCurrent[0] + dArc * LAMP_AIM_LERP,
-      aimCurrent[1] + dTarget * LAMP_AIM_LERP,
-    ];
-    return true;
-  };
-
   const tick = (currentFrame: Frame) => {
-    if (disposed || !scene || !canvasSurface || !prepared) return;
-    const aimMoved = stepAim();
-    const orbitMoved = stepOrbit();
-    const updateScene = aimMoved || orbitMoved || pendingPresent;
+    const pipeline = pipelineController?.pipeline;
+    if (disposed || !runtime || !pipeline || !canvasSurface) return;
+    const aim = interaction.stepAim();
+    const orbit = interaction.stepOrbit();
+    const updateScene = !!aim || !!orbit || pendingPresent;
     const dustTime = gpuClock
       ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS
       : 0;
-    const dustMoved = controls.view === "glass" && dustTime !== lastDustTime;
-    if (!updateScene && !dustMoved) return;
+    const dustMoved =
+      pipeline.mode === "dark" &&
+      controls.view === "glass" &&
+      dustTime !== lastDustTime;
+    if (!updateScene && !dustMoved && !debugPending) return;
+    if (updateScene || dustMoved) {
+      try {
+        if (aim) setRuntimeLampAim(runtime, aim[0], aim[1]);
+        if (orbit) setRuntimeOrbit(runtime, orbit[0], orbit[1]);
+        if (aim || orbit) debugHost?.invalidate();
+        pipeline.bind(dustTime);
+        pipeline.render(currentFrame, canvasSurface, { updateScene });
+        pendingPresent = false;
+        lastDustTime = dustTime;
+      } catch (error) {
+        handleFailure(error);
+        return;
+      }
+    }
+    debugPending = false;
     try {
-      if (aimMoved) setLampAim(scene, aimCurrent[0], aimCurrent[1]);
-      if (orbitMoved) setOrbit(scene, orbitCurrent[0], orbitCurrent[1]);
-      presentScene(scene, canvasSurface, currentFrame, dustTime, updateScene);
-      pendingPresent = false;
-      lastDustTime = dustTime;
+      debugHost?.render(currentFrame, gpuClock?.time ?? 0);
     } catch (error) {
-      handleFailure(error);
+      reportRecoverableFailure(error);
     }
   };
 
@@ -238,17 +207,40 @@ export function createRenderer(
     framingPending = false;
     observer?.disconnect();
     observer = undefined;
-    window.removeEventListener("pointermove", onPointerMove as EventListener);
-    window.removeEventListener("blur", onPointerLeave);
+    window.removeEventListener(
+      "pointermove",
+      interaction.onPointerMove as EventListener
+    );
+    window.removeEventListener("blur", interaction.onPointerLeave);
     if (typeof window !== "undefined")
       window.removeEventListener("resize", measure);
-    if (scene) destroyScene(scene);
-    scene = undefined;
-    canvasSurface?.dispose();
+
+    debugRelay?.setDelegate(NOOP_PRISM_DEBUG_PREVIEW_BRIDGE);
+    debugHost?.dispose();
+    debugHost = undefined;
+    debugRelay?.dispose();
+
+    const controller = pipelineController;
+    const ownedRuntime = runtime;
+    const ownedSurface = canvasSurface;
+    const ownedGpu = gpu;
+    pipelineController = undefined;
+    runtime = undefined;
     canvasSurface = undefined;
-    gpu?.dispose();
     gpu = undefined;
     gpuClock = undefined;
+
+    const finishResourceCleanup = () => {
+      if (ownedRuntime) destroyPrismRuntime(ownedRuntime);
+      ownedSurface?.dispose();
+      ownedGpu?.dispose();
+    };
+    const pendingCleanup = controller?.destroy();
+    if (pendingCleanup) {
+      void pendingCleanup.then(finishResourceCleanup, finishResourceCleanup);
+    } else {
+      finishResourceCleanup();
+    }
   }
 
   const initialize = async () => {
@@ -261,12 +253,42 @@ export function createRenderer(
     }
     gpu = nextGpu;
     canvasSurface = surface(gpu, options.canvas, { dpr: [1, 2] });
-    scene = createScene(gpu, canvasSurface.size, "prism-rainbow");
-    setControls(scene, controls);
-    window.addEventListener("pointermove", onPointerMove as EventListener, {
-      passive: true,
+    runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow");
+    setRuntimeControls(runtime, controls);
+    pipelineController = createPrismPipelineController({
+      runtime,
+      output: canvasSurface,
+      initialMode: requestedMode,
+      onActivate: () => {
+        pendingPresent = true;
+        lastDustTime = -1;
+        debugHost?.invalidate();
+      },
     });
-    window.addEventListener("blur", onPointerLeave);
+    if (options.debugPreviews) {
+      try {
+        const { createPrismDebugPreviewHost } = await import("./debug/gpu");
+        if (disposed || !gpu || !runtime || !pipelineController) return;
+        debugHost = createPrismDebugPreviewHost({
+          gpu,
+          runtime,
+          getPipeline: () => pipelineController?.pipeline,
+          invalidate: () => {
+            debugPending = true;
+          },
+          onError: reportRecoverableFailure,
+        });
+        debugRelay?.setDelegate(debugHost.bridge);
+      } catch (error) {
+        reportRecoverableFailure(error);
+      }
+    }
+    window.addEventListener(
+      "pointermove",
+      interaction.onPointerMove as EventListener,
+      { passive: true }
+    );
+    window.addEventListener("blur", interaction.onPointerLeave);
     observer =
       typeof ResizeObserver === "undefined"
         ? undefined
@@ -275,9 +297,8 @@ export function createRenderer(
     if (options.framingElement) observer?.observe(options.framingElement);
     window.addEventListener("resize", measure);
     measure();
-    await prepareScene(scene, canvasSurface);
+    await pipelineController.ready;
     if (disposed) return;
-    prepared = true;
     gpuClock = clock(gpu);
     loop = frameLoop(gpu, tick);
   };
@@ -290,41 +311,44 @@ export function createRenderer(
 
   return {
     ready,
+    debugBridge: debugRelay?.bridge ?? NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+    debugSources() {
+      return pipelineController?.debugSources() ?? [];
+    },
+    async setMode(mode) {
+      if (disposed) return;
+      requestedMode = mode;
+      if (!pipelineController) {
+        await ready;
+        return;
+      }
+      try {
+        await pipelineController.setMode(mode);
+        if (disposed) return;
+        pendingPresent = true;
+        lastDustTime = -1;
+        debugHost?.invalidate();
+      } catch (error) {
+        if (disposed) return;
+        // The controller deliberately retains the previous active pipeline
+        // when a candidate module or prepare fails. Report and reject the
+        // switch without tearing that valid renderer down.
+        reportRecoverableFailure(error);
+        throw error;
+      }
+    },
     setControls(next) {
       if (disposed) return;
       controls = { ...next };
       pendingPresent = true;
-      if (scene) setControls(scene, controls);
+      if (runtime) setRuntimeControls(runtime, controls);
+      debugHost?.invalidate();
     },
     invalidate() {
       pendingPresent = true;
+      debugHost?.invalidate();
     },
     resize,
     dispose,
   };
-}
-
-/**
- * Headless render used for the gallery thumbnail and by the Node GPU tests.
- *
- * Particle positions are deterministic and their animation is pinned to time
- * zero, so one frame remains the final image.
- */
-export async function renderThumbnail(
-  gpu: Gpu,
-  output: Target,
-  options: PrismThumbnailOptions = {}
-): Promise<void> {
-  const scene = createScene(gpu, output.size, "prism-rainbow-thumb");
-  try {
-    if (options.controls) setControls(scene, options.controls);
-    if (options.lampArc !== undefined) setLampArc(scene, options.lampArc);
-    if (options.orbit) setOrbit(scene, options.orbit[0], options.orbit[1]);
-    await prepareScene(scene, output);
-    presentScene(scene, output);
-    await gpu.gpu.queue.onSubmittedWorkDone();
-    await gpu.settled();
-  } finally {
-    destroyScene(scene);
-  }
 }

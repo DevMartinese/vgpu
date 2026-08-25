@@ -5,7 +5,7 @@ import DynamicLink from "fumadocs-core/dynamic-link";
 import { HeroTabs } from "./hero-tabs";
 import { PrismBackground } from "./prism-background/prism-background";
 import "../hero-glass-button.css";
-import "../hero-light-invert.css";
+import "../hero-theme.css";
 
 /**
  * Landing hero.
@@ -17,8 +17,8 @@ export function Hero() {
   return (
     <HeroTabProvider>
       <section
-        data-hero-invert
-        className="relative h-[calc(100svh-4rem)] max-h-[50em] overflow-hidden bg-black"
+        data-hero-theme
+        className="relative h-[calc(100svh-4rem)] max-h-[50em] overflow-hidden"
       >
         <div
           data-hero-container
@@ -43,10 +43,6 @@ export function Hero() {
             data-hero-foot-fade
             aria-hidden
             className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[16%]"
-            style={{
-              background:
-                "linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.52) 24%, rgba(0,0,0,0.3) 48%, rgba(0,0,0,0.13) 72%, rgba(0,0,0,0) 100%)",
-            }}
           />
 
           {/* The HTML takes a fixed content column on desktop; the invisible
@@ -69,14 +65,14 @@ export function Hero() {
                 <svg
                   aria-hidden="true"
                   className="block size-full"
-                  fill="white"
+                  fill="currentColor"
                   viewBox="0 0 179.2 75"
                 >
                   <VgpuWordmarkGlyphs />
                 </svg>
               </h1>
               <p
-                className="max-w-[10em] text-4xl text-balance text-center font-light leading-tight text-white min-[768px]:text-left"
+                className="max-w-[10em] text-4xl text-balance text-center font-light leading-tight min-[768px]:text-left"
               >
                 The WebGPU library, designed for agents.
               </p>

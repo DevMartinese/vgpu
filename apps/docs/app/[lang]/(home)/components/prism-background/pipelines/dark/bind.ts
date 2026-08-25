@@ -1,0 +1,165 @@
+import {
+  BLOOM_KERNEL_TAPS,
+  BLOOM_LEVEL_FACTORS,
+  PARTICLE_LIGHT_FIRST_LEVEL,
+  bloomKernelWeights,
+  bloomSpread,
+} from "../../bloom";
+import {
+  glassUniforms,
+  runtimeWallExtent,
+  sceneUniforms,
+} from "../../runtime/uniforms";
+import type { PrismRuntime } from "../../runtime/types";
+import {
+  PRISM_FRONT_Z,
+  PRISM_LIGHT_PLANE_Z,
+  PRISM_POSTPROCESS_RANGES,
+  PRISM_TRIANGLE,
+} from "../../types";
+import type { DarkPipelineGraph } from "./types";
+
+const BLOOM_KERNEL_WEIGHTS = BLOOM_KERNEL_TAPS.map((tapCount) =>
+  bloomKernelWeights(tapCount)
+);
+
+export function bindDarkGraph(
+  graph: DarkPipelineGraph,
+  runtime: PrismRuntime,
+  time: number
+): void {
+  const backgroundTarget = graph.backgroundTarget;
+  const sceneTarget = graph.sceneTarget;
+  const bloomTargets = graph.bloomTargets;
+  const studioEnvironment = runtime.studioEnvironment;
+  const debugEnvironment = runtime.debugEnvironment;
+  if (!backgroundTarget || !sceneTarget || !bloomTargets) {
+    throw new Error(
+      "prepare() must create dark pipeline targets before bind()."
+    );
+  }
+  if (!studioEnvironment || !debugEnvironment) {
+    throw new Error("prepare() must create prism environments before bind().");
+  }
+
+  const scene = sceneUniforms(runtime);
+  graph.light.set({ scene });
+  graph.lightWireframe.set({ scene });
+  graph.wall.set({ scene });
+  graph.copyBackground.set({ sceneTexture: backgroundTarget });
+  graph.glassBack.set({
+    params: glassUniforms(runtime, "dark"),
+    studioEnvironment: studioEnvironment.texture,
+    debugEnvironment: debugEnvironment.texture,
+    environmentSampler: runtime.environmentSampler,
+  });
+  graph.glassFront.set({
+    params: glassUniforms(runtime, "dark"),
+    sceneTexture: backgroundTarget,
+    sceneSampler: runtime.sceneSampler,
+    studioEnvironment: studioEnvironment.texture,
+    debugEnvironment: debugEnvironment.texture,
+    environmentSampler: runtime.environmentSampler,
+  });
+  graph.wireframe.set({
+    params: { viewProjection: runtime.view.viewProjection },
+  });
+  graph.bloomExtract.set({
+    sourceTexture: sceneTarget,
+    sourceSampler: runtime.sceneSampler,
+    params: { threshold: runtime.controls.postprocess.bloomThreshold },
+  });
+
+  const particleTarget = bloomTargets[PARTICLE_LIGHT_FIRST_LEVEL];
+  graph.particleLightDownsample.set({
+    sourceTexture: sceneTarget,
+    sourceSampler: runtime.sceneSampler,
+    params: {
+      sourceTexelSize: [1 / sceneTarget.size[0], 1 / sceneTarget.size[1]],
+      sourceToTargetScale: [
+        sceneTarget.size[0] / particleTarget.vertical.size[0],
+        sceneTarget.size[1] / particleTarget.vertical.size[1],
+      ],
+    },
+  });
+  graph.bloomBlur.forEach((bloom, level) => {
+    const targets = bloomTargets[level]!;
+    const horizontalSource =
+      level === 0 || level === PARTICLE_LIGHT_FIRST_LEVEL
+        ? targets.vertical
+        : bloomTargets[level - 1]!.vertical;
+    const coefficients = BLOOM_KERNEL_WEIGHTS[level]!;
+    const commonParams = {
+      texelSize: [
+        1 / targets.horizontal.size[0],
+        1 / targets.horizontal.size[1],
+      ],
+      tapCount: BLOOM_KERNEL_TAPS[level]!,
+      coefficients0: coefficients.slice(0, 4),
+      coefficients1: coefficients.slice(4, 8),
+      coefficients2: coefficients.slice(8, 12),
+      coefficients3: coefficients.slice(12, 16),
+      coefficients4: coefficients.slice(16, 20),
+      coefficients5: coefficients.slice(20, 24),
+    };
+    bloom.horizontal.set({
+      sourceTexture: horizontalSource,
+      sourceSampler: runtime.sceneSampler,
+      params: { ...commonParams, direction: [1, 0] },
+    });
+    bloom.vertical.set({
+      sourceTexture: targets.horizontal,
+      sourceSampler: runtime.sceneSampler,
+      params: { ...commonParams, direction: [0, 1] },
+    });
+  });
+  graph.bloomComposite.set({
+    level0Texture: bloomTargets[0].vertical,
+    level1Texture: bloomTargets[1].vertical,
+    level2Texture: bloomTargets[2].vertical,
+    levelSampler: runtime.sceneSampler,
+    params: {
+      radius: bloomSpread(
+        runtime.controls.postprocess.bloomRadius,
+        PRISM_POSTPROCESS_RANGES.bloomRadius.min,
+        PRISM_POSTPROCESS_RANGES.bloomRadius.max
+      ),
+      factors: [...BLOOM_LEVEL_FACTORS, 0],
+    },
+  });
+  graph.present.set({
+    sceneTexture: sceneTarget,
+    bloomTexture: bloomTargets[0].horizontal,
+    bloomSampler: runtime.sceneSampler,
+    params: {
+      bloomStrength:
+        runtime.controls.view === "glass"
+          ? runtime.controls.postprocess.bloomStrength
+          : 0,
+    },
+  });
+  graph.dust.set({
+    params: dustUniforms(runtime, time),
+    colorTexture: bloomTargets[1].vertical,
+    lightTexture: particleTarget.vertical,
+    lightSampler: runtime.sceneSampler,
+  });
+}
+
+function dustUniforms(
+  runtime: PrismRuntime,
+  time: number
+): Record<string, unknown> {
+  return {
+    viewProjection: runtime.view.viewProjection,
+    fieldHalfExtent: runtimeWallExtent(runtime),
+    outputSize: runtime.outputSize,
+    time,
+    cameraDistance: runtime.cameraDistance,
+    lightPlaneZ: PRISM_LIGHT_PLANE_Z,
+    prismA: PRISM_TRIANGLE.a,
+    prismB: PRISM_TRIANGLE.b,
+    prismC: PRISM_TRIANGLE.c,
+    prismFrontZ: PRISM_FRONT_Z,
+  };
+}

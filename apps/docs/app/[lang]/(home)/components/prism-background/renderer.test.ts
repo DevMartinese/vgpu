@@ -157,6 +157,8 @@ function gpu() {
       body({
         draw: (pipeline: unknown, options?: unknown) =>
           encoded.push(options ? { pipeline, options } : pipeline),
+        bundles: (recorded: { commands: unknown[] }) =>
+          encoded.push(...recorded.commands),
       });
       encodedPasses.push(encoded);
     }),
@@ -199,10 +201,19 @@ function gpu() {
   }[] = [];
   const copyTextureToTexture = vi.fn();
   const finishEncoder = vi.fn(() => ({}));
+  let nextCompileFailure: Error | undefined;
   const pipeline = (
     into: { set: ReturnType<typeof vi.fn>; compile: ReturnType<typeof vi.fn> }[]
   ) => {
-    const created = { set: vi.fn(), compile: vi.fn(async () => {}) };
+    const created = {
+      set: vi.fn(),
+      compile: vi.fn(async () => {
+        if (!nextCompileFailure) return;
+        const failure = nextCompileFailure;
+        nextCompileFailure = undefined;
+        throw failure;
+      }),
+    };
     into.push(created);
     return created;
   };
@@ -212,6 +223,7 @@ function gpu() {
       queue: {
         onSubmittedWorkDone: vi.fn(async () => {}),
         submit: vi.fn(),
+        writeTexture: vi.fn(),
       },
       createCommandEncoder: vi.fn(() => ({
         copyTextureToTexture,
@@ -255,6 +267,21 @@ function gpu() {
       ),
       effect: vi.fn(() => pipeline(effects)),
       draw: vi.fn(() => pipeline(draws)),
+      bundle: vi.fn(
+        (
+          _options: unknown,
+          record: (recorder: {
+            draw(pipeline: unknown, options?: unknown): void;
+          }) => void
+        ) => {
+          const commands: unknown[] = [];
+          record({
+            draw: (created, options) =>
+              commands.push(options ? { pipeline: created, options } : created),
+          });
+          return { commands };
+        }
+      ),
       // The free functions are routed with `gpu` stripped, so these fakes see
       // only the arguments after it.
       frame: vi.fn((callback: (frame: unknown) => void) =>
@@ -280,6 +307,9 @@ function gpu() {
     passOptions,
     gpuClock,
     stop,
+    failNextCompile(error: Error) {
+      nextCompileFailure = error;
+    },
   };
 }
 
@@ -292,14 +322,15 @@ test("renders the deterministic light once and idles until something changes", a
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
 
   expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
-  // The light mesh is written once at construction and once after the final
-  // output aspect is known. No history textures are allocated.
+  expect(live.instance.fns.bundle).toHaveBeenCalledOnce();
+  // Runtime construction already knows the output aspect, so pipeline prepare
+  // does not retrace the same light mesh. No history textures are allocated.
   expect(live.instance.device.createBuffer).toHaveBeenCalledOnce();
-  expect(live.lightBuffer.write).toHaveBeenCalledTimes(2);
+  expect(live.lightBuffer.write).toHaveBeenCalledOnce();
   expect(live.effects).toHaveLength(17);
   expect(live.draws).toHaveLength(7);
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
@@ -413,6 +444,14 @@ test("renders the deterministic light once and idles until something changes", a
   );
   const backGlassBindings = live.draws[2]!.set.mock.lastCall?.[0];
   const frontGlassBindings = live.draws[3]!.set.mock.lastCall?.[0];
+  expect(backGlassBindings).toEqual(
+    expect.objectContaining({
+      params: expect.objectContaining({
+        ior: 1.645,
+        absorption: [1, 1, 0.54],
+      }),
+    })
+  );
   expect(backGlassBindings).not.toHaveProperty("sceneTexture");
   expect(backGlassBindings).not.toHaveProperty("sceneSampler");
   expect(frontGlassBindings).toEqual(
@@ -508,11 +547,103 @@ test("renders the deterministic light once and idles until something changes", a
   renderer.dispose();
 });
 
+test("an explicit light mode uses the lean pipeline and never schedules dust-only frames", async () => {
+  const env = browser();
+  const live = gpu();
+  const controls = {
+    ...DEFAULT_PRISM_CONTROLS,
+    glass: {
+      ...DEFAULT_PRISM_CONTROLS.glass,
+      transmission: {
+        dark: { ior: 1.81, absorption: [0.7, 0.6, 0.5] },
+        light: { ior: 1.47, absorption: [0.1, 0.05, 0] },
+      },
+    },
+  } satisfies typeof DEFAULT_PRISM_CONTROLS;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Promise.reject(new Error("offline")))
+  );
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+    initialControls: controls,
+  });
+  await renderer.ready;
+
+  expect(live.instance.fns.bundle).toHaveBeenCalledOnce();
+  expect(live.effects).toHaveLength(6);
+  expect(live.draws).toHaveLength(8);
+  expect(live.targets).toHaveLength(32);
+  expect(live.targets.slice(0, 2).map(({ size }) => size)).toEqual([
+    [200, 100],
+    [200, 100],
+  ]);
+  expect(live.targets.slice(0, 2).every(({ msaa }) => msaa === 4)).toBe(true);
+  const lightDrawOptions = live.instance.fns.draw.mock.calls as unknown as [
+    Record<string, unknown>
+  ][];
+  expect(lightDrawOptions.map(([options]) => options.label)).toEqual([
+    "prism-rainbow.light.wall",
+    "prism-rainbow.light.prism-cast-shadow",
+    "prism-rainbow.light.projected-caustic",
+    "prism-rainbow.light.glass-back",
+    "prism-rainbow.light.glass-front",
+    "prism-rainbow.light.glass-accent",
+    "prism-rainbow.light.wireframe",
+    "prism-rainbow.light.light-wireframe",
+  ]);
+  expect(lightDrawOptions.some(([options]) => "instances" in options)).toBe(
+    false
+  );
+  expect(renderer.debugSources().at(-1)?.id).toBe("final-output");
+
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(3);
+  for (const glassDraw of live.draws.slice(3, 6)) {
+    expect(glassDraw!.set).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({
+          ior: 1.47,
+          absorption: [0.1, 0.05, 0],
+        }),
+      })
+    );
+  }
+  expect(live.encodedPasses).toEqual([
+    [
+      live.draws[0],
+      live.draws[1],
+      partialDraw(live.draws[2], 0, LIGHT_WHITE_VERTICES),
+      partialDraw(
+        live.draws[2],
+        LIGHT_OUTGOING_FIRST_VERTEX,
+        LIGHT_OUTGOING_VERTICES
+      ),
+      live.draws[3],
+      partialDraw(
+        live.draws[2],
+        LIGHT_INTERNAL_FIRST_VERTEX,
+        LIGHT_INTERNAL_VERTICES
+      ),
+    ],
+    [live.effects[0], live.draws[4], live.draws[5]],
+    [live.effects[1]],
+  ]);
+  live.gpuClock.time = 1 / 30;
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(3);
+
+  renderer.dispose();
+});
+
 test("dust-only animation frames reuse the resolved scene and bloom", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
 
@@ -532,7 +663,7 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
       params: expect.objectContaining({ time: 1 / 30 }),
     })
   );
-  expect(live.lightBuffer.write).toHaveBeenCalledTimes(2);
+  expect(live.lightBuffer.write).toHaveBeenCalledOnce();
   renderer.dispose();
 });
 
@@ -540,7 +671,7 @@ test("the Pass A view keeps the sorted light around the environment-only back fa
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
 
@@ -584,7 +715,7 @@ test("the light wireframe reveals every generated triangle in the light-only vie
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
 
@@ -630,7 +761,7 @@ test("pointer position smoothly moves the lamp and its target without dragging",
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writesBeforeMove = live.lightBuffer.write.mock.calls.length;
@@ -662,7 +793,7 @@ test("only optical controls rebuild the light mesh", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
@@ -701,8 +832,13 @@ test("only optical controls rebuild the light mesh", async () => {
     ...DEFAULT_PRISM_CONTROLS,
     glass: {
       ...DEFAULT_PRISM_CONTROLS.glass,
-      ior: 1.72,
-      absorption: [0.2, 0.15, 0.1],
+      transmission: {
+        ...DEFAULT_PRISM_CONTROLS.glass.transmission,
+        dark: {
+          ior: 1.72,
+          absorption: [0.2, 0.15, 0.1],
+        },
+      },
     },
   });
   tick(live.loopFrame);
@@ -795,7 +931,7 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
@@ -837,7 +973,7 @@ test("FOV updates the automatically distanced camera boundary", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
@@ -864,6 +1000,7 @@ test("observes and frames the prism relative to its canvas-local DOM slot", asyn
   const renderer = createRenderer({
     canvas: env.canvas,
     framingElement: env.framingElement,
+    initialMode: "dark",
   });
   await renderer.ready;
 
@@ -890,7 +1027,7 @@ test("the camera follows the pointer without rebuilding an unchanged light", asy
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const pointer = {
@@ -914,7 +1051,7 @@ test("coalesces resizes and updates both scene targets plus the light mesh", asy
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
 
   renderer.resize({ width: 300, height: 150, dpr: 1.6 });
@@ -944,7 +1081,9 @@ test("coalesces resizes and updates both scene targets plus the light mesh", asy
   }
   for (const colorTarget of live.targets.slice(0, 10))
     expect(colorTarget.destroy).not.toHaveBeenCalled();
-  expect(live.lightBuffer.write).toHaveBeenCalledTimes(3);
+  // Preparing at the runtime's existing size is a no-op; only the real resize
+  // retraces the wall-bounded light mesh.
+  expect(live.lightBuffer.write).toHaveBeenCalledTimes(2);
 
   renderer.dispose();
   renderer.dispose();
@@ -961,11 +1100,121 @@ test("coalesces resizes and updates both scene targets plus the light mesh", asy
     expect(environmentTexture.destroy).toHaveBeenCalledOnce();
 });
 
+test("a stale async theme switch cannot replace the latest active mode", async () => {
+  const env = browser();
+  const live = gpu();
+  const assetFetch = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => assetFetch.promise)
+  );
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+  });
+  await renderer.ready;
+  const debugBridge = renderer.debugBridge;
+
+  const switchToLight = renderer.setMode("light");
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  const keepDark = renderer.setMode("dark");
+  assetFetch.resolve({
+    ok: false,
+    status: 503,
+    statusText: "offline",
+  } as Response);
+  await Promise.all([switchToLight, keepDark]);
+
+  expect(renderer.debugSources()[0]?.id).toBe("dark-backdrop-hdr");
+  expect(renderer.debugBridge).toBe(debugBridge);
+  expect(live.targets[0]!.destroy).not.toHaveBeenCalled();
+  expect(live.targets[1]!.destroy).not.toHaveBeenCalled();
+  expect(
+    live.targets
+      .slice(-2)
+      .every(({ destroy }) => destroy.mock.calls.length === 1)
+  ).toBe(true);
+  renderer.dispose();
+});
+
+test("a failed theme candidate preserves the active pipeline and can recover", async () => {
+  const env = browser();
+  const live = gpu();
+  const onError = vi.fn();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Promise.reject(new Error("offline")))
+  );
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    onError,
+  });
+  await renderer.ready;
+
+  live.failNextCompile(new Error("light shader failed"));
+  await expect(renderer.setMode("light")).rejects.toThrow(
+    "light shader failed"
+  );
+  expect(renderer.debugSources()[0]?.id).toBe("dark-backdrop-hdr");
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "light shader failed" })
+  );
+  expect(live.stop).not.toHaveBeenCalled();
+  expect(live.surface.dispose).not.toHaveBeenCalled();
+  expect(live.instance.dispose).not.toHaveBeenCalled();
+
+  await renderer.setMode("light");
+  expect(renderer.debugSources().at(-1)?.id).toBe("final-output");
+  expect(live.stop).not.toHaveBeenCalled();
+  renderer.dispose();
+});
+
+test("dispose defers shared GPU teardown until a pending mode prepare settles", async () => {
+  const env = browser();
+  const live = gpu();
+  const assetFetch = deferred<Response>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => assetFetch.promise)
+  );
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+  });
+  await renderer.ready;
+
+  const switchToLight = renderer.setMode("light");
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  renderer.dispose();
+  expect(live.stop).toHaveBeenCalledOnce();
+  expect(live.surface.dispose).not.toHaveBeenCalled();
+  expect(live.instance.dispose).not.toHaveBeenCalled();
+  expect(live.lightBuffer.destroy).not.toHaveBeenCalled();
+
+  assetFetch.resolve({
+    ok: false,
+    status: 503,
+    statusText: "offline",
+  } as Response);
+  await switchToLight;
+  await vi.waitFor(() => expect(live.instance.dispose).toHaveBeenCalledOnce());
+  expect(live.surface.dispose).toHaveBeenCalledOnce();
+  expect(live.lightBuffer.destroy).toHaveBeenCalledOnce();
+  for (const colorTarget of live.targets)
+    expect(colorTarget.destroy).toHaveBeenCalledOnce();
+  for (const texture of live.textures)
+    expect(texture.destroy).toHaveBeenCalledOnce();
+});
+
 test("dispose during init cleans up a late GPU without starting a loop", async () => {
   const env = browser();
   const pending = deferred<ReturnType<typeof gpu>["instance"]>();
   mocks.init.mockReturnValueOnce(pending.promise);
-  const renderer = createRenderer({ canvas: env.canvas });
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await vi.waitFor(() => expect(mocks.init).toHaveBeenCalledOnce());
   renderer.dispose();
   const late = gpu();
@@ -986,7 +1235,11 @@ test("reports an initialization failure once, rejects ready, and self-disposes",
   const onError = vi.fn(() => {
     throw new Error("reporter failed");
   });
-  const renderer = createRenderer({ canvas: env.canvas, onError });
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    onError,
+  });
   await expect(renderer.ready).rejects.toBe(error);
   expect(onError).toHaveBeenCalledOnce();
   expect(failed.instance.dispose).toHaveBeenCalledOnce();

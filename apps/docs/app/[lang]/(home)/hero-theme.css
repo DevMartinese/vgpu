@@ -1,0 +1,55 @@
+/* The GPU wall keeps its photographic base while the sticky navbar uses the
+   regular page surface once content starts scrolling underneath it. */
+:root {
+  --home-hero-background: #000000;
+  --home-hero-foreground: #ffffff;
+  --home-header-scrolled-background: #000000;
+}
+
+html.light {
+  --home-hero-background: #d8d2c8;
+  --home-hero-foreground: #111111;
+  --home-header-scrolled-background: #fafafa;
+}
+
+[data-hero-theme],
+[data-prism-background] {
+  background-color: var(--home-hero-background);
+}
+
+[data-hero-theme] {
+  color: var(--home-hero-foreground);
+}
+
+/* The package navbar is outside the home layout, so the home marker cannot
+   pass it a class directly. `:has()` scopes the full-width surface to this route
+   without changing the shared navbar on docs and examples pages. */
+body:has([data-hero-theme]) [data-geistdocs-container] > header {
+  border-bottom-color: transparent;
+  background-color: transparent;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease;
+}
+
+html[data-scrolled]
+  body:has([data-hero-theme])
+  [data-geistdocs-container]
+  > header {
+  background-color: var(--home-header-scrolled-background);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has([data-hero-theme]) [data-geistdocs-container] > header {
+    transition: none;
+  }
+}
+
+[data-hero-tabs-rule] {
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--home-hero-foreground) 10%,
+    transparent
+  );
+}

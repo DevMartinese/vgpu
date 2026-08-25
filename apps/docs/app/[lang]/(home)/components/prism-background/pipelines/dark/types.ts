@@ -1,0 +1,46 @@
+import type { Bundle, Draw, Effect, Target } from "vgpu";
+
+export interface BloomLevelTargets {
+  readonly horizontal: Target;
+  readonly vertical: Target;
+}
+
+export interface BloomLevelEffects {
+  readonly horizontal: Effect;
+  readonly vertical: Effect;
+}
+
+export type BloomTargets = readonly [
+  BloomLevelTargets,
+  BloomLevelTargets,
+  BloomLevelTargets,
+  BloomLevelTargets
+];
+
+export type BloomBlurEffects = readonly [
+  BloomLevelEffects,
+  BloomLevelEffects,
+  BloomLevelEffects,
+  BloomLevelEffects
+];
+
+/** Dark-only draws, postprocess effects, and render targets. */
+export interface DarkPipelineGraph {
+  readonly light: Draw;
+  readonly lightWireframe: Draw;
+  readonly dust: Draw;
+  readonly wall: Draw;
+  readonly copyBackground: Effect;
+  readonly bloomExtract: Effect;
+  readonly bloomBlur: BloomBlurEffects;
+  readonly bloomComposite: Effect;
+  readonly particleLightDownsample: Effect;
+  readonly present: Effect;
+  readonly glassBack: Draw;
+  readonly glassFront: Draw;
+  readonly wireframe: Draw;
+  backdropBundle?: Bundle;
+  backgroundTarget?: Target;
+  sceneTarget?: Target;
+  bloomTargets?: BloomTargets;
+}

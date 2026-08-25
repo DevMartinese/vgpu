@@ -102,15 +102,35 @@ export const PRISM_VIEW_LABELS: Record<PrismView, string> = {
   caustic: "Light only",
 };
 
-export interface GlassControls {
+export type PrismTheme = "dark" | "light";
+
+export interface GlassTransmissionControls {
   /** Index of refraction used by both rasterized glass interfaces. */
   readonly ior: number;
-  /** Multiplier on the studio environment before it is reflected. */
-  readonly reflectionStrength: number;
   /** Beer-Lambert absorption per scene unit, in linear RGB. */
   readonly absorption: readonly [number, number, number];
+}
+
+export type GlassTransmissionByTheme = Readonly<
+  Record<PrismTheme, GlassTransmissionControls>
+>;
+
+export interface GlassReflectionControls {
+  /** Multiplier on the studio environment before it is reflected. */
+  readonly reflectionStrength: number;
   /** Exposure applied to the studio environment before material response. */
   readonly environmentExposure: number;
+}
+
+export type GlassReflectionByTheme = Readonly<
+  Record<PrismTheme, GlassReflectionControls>
+>;
+
+export interface GlassControls {
+  /** Theme-specific transmission response. */
+  readonly transmission: GlassTransmissionByTheme;
+  /** Theme-specific environment reflection response. */
+  readonly reflection: GlassReflectionByTheme;
 }
 
 export interface PostprocessControls {
@@ -213,11 +233,23 @@ export const PRISM_SPECTRAL_DISPERSION_RANGES = {
   strength: { min: 0, max: 0.2, step: 0.0005 },
 } as const;
 
+export const DEFAULT_GLASS_TRANSMISSION: GlassTransmissionByTheme = {
+  dark: {
+    ior: 1.645,
+    absorption: [1, 1, 0.54],
+  },
+  light: {
+    ior: 1.645,
+    absorption: [0, 0, 0],
+  },
+};
+
 export const DEFAULT_GLASS_CONTROLS: GlassControls = {
-  ior: 1.645,
-  reflectionStrength: 2.14,
-  absorption: [1, 1, 0.54],
-  environmentExposure: 2.3,
+  transmission: DEFAULT_GLASS_TRANSMISSION,
+  reflection: {
+    dark: { reflectionStrength: 2.14, environmentExposure: 2.3 },
+    light: { reflectionStrength: 3, environmentExposure: 4 },
+  },
 };
 
 export const PRISM_POSTPROCESS_RANGES = {

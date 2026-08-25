@@ -64,7 +64,7 @@ export function createEnvironmentDebugRenderer(
   let distance = INITIAL_ORBIT.distance;
   let environmentExposure = finiteExposure(
     options.initialEnvironmentExposure,
-    PRISM_GLASS.environmentExposure,
+    PRISM_GLASS.reflection.dark.environmentExposure,
   );
   let pendingPresent = true;
 
@@ -271,7 +271,10 @@ export function createEnvironmentDebugRenderer(
   return {
     ready,
     setEnvironmentExposure(value) {
-      environmentExposure = finiteExposure(value, PRISM_GLASS.environmentExposure);
+      environmentExposure = finiteExposure(
+        value,
+        PRISM_GLASS.reflection.dark.environmentExposure
+      );
       invalidate();
     },
     dispose,

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createRenderer, type PrismRenderer } from "./renderer";
 import type { EnvironmentDebugRenderer } from "./environment-debug";
+import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
 
 const Controls = lazy(() =>
@@ -18,30 +19,61 @@ const Controls = lazy(() =>
   }))
 );
 
+const PrismDebugGraph = lazy(() =>
+  import("./debug/graph").then(({ PrismDebugGraph: Component }) => ({
+    default: Component,
+  }))
+);
+
+const HERO_BACKGROUND_PROPERTY = "--home-hero-background";
+const CSS_HEX_COLOR = /^#[\da-f]{6}$/i;
+
+function heroBackgroundColor(canvas: HTMLCanvasElement): string {
+  const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
+  if (!hero) return DEFAULT_PRISM_CONTROLS.wallColor;
+  const value = getComputedStyle(hero)
+    .getPropertyValue(HERO_BACKGROUND_PROPERTY)
+    .trim();
+  return CSS_HEX_COLOR.test(value) ? value : DEFAULT_PRISM_CONTROLS.wallColor;
+}
+
+function currentPrismMode(): PrismPipelineMode {
+  return document.documentElement.classList.contains("light")
+    ? "light"
+    : "dark";
+}
+
+function environmentDebugState(
+  controls: PrismControls,
+  mode: PrismPipelineMode
+) {
+  return {
+    visible: controls.environmentDebug,
+    exposure: controls.glass.reflection[mode].environmentExposure,
+  };
+}
+
 export function PrismBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<PrismRenderer | null>(null);
+  const controlsRef = useRef<PrismControls>(DEFAULT_PRISM_CONTROLS);
   const [showDebug, setShowDebug] = useState(false);
-  const [environmentDebug, setEnvironmentDebug] = useState(() => ({
-    visible: DEFAULT_PRISM_CONTROLS.environmentDebug,
-    exposure: DEFAULT_PRISM_CONTROLS.glass.environmentExposure,
-  }));
+  const [debugSources, setDebugSources] = useState<
+    readonly PrismDebugSource[] | undefined
+  >();
+  const [guiInitialControls, setGuiInitialControls] = useState<PrismControls>(
+    DEFAULT_PRISM_CONTROLS
+  );
+  const [environmentDebug, setEnvironmentDebug] = useState(() =>
+    environmentDebugState(DEFAULT_PRISM_CONTROLS, "dark")
+  );
   const reportError = useCallback((error: unknown) => {
     console.error("Prism background failed to render.", error);
   }, []);
 
-  useEffect(() => {
-    setShowDebug(new URLSearchParams(window.location.search).has("debug"));
-  }, []);
-
   const setControls = useCallback((controls: PrismControls) => {
-    const nextDebug = {
-      visible:
-        controls.environmentDebug ?? DEFAULT_PRISM_CONTROLS.environmentDebug,
-      exposure:
-        controls.glass?.environmentExposure ??
-        DEFAULT_PRISM_CONTROLS.glass.environmentExposure,
-    };
+    controlsRef.current = controls;
+    const nextDebug = environmentDebugState(controls, currentPrismMode());
     setEnvironmentDebug((current) =>
       current.visible === nextDebug.visible &&
       current.exposure === nextDebug.exposure
@@ -53,28 +85,67 @@ export function PrismBackground() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const debugPreviews = new URLSearchParams(window.location.search).has(
+      "debug"
+    );
+    setShowDebug(debugPreviews);
     const heroContainer = canvas.closest<HTMLElement>("[data-hero-container]");
     const framingElement = heroContainer?.querySelector<HTMLElement>(
       "[data-triangle-container]"
     );
+    const initialControls = {
+      ...DEFAULT_PRISM_CONTROLS,
+      wallColor: heroBackgroundColor(canvas),
+    };
+    controlsRef.current = initialControls;
+    setGuiInitialControls(initialControls);
+    setEnvironmentDebug(
+      environmentDebugState(initialControls, currentPrismMode())
+    );
     const renderer = createRenderer({
       canvas,
       framingElement: framingElement ?? undefined,
-      initialControls: DEFAULT_PRISM_CONTROLS,
+      initialMode: currentPrismMode(),
+      initialControls,
+      debugPreviews,
       onError: reportError,
     });
     rendererRef.current = renderer;
-    void renderer.ready.catch(() => {
+    const syncDebugSources = () => {
+      if (debugPreviews && rendererRef.current === renderer)
+        setDebugSources(renderer.debugSources());
+    };
+    const syncTheme = () => {
+      const mode = currentPrismMode();
+      const wallColor = heroBackgroundColor(canvas);
+      if (wallColor !== controlsRef.current.wallColor) {
+        const nextControls = { ...controlsRef.current, wallColor };
+        controlsRef.current = nextControls;
+        setGuiInitialControls(nextControls);
+        renderer.setControls?.(nextControls);
+      }
+      setEnvironmentDebug(environmentDebugState(controlsRef.current, mode));
+      void renderer.setMode(mode).then(syncDebugSources, () => {
+        // The renderer reports mode preparation failures through onError.
+      });
+    };
+    const themeObserver = new MutationObserver(syncTheme);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    void renderer.ready.then(syncDebugSources, () => {
       // onError reports initialization failures without replacing the hero.
     });
     return () => {
+      themeObserver.disconnect();
       rendererRef.current = null;
       renderer.dispose();
     };
   }, [reportError]);
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <div data-prism-background className="absolute inset-0 overflow-hidden">
       <canvas
         ref={canvasRef}
         aria-hidden="true"
@@ -87,7 +158,11 @@ export function PrismBackground() {
       />
       {showDebug ? (
         <Suspense fallback={null}>
-          <Controls onChange={setControls} />
+          <Controls initialValue={guiInitialControls} onChange={setControls} />
+          <PrismDebugGraph
+            bridge={rendererRef.current?.debugBridge}
+            sources={debugSources}
+          />
         </Suspense>
       ) : null}
       {environmentDebug.visible ? (
