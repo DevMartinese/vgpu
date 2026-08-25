@@ -25,6 +25,7 @@ Use these instructions when an AI coding agent edits this project.
 | Task | Edit |
 | --- | --- |
 | Configure site title, logo, nav, GitHub links, AI prompt, suggestions, translations, `basePath`, or `siteId` | `geistdocs.tsx` |
+| Edit public agent best-fit use cases or operational instructions shared by `/agents.md` and `/llms.txt` | `lib/agent-guidance.ts` |
 | Add or update documentation pages | `content/docs/**/*.mdx` |
 | Control sidebar order, groups, and labels | `content/docs/meta.json` |
 | Override MDX components | `components/geistdocs/mdx-components.tsx` |
@@ -35,6 +36,7 @@ Use these instructions when an AI coding agent edits this project.
 | Configure the docs page renderer | `app/[lang]/docs/[[...slug]]/page.tsx` |
 | Configure AI-readable markdown output | `app/[lang]/agents.md/route.ts`, `app/[lang]/.well-known/mcp.json/route.ts`, `app/[lang]/llms.txt/route.ts`, `app/[lang]/llms-full.txt/route.ts`, `app/[lang]/llms.mdx/[[...slug]]/route.ts`, `app/[lang]/sitemap.md/route.ts` |
 | Configure chat or search APIs | `app/api/chat/route.ts`, `app/api/search/route.ts` |
+| Configure the structured JSON fallback for unknown `/api/*` paths | `lib/api-not-found.ts`, `app/api/[...notFound]/route.ts` |
 | Add request handling before or after Geistdocs routing | `proxy.ts` |
 | Edit the marketing home page | `app/[lang]/(home)/**` |
 | Edit shared styles | `app/global.css`, `app/styles/geistdocs.css` |
@@ -54,6 +56,8 @@ Use these instructions when an AI coding agent edits this project.
 - Keep `export const config` in `proxy.ts` as a static object. Next.js must parse proxy matchers at build time.
 - Use proxy matcher exclusions that only match `/api` and `/api/...`, such as `api(?:/|$)`. Do not exclude broad prefixes like `api`, because that also excludes routes such as `/api-reference`.
 - Preserve markdown negotiation unless the task explicitly changes AI-readable output. The app serves a concise `/llms.txt` index, a `createLlmsRoute`-backed `/llms-full.txt` corpus, `/agents.md`, `/.well-known/mcp.json`, and per-page Markdown for `.md`, `.mdx`, `Accept: text/markdown`, and AI-agent requests.
+- Preserve the proxy `after` hook that returns a recoverable Markdown 404 for unknown agent requests outside `/docs`. When adding a valid HTML app route, add it to `lib/geistdocs/markdown-not-found.ts` so Markdown-preferring clients still receive the real page rather than the fallback.
+- Preserve `app/api/[...notFound]/route.ts` as the lowest-precedence API route. Valid API routes must retain their own contracts, unknown `/api/*` paths return a stable JSON 404 instead of the framework HTML response, and the existing bare `/api` redirect continues to lead to `/docs/reference`.
 - When adding custom proxy behavior, prefer `before`, `after`, and `markdownRoutes` options on `createProxy` instead of replacing the proxy.
 - Use explicit `markdownRoutes` for root-mounted docs or any site where homepage/app routes coexist with docs routes.
 - Keep source URLs, navigation links, `getPageUrl`, and `markdownRoutes` app-local when `config.basePath` is set. Geistdocs derives public page-action and Markdown URLs separately.
@@ -101,5 +105,5 @@ Use these instructions when an AI coding agent edits this project.
 
 - Run `pnpm build` after changing routes, config, source setup, MDX components, or package versions.
 - Run `pnpm dev` and open the changed pages when visual layout, navigation, or MDX rendering changes.
-- Check both `/docs` and AI-readable routes such as `/agents.md`, `/.well-known/mcp.json`, `/llms.txt`, `/llms-full.txt`, or a page-level `.md` URL when changing content routing or proxy behavior.
+- Check both `/docs` and AI-readable routes such as `/agents.md`, `/.well-known/mcp.json`, `/llms.txt`, `/llms-full.txt`, a page-level `.md` URL, an unknown URL with `Accept: text/markdown`, and an unknown `/api` path when changing content routing or proxy behavior.
 - Confirm no secrets were added to source files. Use `.env.local` for local values and keep it out of Git.
