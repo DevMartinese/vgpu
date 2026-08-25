@@ -1,0 +1,542 @@
+{
+  "schemaVersion": 1,
+  "contractId": "vgpu-examples/v1",
+  "revision": "dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2",
+  "source": {
+    "repository": "https://github.com/vgpu/vgpu",
+    "gitCommit": "sha256:7ca4cbb942fe6fb48fd01bcfff7ccb0ac72fbf87f0f939accdc8b1a0feb264d3"
+  },
+  "examples": [
+    {
+      "id": "gradient",
+      "title": "Simple Gradient",
+      "description": "Map screen coordinates to color with a tiny fullscreen fragment shader.",
+      "tags": [
+        "gradient",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "fragment-shader",
+        "responsive-canvas"
+      ],
+      "fileCount": 3,
+      "aggregateSha256": "2de92a45eac65a7f6c0980c87dd5f260c5bffdda3cf3abf26bdb55738c1b9e33",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/gradient/manifest.json",
+      "manifestSha256": "428115b5103e3ff513b08d0dcc41eb36b553c6857ad82c432ce7814c60b61044"
+    },
+    {
+      "id": "triangle-led-front",
+      "title": "Triangle LED Hero",
+      "description": "Analytic edge-glow triangle with LED emitters, floor radiance, and interactive color deploy. Canvas-scoped pointer input drives the lighting while a lil-gui selector chooses highlighted edges.",
+      "tags": [
+        "triangle",
+        "led",
+        "raycasting",
+        "lighting"
+      ],
+      "capabilities": [
+        "webgpu",
+        "select-control",
+        "pointer-input",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 17,
+      "aggregateSha256": "7338d878ed84a6498c1f3f6cf946f4fcd9bb3b6e1198398c44eaffad5d02202d",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/triangle-led-front/manifest.json",
+      "manifestSha256": "78cefe6c34f80994fff291262d5706332e1b62b31a75222f1c34b8983f071fd0"
+    },
+    {
+      "id": "anti-aliasing",
+      "title": "Anti-Aliasing",
+      "description": "One high-contrast scene through Off, MSAA 4×, SSAA 2×, and FXAA — pick a mode and watch the edges.",
+      "tags": [
+        "anti-aliasing",
+        "msaa",
+        "ssaa",
+        "fxaa"
+      ],
+      "capabilities": [
+        "webgpu",
+        "render-targets",
+        "select-control",
+        "multi-pass",
+        "responsive-canvas"
+      ],
+      "fileCount": 6,
+      "aggregateSha256": "9f60cf31f45e43cde516d18125ffe37ffbcb6720d96053b93252061b35d814f4",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/anti-aliasing/manifest.json",
+      "manifestSha256": "492d6f2b0282d0b6585a4ae1f569effbec87dba332cdb909a32ef8aa9be5660c"
+    },
+    {
+      "id": "black-hole",
+      "title": "Black Hole",
+      "description": "Raymarched gravitational lensing — null geodesics bend starlight around an event horizon while a Keplerian accretion disk glows with Doppler beaming, graded through an HDR bloom chain.",
+      "tags": [
+        "black-hole",
+        "raymarching",
+        "hdr",
+        "bloom"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 7,
+      "aggregateSha256": "7b2bbffc32edab65f4175ab09469c0c3cfdeb247dbde6ea1687ded635bfac1dd",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/black-hole/manifest.json",
+      "manifestSha256": "bc1716c8e416b2bf1f680aa1e667c76315b47f726f920c5a80ee2b8ce33e589e"
+    },
+    {
+      "id": "optimized-black-hole",
+      "title": "Optimized Black Hole",
+      "description": "A multi-pass black hole that bakes relativistic ray traversal once into a G-buffer, then reuses it for animated disk shading, stars, antialiasing and HDR bloom.",
+      "tags": [
+        "black-hole",
+        "raymarching",
+        "performance",
+        "hdr",
+        "bloom",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "multi-pass",
+        "render-targets",
+        "offscreen-rendering",
+        "continuous-rendering",
+        "responsive-canvas",
+        "textures",
+        "hdr"
+      ],
+      "fileCount": 14,
+      "aggregateSha256": "be95ed191e864dde37db73d93ed4a4a9a491de40a8ecc4464441de1e20867586",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/optimized-black-hole/manifest.json",
+      "manifestSha256": "8595e9afd013b8ab39c839eadb88dfecc965cd485e43dad965537f6d9d9cf40f"
+    },
+    {
+      "id": "earth",
+      "title": "Earth",
+      "description": "A procedural planet with GPU-baked albedo, night lights and clouds, a lit atmosphere, and an HDR bloom chain tuned so only the sun glows.",
+      "tags": [
+        "lighting",
+        "hdr",
+        "bloom",
+        "rendering"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "controls",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas",
+        "textures"
+      ],
+      "fileCount": 13,
+      "aggregateSha256": "7a5cbd7964b5265d59cee8c28b9d922e9893243cb1bc6e821ae7e8288b428797",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/earth/manifest.json",
+      "manifestSha256": "8b02e096434e96d96cafedf7f3c4189da3fda636364de666359b75f0813c40f2"
+    },
+    {
+      "id": "fluid",
+      "title": "Interactive Fluid",
+      "description": "A compact pressure-projected fluid solver with velocity advection, colorful dye, and pointer or touch stirring.",
+      "tags": [
+        "fluid",
+        "simulation",
+        "compute",
+        "navier-stokes"
+      ],
+      "capabilities": [
+        "webgpu",
+        "compute-shader",
+        "fixed-timestep",
+        "pointer-input",
+        "multi-pass",
+        "responsive-canvas"
+      ],
+      "fileCount": 13,
+      "aggregateSha256": "f63734db303581d9f415887c1ac5c8e78cdcbb027f79a5c2aef6c52fd4988fb2",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/fluid/manifest.json",
+      "manifestSha256": "865268007054e201aedd7760b587fda12de25efca14e0a3588f660c36e66d757"
+    },
+    {
+      "id": "instanced-rendering",
+      "title": "Instanced Rendering",
+      "description": "One cube mesh + one instance stream, with 125,000 independently animated cubes.",
+      "tags": [
+        "instancing",
+        "indirect-rendering",
+        "performance"
+      ],
+      "capabilities": [
+        "webgpu",
+        "select-control",
+        "instanced-rendering",
+        "offscreen-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 7,
+      "aggregateSha256": "83d00c5ea18b0f3237de15e690a715d25c5ef0a2b16a6dba8ceb315ec9850785",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/instanced-rendering/manifest.json",
+      "manifestSha256": "6a979bdbddd3ee2975039cbaa020c2f4e0994e6e615d2e83e30586ba866e771a"
+    },
+    {
+      "id": "batch-rendering",
+      "title": "Batch Rendering",
+      "description": "Four primitive ranges in one mesh, recorded once as a render bundle.",
+      "tags": [
+        "batch-rendering",
+        "render-bundles",
+        "instancing"
+      ],
+      "capabilities": [
+        "webgpu",
+        "render-bundles",
+        "offscreen-rendering",
+        "resize"
+      ],
+      "fileCount": 5,
+      "aggregateSha256": "581825c38803de600a38c8aedf5adc09d37c27bb282bd35da935214479b3e069",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/batch-rendering/manifest.json",
+      "manifestSha256": "42b20fee98735d8cf746ede073145e9b6b4e3e59f0a9e5dfcc80e628e8fcba2f"
+    },
+    {
+      "id": "fft-ocean",
+      "title": "Particles ocean",
+      "description": "A deep-water surface driven by a real inverse FFT. A Phillips spectrum evolves in frequency space, Stockham passes produce a displacement field, and half a million particles ride the waves through an HDR bloom chain.",
+      "tags": [
+        "ocean",
+        "fft",
+        "particles",
+        "compute"
+      ],
+      "capabilities": [
+        "webgpu",
+        "compute-shader",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 20,
+      "aggregateSha256": "673b4d091692690b0af53e042643ad8346ddcf5610f2dfb17680c546d5f0a91e",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/fft-ocean/manifest.json",
+      "manifestSha256": "75d2804d4f724f5100f08f90b01e011146c0eb67fa82a0eed519c9ffef7340ca"
+    },
+    {
+      "id": "fft-ocean-surface",
+      "title": "FFT ocean surface",
+      "description": "A displaced ocean surface driven by a real inverse FFT. A Phillips spectrum evolves in frequency space, two compute passes run a shared-memory radix-2 IFFT into a displacement field, and a procedural grid rides it with per-pixel normals, foam and a Fresnel sky reflection under a tunable sunset. Orbit with the mouse; tweak the sea from the panel.",
+      "tags": [
+        "ocean",
+        "fft",
+        "compute",
+        "lighting",
+        "hdr"
+      ],
+      "capabilities": [
+        "webgpu",
+        "compute-shader",
+        "storage-buffers",
+        "multi-pass",
+        "hdr",
+        "pointer-orbit",
+        "controls",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 16,
+      "aggregateSha256": "7217b78cf8c05e26a21c62e53e2a84bc451d6de49bd987a7ae3ac7699041e41f",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/fft-ocean-surface/manifest.json",
+      "manifestSha256": "28ae909a59f075bdea465ff6749f0b1d1fb67cca746a3fd20d0931d97e0e856d"
+    },
+    {
+      "id": "raymarched-fractal",
+      "title": "Raymarched fractal",
+      "description": "A raymarched Sierpiński tetrahedron emerges from pure black under directional light and restrained HDR bloom, with drag-only orbit controls.",
+      "tags": [
+        "raymarching",
+        "raymarch",
+        "fractal",
+        "sierpinski",
+        "hdr",
+        "bloom"
+      ],
+      "capabilities": [
+        "webgpu",
+        "demand-rendering",
+        "pointer-orbit",
+        "multi-pass",
+        "responsive-canvas"
+      ],
+      "fileCount": 9,
+      "aggregateSha256": "40e8d0bb511a2199e63a3f49b936609183a0b13133194d4d884a822f8c3c6c90",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/raymarched-fractal/manifest.json",
+      "manifestSha256": "07afd90c1f776a248f467e1ebae601c971930e53c70fd5c777004f3a192b23b5"
+    },
+    {
+      "id": "glass-fractal",
+      "title": "Glass Fractal",
+      "description": "A beveled glass tetrahedron contains a morphing fractal mesh and liquid orb, combining screen-space transmission, studio reflections, soft material lighting and interactive controls.",
+      "tags": [
+        "fractal",
+        "frosted-glass",
+        "lighting",
+        "hdr",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "controls",
+        "pointer-input",
+        "multi-pass",
+        "render-targets",
+        "continuous-rendering",
+        "responsive-canvas",
+        "textures",
+        "hdr"
+      ],
+      "fileCount": 21,
+      "aggregateSha256": "862329083cbd524fbaf670a90bb0a9a077014bc7e6fa9ab6f8a08315003db888",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/glass-fractal/manifest.json",
+      "manifestSha256": "c065df88a654e7641e3687793503d3571a3eec85e3da654f80cf32c7476b65ba"
+    },
+    {
+      "id": "environment-map",
+      "title": "Environment Map",
+      "description": "One 360° equirectangular map lights the whole scene: it is the background and every reflection on a mirror-metal cube floating in it.",
+      "tags": [
+        "lighting",
+        "hdr",
+        "rendering"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "multi-pass",
+        "continuous-rendering",
+        "responsive-canvas",
+        "textures"
+      ],
+      "fileCount": 10,
+      "aggregateSha256": "8adebd47f14548542619ddf99f809533fa5cfe8c424b8820f30856319e3c34e1",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/environment-map/manifest.json",
+      "manifestSha256": "c6e7fe90c6e5911524e5711a63808dca8b10f76acaa06ed6c4c1cee36f31548d"
+    },
+    {
+      "id": "transmission",
+      "title": "Transmission",
+      "description": "A glass cube refracts the scene behind it in screen space: the frame is rendered, blurred into a pyramid, and read back through Snell refraction, chromatic dispersion and a Fresnel-weighted environment reflection.",
+      "tags": [
+        "lighting",
+        "hdr",
+        "rendering",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "pointer-orbit",
+        "controls",
+        "checkbox-controls",
+        "select-control",
+        "multi-pass",
+        "render-targets",
+        "continuous-rendering",
+        "responsive-canvas",
+        "textures",
+        "hdr"
+      ],
+      "fileCount": 21,
+      "aggregateSha256": "656c1b67178637600aad710bdf13502f9113efdba059348b17ea2428516081d6",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/transmission/manifest.json",
+      "manifestSha256": "11b73e4171f0d87d050a5cd1bdb8785802d90ed2ff8de20948888b5d7b2a79d2"
+    },
+    {
+      "id": "clipping",
+      "title": "Clipping",
+      "description": "A single signed-distance test slices an animated icosphere, while a fitted disk reveals the moving cross-section.",
+      "tags": [
+        "clipping",
+        "3d",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 4,
+      "aggregateSha256": "291981898799ce9d604de02400a1ac6b64f80d2df720aaa9e4c8e22c035d8ddc",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/clipping/manifest.json",
+      "manifestSha256": "13975e5e2d98909fbdc13ea3b3737f81b73836a3860de336dc81a55ec3a52215"
+    },
+    {
+      "id": "radiance-cascades",
+      "title": "Radiance Cascades",
+      "description": "Draw light with the pointer and watch it bounce: a jump-flooded distance field feeds six radiance cascades — base 4, geometric intervals, linear RGBA16F — merged top-down with visibility alpha into 2D global illumination.",
+      "tags": [
+        "lighting",
+        "hdr",
+        "raymarching",
+        "rendering",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "multi-pass",
+        "render-targets",
+        "textures",
+        "hdr",
+        "pointer-input",
+        "controls",
+        "select-control",
+        "responsive-canvas",
+        "continuous-rendering"
+      ],
+      "fileCount": 20,
+      "aggregateSha256": "1d32d2eedba1b5d34b862c3e59e5181ec42067aed2de8302fd729575f8a24034",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/radiance-cascades/manifest.json",
+      "manifestSha256": "0d447c334278e6b57a247be32c8e86a68940bc29a949b9324e3cc25fd67fd75f"
+    },
+    {
+      "id": "agent-radiance-cascades",
+      "title": "Agent Radiance Cascades",
+      "description": "The static ten-dot Agent mark becomes a selectable loading field with capture-quality controls: every gray-to-white dot is both an HDR emitter and an occluder, feeding a jump-flooded distance field and six top-down radiance cascades.",
+      "tags": [
+        "lighting",
+        "hdr",
+        "raymarching",
+        "rendering",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "multi-pass",
+        "render-targets",
+        "textures",
+        "hdr",
+        "controls",
+        "select-control",
+        "responsive-canvas",
+        "continuous-rendering"
+      ],
+      "fileCount": 20,
+      "aggregateSha256": "7c5cbd8cf026f4c72bfe3ead893ede864d8957b2a7ad16abc6b77964ef5e1227",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/agent-radiance-cascades/manifest.json",
+      "manifestSha256": "033cd2c3230591b15f0d6a2aac36124a6d1b4e865b64e54c325541607ea773c2"
+    },
+    {
+      "id": "nextjs-flare",
+      "title": "Next.js Flare",
+      "description": "Next.js logo shader — a rim-lit N glyph with volumetric scattering: a 48-step ray walk jittered by blue noise over a separable Gaussian blur chain, breathing autonomously until the pointer takes over.",
+      "tags": [
+        "flare",
+        "volumetric",
+        "lighting",
+        "animation"
+      ],
+      "capabilities": [
+        "webgpu",
+        "multi-pass",
+        "pointer-input",
+        "textures",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 15,
+      "aggregateSha256": "672379065eca73d3945dfb7c5cc8596aa466c6fdeb669083c89e48053b486469",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/nextjs-flare/manifest.json",
+      "manifestSha256": "cbb507c6d833655f276341cd7619ef768fcec5f5a896ad49747a4cf5e0b09984"
+    },
+    {
+      "id": "depth-estimation",
+      "title": "Depth Estimation",
+      "description": "Estimate depth from a photo or webcam with ONNX Runtime Web on WebGPU. Shade its GPU-resident output beside the input through a zero-copy vgpu buffer wrap.",
+      "tags": [
+        "machine-learning",
+        "onnx",
+        "depth-estimation",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "machine-learning",
+        "external-device",
+        "zero-copy",
+        "gpu-buffer-interop",
+        "storage-buffers",
+        "compute-shader",
+        "camera-input",
+        "select-control",
+        "demand-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 9,
+      "aggregateSha256": "2d82cff8928e3896463fe1ba325bd2d902b1fe3dec98bc397f7f4f394365eba0",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/depth-estimation/manifest.json",
+      "manifestSha256": "21bd076696cdae5d80f77c3acc11d6f06cfd8c5fc3421fd53c19197cc4061d3d"
+    },
+    {
+      "id": "mnist-classifier",
+      "title": "MNIST Classifier",
+      "description": "Draw a digit and classify it with ONNX Runtime Web on WebGPU. Render the GPU-resident logits through a non-owning vgpu buffer wrap.",
+      "tags": [
+        "machine-learning",
+        "onnx",
+        "mnist",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "machine-learning",
+        "external-device",
+        "zero-copy",
+        "gpu-buffer-interop",
+        "storage-buffers",
+        "pointer-input",
+        "demand-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 6,
+      "aggregateSha256": "0720531eeefcd4c4708d7632b07bf6441ba9a3e93df389d52e5a7d7addee0020",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/mnist-classifier/manifest.json",
+      "manifestSha256": "ed06f59d9c310fabc8bb5e4da075e9cd79e53aabbad1d42baaf01e5b4e9b8bb3"
+    },
+    {
+      "id": "air-painting",
+      "title": "Air Painting",
+      "description": "Wipe fog off the glass with your hands. ONNX Runtime Web tracks both palms on WebGPU to clear a frosted camera feed.",
+      "tags": [
+        "machine-learning",
+        "onnx",
+        "hand-tracking",
+        "frosted-glass",
+        "shader"
+      ],
+      "capabilities": [
+        "webgpu",
+        "machine-learning",
+        "external-device",
+        "zero-copy",
+        "gpu-buffer-interop",
+        "storage-buffers",
+        "compute-shader",
+        "camera-input",
+        "textures",
+        "continuous-rendering",
+        "responsive-canvas"
+      ],
+      "fileCount": 17,
+      "aggregateSha256": "72480bf69e678ca556767f1a03fe97c98567d4aaf19bea5a727344161c1ca7fd",
+      "manifestUrl": "https://vgpu.sh/api/examples/v1/revisions/dcb9c696558279122f48753e76c31225516cfb6cd334c6e478f2eca9c38e85b2/examples/air-painting/manifest.json",
+      "manifestSha256": "16d785b3766a5d8528d672f0da9b144fb13439d68dd69df9fc481bc0c5bafc50"
+    }
+  ]
+}
