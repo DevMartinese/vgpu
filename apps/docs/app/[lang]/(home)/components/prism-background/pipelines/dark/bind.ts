@@ -26,13 +26,20 @@ const BLOOM_KERNEL_WEIGHTS = BLOOM_KERNEL_TAPS.map((tapCount) =>
 export function bindDarkGraph(
   graph: DarkPipelineGraph,
   runtime: PrismRuntime,
-  time: number
+  time: number,
+  updateScene = true
 ): void {
   const backgroundTarget = graph.backgroundTarget;
   const sceneTarget = graph.sceneTarget;
   const bloomTargets = graph.bloomTargets;
+  const presentationTarget = graph.presentationTarget;
   const studioEnvironment = runtime.studioEnvironment;
-  if (!backgroundTarget || !sceneTarget || !bloomTargets) {
+  if (
+    !backgroundTarget ||
+    !sceneTarget ||
+    !bloomTargets ||
+    !presentationTarget
+  ) {
     throw new Error(
       "prepare() must create dark pipeline targets before bind()."
     );
@@ -43,6 +50,11 @@ export function bindDarkGraph(
   // Bindings are statically required even when the debug environment is not.
   // Reusing the studio view keeps the production path allocation-free.
   const debugEnvironment = runtime.debugEnvironment ?? studioEnvironment;
+
+  if (!updateScene) {
+    graph.dust.set({ params: { time } });
+    return;
+  }
 
   const scene = sceneUniforms(runtime);
   graph.light.set({ scene });
@@ -140,6 +152,7 @@ export function bindDarkGraph(
           : 0,
     },
   });
+  graph.copyPresentation.set({ sourceTexture: presentationTarget });
   graph.dust.set({
     params: dustUniforms(runtime, time),
     colorTexture: bloomTargets[1].vertical,

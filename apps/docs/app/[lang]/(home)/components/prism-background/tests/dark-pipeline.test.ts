@@ -56,8 +56,13 @@ describe("dark pipeline debug targets", () => {
         "dark.particle-light.3.horizontal",
         "dark.particle-light.3.vertical",
         "dark.bloom.composite",
-        "dark.present",
+        "dark.present-cache",
+        "dark.output",
       ]);
+
+      expect(pipeline.targets.presentationLDR?.size).toEqual([24, 16]);
+      expect(pipeline.targets.presentationLDR?.format).toBe("rgba8unorm");
+      expect(pipeline.targets.presentationLDR?.sampleCount).toBe(1);
 
       expect(pipeline.debugTarget("dark-backdrop-hdr")?.primary).toBe(
         pipeline.targets.backdropHDR
@@ -87,6 +92,54 @@ describe("dark pipeline debug targets", () => {
       expect(pipeline.debugTarget("missing")).toBeUndefined();
     } finally {
       pipeline.destroy();
+      destroyPrismRuntime(runtime);
+      gpu.dispose();
+    }
+  });
+
+  test("builds an invalid presentation before retaining dust-only frames", async () => {
+    const gpu = await init();
+    const runtime = createPrismRuntime(gpu, [24, 16], "dark-retained-test");
+    runtime.studioEnvironment = {
+      texture: gpu.device.createTexture({
+        size: [2, 1],
+        format: "rgba16float",
+        usage: ["texture_binding", "copy_dst"],
+      }),
+      prepared: true,
+    } as EnvironmentTexture;
+    runtime.environmentReady = Promise.resolve();
+    const output = target(gpu, { size: [24, 16], format: "rgba8unorm" });
+    const pipeline = createDarkPipeline(runtime);
+
+    const renderProfile = (updateScene: boolean): string[] => {
+      const passes: string[] = [];
+      pipeline.bind(1, { updateScene });
+      frame(gpu, (currentFrame) =>
+        pipeline.render(currentFrame, output, {
+          updateScene,
+          profile: {
+            pass(name) {
+              passes.push(name);
+              return undefined;
+            },
+          },
+        })
+      );
+      return passes;
+    };
+
+    try {
+      await pipeline.prepare(output);
+      expect(renderProfile(false)).toHaveLength(15);
+      expect(renderProfile(false)).toEqual(["dark.output"]);
+
+      pipeline.resize([32, 20]);
+      expect(pipeline.targets.presentationLDR?.size).toEqual([32, 20]);
+      expect(renderProfile(false)).toHaveLength(15);
+    } finally {
+      pipeline.destroy();
+      expect(pipeline.targets.presentationLDR).toBeUndefined();
       destroyPrismRuntime(runtime);
       gpu.dispose();
     }

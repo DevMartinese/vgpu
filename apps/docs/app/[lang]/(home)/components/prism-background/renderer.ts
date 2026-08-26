@@ -192,7 +192,7 @@ export function createRenderer(
         if (aim) setRuntimeLampAim(runtime, aim[0], aim[1]);
         if (orbit) setRuntimeOrbit(runtime, orbit[0], orbit[1]);
         if (aim || orbit) debugHost?.invalidate();
-        pipeline.bind(dustTime);
+        pipeline.bind(dustTime, { updateScene });
         pipeline.render(
           currentFrame,
           canvasSurface,

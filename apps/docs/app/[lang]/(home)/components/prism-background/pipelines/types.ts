@@ -13,6 +13,11 @@ export interface PrismPipelineRenderOptions {
   readonly profile?: PrismPassProfile;
 }
 
+export interface PrismPipelineBindOptions {
+  /** Skip scene-owned writes when only a retained overlay changes. */
+  readonly updateScene?: boolean;
+}
+
 export interface PrismPassProfile {
   /** Counts the pass and returns its optional timestamp-query span. */
   pass(name: string): TimerSpan | undefined;
@@ -51,7 +56,7 @@ export interface PrismPipeline {
   readonly mode: PrismPipelineMode;
   prepare(output: PrismOutput): Promise<void>;
   resize(size: readonly [number, number]): void;
-  bind(time: number): void;
+  bind(time: number, options?: PrismPipelineBindOptions): void;
   render(
     currentFrame: Frame,
     output: PrismOutput,

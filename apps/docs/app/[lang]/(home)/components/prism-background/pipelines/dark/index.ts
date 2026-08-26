@@ -27,25 +27,29 @@ export interface DarkPrismPipeline extends PrismPipeline {
   readonly targets: {
     readonly backdropHDR?: Target;
     readonly sceneHDR?: Target;
+    readonly presentationLDR?: Target;
   };
   debugTarget(sourceId: string): PrismDebugTargetPreview | undefined;
 }
 
 export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
   const graph = createDarkGraph(runtime);
+  let presentationValid = false;
   return {
     mode: "dark",
     get targets() {
       return {
         backdropHDR: graph.backgroundTarget,
         sceneHDR: graph.sceneTarget,
+        presentationLDR: graph.presentationTarget,
       };
     },
     async prepare(output) {
       resizeRuntime(runtime, output.size);
-      ensureDarkTargets(graph, runtime, output.size);
+      ensureDarkTargets(graph, runtime, output.size, output.format);
+      presentationValid = false;
       const environmentReady = prepareRuntimeEnvironment(runtime);
-      bindDarkGraph(graph, runtime, 0);
+      bindDarkGraph(graph, runtime, 0, true);
       // A cold shader failure must not release the shared runtime while either
       // environment bake is still compiling or submitting work.
       await settleAllOrThrow([
@@ -56,18 +60,31 @@ export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
     },
     resize(size) {
       resizeDarkTargets(graph, size);
+      presentationValid = false;
     },
-    bind(time) {
-      bindDarkGraph(graph, runtime, time);
+    bind(time, options) {
+      bindDarkGraph(
+        graph,
+        runtime,
+        time,
+        (options?.updateScene ?? true) || !presentationValid
+      );
     },
     render(currentFrame, output, options) {
-      renderDarkGraph(currentFrame, graph, runtime, output, options);
+      const updateScene =
+        (options?.updateScene ?? true) || !presentationValid;
+      renderDarkGraph(currentFrame, graph, runtime, output, {
+        ...options,
+        updateScene,
+      });
+      presentationValid = true;
     },
     debugSources: () => PRISM_DARK_DEBUG_SOURCES,
     debugTarget(sourceId) {
       return resolveDarkDebugTarget(graph, sourceId);
     },
     destroy() {
+      presentationValid = false;
       destroyDarkTargets(graph);
     },
   };
@@ -110,6 +127,7 @@ function compileGraph(
   const background = graph.backgroundTarget!;
   const scene = graph.sceneTarget!;
   const bloom = graph.bloomTargets!;
+  const presentation = graph.presentationTarget!;
   const outputSignature = { colors: [output.format] } as const;
   return [
     graph.light.compile(background),
@@ -129,6 +147,7 @@ function compileGraph(
     graph.particleLightDownsample.compile(
       bloom[PARTICLE_LIGHT_FIRST_LEVEL].vertical
     ),
-    graph.present.compile(outputSignature),
+    graph.present.compile(presentation),
+    graph.copyPresentation.compile(outputSignature),
   ];
 }

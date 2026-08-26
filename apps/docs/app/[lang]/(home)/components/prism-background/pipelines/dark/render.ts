@@ -27,7 +27,8 @@ export function renderDarkGraph(
   const background = graph.backgroundTarget;
   const scene = graph.sceneTarget;
   const bloom = graph.bloomTargets;
-  if (!background || !scene || !bloom) {
+  const presentation = graph.presentationTarget;
+  if (!background || !scene || !bloom || !presentation) {
     throw new Error("prepare() must run before rendering the dark pipeline.");
   }
 
@@ -117,12 +118,20 @@ export function renderDarkGraph(
         pass.draw(graph.bloomComposite);
       }
     );
+    current.pass(
+      profilePass(
+        { target: presentation, clear: [0, 0, 0, 1] },
+        options.profile,
+        "dark.present-cache"
+      ),
+      (pass) => pass.draw(graph.present)
+    );
   }
 
   current.pass(
-    profilePass({ target: output }, options.profile, "dark.present"),
+    profilePass({ target: output }, options.profile, "dark.output"),
     (pass) => {
-      pass.draw(graph.present);
+      pass.draw(graph.copyPresentation);
       if (runtime.controls.view === "glass") {
         pass.draw(graph.dust, { instances: DUST_PARTICLE_COUNT });
       }

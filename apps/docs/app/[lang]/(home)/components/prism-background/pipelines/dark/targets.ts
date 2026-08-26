@@ -8,7 +8,8 @@ import type { BloomTargets, DarkPipelineGraph } from "./types";
 export function ensureDarkTargets(
   graph: DarkPipelineGraph,
   runtime: PrismRuntime,
-  size: readonly [number, number]
+  size: readonly [number, number],
+  outputFormat: GPUTextureFormat
 ): void {
   graph.backgroundTarget ??= target(runtime.gpu, {
     size,
@@ -36,6 +37,11 @@ export function ensureDarkTargets(
       }),
     })
   ) as unknown as BloomTargets;
+  graph.presentationTarget ??= target(runtime.gpu, {
+    size,
+    format: outputFormat,
+    label: `${runtime.label}.retained-dark-presentation`,
+  });
   resizeDarkTargets(graph, size);
 }
 
@@ -45,6 +51,7 @@ export function resizeDarkTargets(
 ): void {
   resizeTarget(graph.backgroundTarget, size);
   resizeTarget(graph.sceneTarget, size);
+  resizeTarget(graph.presentationTarget, size);
   graph.bloomTargets?.forEach((bloomLevel, level) => {
     const next = bloomLevelSize(size, level);
     resizeTarget(bloomLevel.horizontal, next);
@@ -62,6 +69,8 @@ export function destroyDarkTargets(graph: DarkPipelineGraph): void {
     destroyTarget(bloomLevel.vertical);
   });
   graph.bloomTargets = undefined;
+  destroyTarget(graph.presentationTarget);
+  graph.presentationTarget = undefined;
 }
 
 export function bloomLevelSize(

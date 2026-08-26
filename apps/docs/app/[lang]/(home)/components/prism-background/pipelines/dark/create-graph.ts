@@ -15,6 +15,7 @@ import presentWgsl from "../../present.wgsl";
 import type { PrismRuntime } from "../../runtime/types";
 import wallWgsl from "../../wall.wgsl";
 import wireframeWgsl from "../../wireframe.wgsl";
+import copyPresentationWgsl from "./copy-presentation.wgsl";
 import type { BloomBlurEffects, DarkPipelineGraph } from "./types";
 
 export const DUST_PARTICLE_COUNT = 2200;
@@ -59,6 +60,9 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
     label: `${label}.particle-light-downsample`,
   });
   const present = effect(gpu, presentWgsl, { label: `${label}.present` });
+  const copyPresentation = effect(gpu, copyPresentationWgsl, {
+    label: `${label}.copy-presentation`,
+  });
   const glassBack = draw(gpu, {
     shader: glassBackWgsl,
     geometry: runtime.prism,
@@ -109,6 +113,7 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
     bloomComposite,
     particleLightDownsample,
     present,
+    copyPresentation,
     glassBack,
     glassFront,
     wireframe,

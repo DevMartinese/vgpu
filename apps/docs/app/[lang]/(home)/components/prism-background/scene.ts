@@ -91,7 +91,7 @@ export function presentScene(
   time = 0,
   updateScene = true
 ): void {
-  scene.pipeline.bind(time);
+  scene.pipeline.bind(time, { updateScene });
   const encode = (current: Frame) =>
     scene.pipeline.render(current, output, { updateScene });
   if (currentFrame) encode(currentFrame);

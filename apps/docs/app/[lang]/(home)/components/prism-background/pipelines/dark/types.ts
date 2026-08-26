@@ -36,6 +36,7 @@ export interface DarkPipelineGraph {
   readonly bloomComposite: Effect;
   readonly particleLightDownsample: Effect;
   readonly present: Effect;
+  readonly copyPresentation: Effect;
   readonly glassBack: Draw;
   readonly glassFront: Draw;
   readonly wireframe: Draw;
@@ -43,4 +44,5 @@ export interface DarkPipelineGraph {
   backgroundTarget?: Target;
   sceneTarget?: Target;
   bloomTargets?: BloomTargets;
+  presentationTarget?: Target;
 }
