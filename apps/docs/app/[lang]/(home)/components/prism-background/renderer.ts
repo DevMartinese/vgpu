@@ -1,5 +1,6 @@
 import type { Frame, Gpu, Surface, Target } from "vgpu";
 import { clock, frameLoop, surface } from "vgpu";
+import type { CreateDeviceOptions, VGPUAdapter } from "vgpu/core";
 
 import type {
   BrowserRendererOptions,
@@ -66,6 +67,27 @@ const OFFSCREEN_ROOT_MARGIN_PX = 256;
 const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
 const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+/** Lets vgpu request its device from the adapter already probed for features. */
+function reuseBrowserAdapter(
+  adapter: GPUAdapter,
+  core: Pick<
+    typeof import("vgpu/core"),
+    "Device" | "validateRequiredFeatures"
+  >
+): VGPUAdapter {
+  return {
+    async requestDevice(options: CreateDeviceOptions = {}) {
+      core.validateRequiredFeatures(adapter.features, options.requiredFeatures);
+      const device = await adapter.requestDevice({
+        label: options.label,
+        requiredFeatures: options.requiredFeatures,
+        requiredLimits: options.requiredLimits,
+      });
+      return new core.Device(device, adapter.info ?? null);
+    },
+  };
+}
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
@@ -406,29 +428,39 @@ export function createRenderer(
   }
 
   const initialize = async () => {
-    const { init } = await import("vgpu");
+    // Module loading and adapter acquisition are independent, so start all
+    // three before waiting. The core module stays out of the static hero chunk.
+    const browserAdapterReady = Promise.resolve()
+      .then(() => navigator.gpu?.requestAdapter())
+      .catch(() => undefined);
+    const [{ init }, core, browserAdapter] = await Promise.all([
+      import("vgpu"),
+      import("vgpu/core"),
+      browserAdapterReady,
+    ]);
     if (disposed) return;
     let requiredFeatures: readonly GPUFeatureName[] = [];
-    try {
-      const adapter = await navigator.gpu?.requestAdapter();
+    let adapter: VGPUAdapter | undefined;
+    if (browserAdapter) {
       requiredFeatures = prismOptionalFeatures(
-        adapter?.features,
+        browserAdapter.features,
         options.performanceSampling === true
       );
-    } catch {
-      // The regular device request remains the authoritative availability
-      // check. A failed optional probe simply preserves all fallback paths.
+      adapter = reuseBrowserAdapter(browserAdapter, core);
     }
+    const baseInitOptions = adapter ? { adapter } : undefined;
     let nextGpu;
     try {
       nextGpu = await init(
-        requiredFeatures.length > 0 ? { requiredFeatures } : undefined
+        requiredFeatures.length > 0
+          ? { ...baseInitOptions, requiredFeatures }
+          : baseInitOptions
       );
     } catch (error) {
       if (requiredFeatures.length === 0) throw error;
       // Adapter capabilities may become stale between the optional probe and
       // device creation. Keep the hero alive on the exact fp16 fallback.
-      nextGpu = await init();
+      nextGpu = await init(baseInitOptions);
     }
     if (disposed) {
       nextGpu.dispose();

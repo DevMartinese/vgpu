@@ -17,7 +17,7 @@ import type {
 } from "../types";
 import { bindLightGraph } from "./bind";
 import { recordLightBackdropBundle } from "./bundles";
-import { createLightGraph } from "./create-graph";
+import { createLightGraph, ensureLightWireframeDraws } from "./create-graph";
 import { renderLightGraph } from "./render";
 import {
   destroyLightTargets,
@@ -61,20 +61,24 @@ export function createLightPipeline(
         throw new Error("Cannot prepare a destroyed light pipeline.");
       resizeRuntime(runtime, output.size);
       ensureLightTargets(graph, runtime, output.size);
+      ensureLightWireframeDraws(graph, runtime);
       const environmentReady = prepareRuntimeEnvironment(runtime);
       const ownedAssets = graph.assets;
       const assetsReady = ownedAssets
         ? Promise.resolve(ownedAssets)
         : loadLightAssetTextures(runtime.gpu, loader);
-      // Both branches continue touching the shared GPU after their first
+      // Pipeline compilation needs only the target signatures, so overlap it
+      // with both environment generation and the one-time asset bake.
+      const graphReady = Promise.resolve().then(() =>
+        Promise.all(compileGraph(graph, output))
+      );
+      // All branches continue touching the shared GPU after their first
       // await. Do not let one rejection release the runtime underneath its
       // still-running sibling. Asset failure keeps the old sequential error
       // precedence, while an environment failure releases newly-loaded files
       // before it escapes.
-      const [assetsResult, environmentResult] = await Promise.allSettled([
-        assetsReady,
-        environmentReady,
-      ]);
+      const [assetsResult, environmentResult, graphResult] =
+        await Promise.allSettled([assetsReady, environmentReady, graphReady]);
       const loaded =
         assetsResult.status === "fulfilled" ? assetsResult.value : undefined;
       if (destroyed) {
@@ -86,9 +90,12 @@ export function createLightPipeline(
         if (!ownedAssets) destroyLightAssetTextures(loaded);
         throw environmentResult.reason;
       }
+      if (graphResult.status === "rejected") {
+        if (!ownedAssets) destroyLightAssetTextures(loaded);
+        throw graphResult.reason;
+      }
       graph.assets = loaded;
       bindLightGraph(graph, runtime);
-      await Promise.all(compileGraph(graph, output));
       if (destroyed) return;
       recordLightBackdropBundle(graph, runtime);
     },
@@ -194,11 +201,11 @@ function compileGraph(
     graph.prismShadow.compile(backdrop),
     graph.caustic.compile(backdrop),
     graph.glassBack.compile(backdrop),
-    graph.lightWireframe.compile(backdrop),
+    ...(graph.lightWireframe ? [graph.lightWireframe.compile(backdrop)] : []),
     graph.copyBackdrop.compile(scene),
     graph.glassFront.compile(scene),
     graph.glassAccent.compile(scene),
-    graph.wireframe.compile(scene),
+    ...(graph.wireframe ? [graph.wireframe.compile(scene)] : []),
     graph.present.compile(outputSignature),
   ];
 }

@@ -9,6 +9,7 @@ import glassAccentWgsl from "../../materials/light/glass-accent.wgsl";
 import presentWgsl from "../../materials/light/present.wgsl";
 import shadowWgsl from "../../materials/light/shadow.wgsl";
 import wallWgsl from "../../materials/light/wall.wgsl";
+import { ensurePrismWireframeGeometry } from "../../runtime/resources";
 import type { PrismRuntime } from "../../runtime/types";
 import wireframeWgsl from "../../wireframe.wgsl";
 import { createPrismShadowGeometry } from "./shadow/tuning";
@@ -71,22 +72,6 @@ export function createLightGraph(runtime: PrismRuntime): LightPipelineGraph {
       blend: "premultiplied",
       label: `${label}.light.glass-accent`,
     }),
-    wireframe: draw(gpu, {
-      shader: wireframeWgsl,
-      geometry: runtime.prismWireframe,
-      cull: "none",
-      depth: false,
-      blend: "premultiplied",
-      label: `${label}.light.wireframe`,
-    }),
-    lightWireframe: draw(gpu, {
-      shader: lightWireframeWgsl,
-      geometry: runtime.lightGeometry,
-      cull: "none",
-      depth: false,
-      blend: "premultiplied",
-      label: `${label}.light.light-wireframe`,
-    }),
     present: effect(gpu, presentWgsl, {
       label: `${label}.light.present`,
     }),
@@ -100,4 +85,32 @@ export function createLightGraph(runtime: PrismRuntime): LightPipelineGraph {
       addressModeV: "repeat",
     }),
   };
+}
+
+/** Creates debug-only draws when their controls are first enabled. */
+export function ensureLightWireframeDraws(
+  graph: LightPipelineGraph,
+  runtime: PrismRuntime
+): void {
+  const { gpu, label } = runtime;
+  if (runtime.controls.wireframe && !graph.wireframe) {
+    graph.wireframe = draw(gpu, {
+      shader: wireframeWgsl,
+      geometry: ensurePrismWireframeGeometry(runtime),
+      cull: "none",
+      depth: false,
+      blend: "premultiplied",
+      label: `${label}.light.wireframe`,
+    });
+  }
+  if (runtime.controls.lightWireframe && !graph.lightWireframe) {
+    graph.lightWireframe = draw(gpu, {
+      shader: lightWireframeWgsl,
+      geometry: runtime.lightGeometry,
+      cull: "none",
+      depth: false,
+      blend: "premultiplied",
+      label: `${label}.light.light-wireframe`,
+    });
+  }
 }

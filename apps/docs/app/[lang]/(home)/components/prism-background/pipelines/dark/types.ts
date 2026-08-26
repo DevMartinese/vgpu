@@ -27,9 +27,8 @@ export type BloomBlurEffects = readonly [
 /** Dark-only draws, postprocess effects, and render targets. */
 export interface DarkPipelineGraph {
   readonly light: Draw;
-  readonly lightWireframe: Draw;
+  lightWireframe?: Draw;
   readonly dust: Draw;
-  readonly wall: Draw;
   readonly copyBackground: Effect;
   readonly bloomExtract: Effect;
   readonly bloomBlur: BloomBlurEffects;
@@ -39,7 +38,7 @@ export interface DarkPipelineGraph {
   readonly copyPresentation: Effect;
   readonly glassBack: Draw;
   readonly glassFront: Draw;
-  readonly wireframe: Draw;
+  wireframe?: Draw;
   backdropBundle?: Bundle;
   backgroundTarget?: Target;
   sceneTarget?: Target;

@@ -5,8 +5,8 @@ import { effect, frame, sampler, target } from "vgpu";
 import environmentBakeWgsl from "./environment-bake.wgsl";
 import environmentBlurWgsl from "./environment-blur.wgsl";
 
-/** Same 2:1 HDR layout used by the environment-map and transmission examples. */
-export const ENVIRONMENT_SIZE = [2048, 1024] as const;
+/** 2:1 HDR layout sized for the hero's small on-screen reflection footprint. */
+export const ENVIRONMENT_SIZE = [1024, 512] as const;
 export const ENVIRONMENT_LEVELS = 8;
 export const ENVIRONMENT_TEXEL_ANGLE =
   (2 * Math.PI) / ENVIRONMENT_SIZE[0];

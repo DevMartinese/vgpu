@@ -11,8 +11,8 @@ export interface LightPipelineGraph {
   readonly copyBackdrop: Effect;
   readonly glassFront: Draw;
   readonly glassAccent: Draw;
-  readonly wireframe: Draw;
-  readonly lightWireframe: Draw;
+  wireframe?: Draw;
+  lightWireframe?: Draw;
   readonly present: Effect;
   readonly materialSampler: GPUSampler;
   assets?: LightAssetTextures;

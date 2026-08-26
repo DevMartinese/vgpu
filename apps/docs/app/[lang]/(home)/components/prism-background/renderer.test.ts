@@ -263,10 +263,12 @@ function gpu(features: readonly GPUFeatureName[] = []) {
     destroy: vi.fn(),
   };
   const effects: {
+    label?: string;
     set: ReturnType<typeof vi.fn>;
     compile: ReturnType<typeof vi.fn>;
   }[] = [];
   const draws: {
+    label?: string;
     set: ReturnType<typeof vi.fn>;
     compile: ReturnType<typeof vi.fn>;
   }[] = [];
@@ -288,9 +290,15 @@ function gpu(features: readonly GPUFeatureName[] = []) {
   const finishEncoder = vi.fn(() => ({}));
   let nextCompileFailure: Error | undefined;
   const pipeline = (
-    into: { set: ReturnType<typeof vi.fn>; compile: ReturnType<typeof vi.fn> }[]
+    into: {
+      label?: string;
+      set: ReturnType<typeof vi.fn>;
+      compile: ReturnType<typeof vi.fn>;
+    }[],
+    label?: string
   ) => {
     const created = {
+      label,
       set: vi.fn(),
       compile: vi.fn(async () => {
         if (!nextCompileFailure) return;
@@ -351,8 +359,12 @@ function gpu(features: readonly GPUFeatureName[] = []) {
           return created;
         }
       ),
-      effect: vi.fn(() => pipeline(effects)),
-      draw: vi.fn(() => pipeline(draws)),
+      effect: vi.fn((_source: unknown, options?: { label?: string }) =>
+        pipeline(effects, options?.label)
+      ),
+      draw: vi.fn((options: { label?: string }) =>
+        pipeline(draws, options.label)
+      ),
       bundle: vi.fn(
         (
           _options: unknown,
@@ -399,6 +411,12 @@ function gpu(features: readonly GPUFeatureName[] = []) {
   };
 }
 
+function drawNamed(live: ReturnType<typeof gpu>, label: string) {
+  const found = live.draws.find((draw) => draw.label === label);
+  if (!found) throw new Error(`Missing draw ${label}`);
+  return found;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -410,6 +428,10 @@ test("renders the deterministic light once and idles until something changes", a
   mocks.init.mockResolvedValueOnce(live.instance);
   const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
+  const darkLight = drawNamed(live, "prism-rainbow.light");
+  const glassBack = drawNamed(live, "prism-rainbow.glass-back");
+  const glassFront = drawNamed(live, "prism-rainbow.glass-front");
+  const dust = drawNamed(live, "prism-rainbow.dust");
 
   expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
   expect(live.instance.fns.bundle).toHaveBeenCalledOnce();
@@ -423,17 +445,14 @@ test("renders the deterministic light once and idles until something changes", a
   );
   expect(live.lightBuffer.write).toHaveBeenCalledOnce();
   expect(live.effects).toHaveLength(16);
-  expect(live.draws).toHaveLength(7);
+  expect(live.draws).toHaveLength(4);
   const darkDrawOptions = live.instance.fns.draw.mock.calls as unknown as [
     Record<string, unknown>,
   ][];
   expect(darkDrawOptions.map(([options]) => options.label)).toEqual([
     "prism-rainbow.light",
-    "prism-rainbow.wall",
     "prism-rainbow.glass-back",
     "prism-rainbow.glass-front",
-    "prism-rainbow.wireframe",
-    "prism-rainbow.light-wireframe",
     "prism-rainbow.dust",
   ]);
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
@@ -453,11 +472,11 @@ test("renders the deterministic light once and idles until something changes", a
     })
   );
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
-    3,
+    2,
     expect.objectContaining({ blend: "premultiplied" })
   );
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
-    7,
+    4,
     expect.objectContaining({
       vertices: 6,
       instances: 2200,
@@ -515,7 +534,7 @@ test("renders the deterministic light once and idles until something changes", a
   for (const environmentTexture of live.textures) {
     expect(environmentTexture.options).toEqual(
       expect.objectContaining({
-        size: [2048, 1024],
+        size: [1024, 512],
         format: "rgba16float",
         mipLevelCount: 8,
         usage: ["texture_binding", "copy_dst"],
@@ -540,33 +559,30 @@ test("renders the deterministic light once and idles until something changes", a
   }
   expect(live.effects[10]!.compile).toHaveBeenCalledWith(live.targets[2]);
   expect(live.effects[11]!.compile).toHaveBeenCalledWith(live.targets[9]);
-  expect(live.draws[0]!.compile).toHaveBeenCalledWith(live.targets[0]);
-  expect(live.draws[1]!.compile).toHaveBeenCalledWith(live.targets[0]);
-  expect(live.draws[2]!.compile).toHaveBeenCalledWith(live.targets[0]);
-  expect(live.draws[3]!.compile).toHaveBeenCalledWith(live.targets[1]);
-  expect(live.draws[4]!.compile).toHaveBeenCalledWith(live.targets[1]);
-  expect(live.draws[5]!.compile).toHaveBeenCalledWith(live.targets[0]);
-  expect(live.draws[6]!.compile).toHaveBeenCalledWith({
+  expect(darkLight.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(glassBack.compile).toHaveBeenCalledWith(live.targets[0]);
+  expect(glassFront.compile).toHaveBeenCalledWith(live.targets[1]);
+  expect(dust.compile).toHaveBeenCalledWith({
     colors: ["bgra8unorm"],
   });
   expect(live.effects[0]!.set).toHaveBeenLastCalledWith({
     sceneTexture: live.targets[0],
   });
-  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+  expect(glassBack.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       studioEnvironment: live.textures[0],
       debugEnvironment: live.textures[0],
     })
   );
-  expect(live.draws[3]!.set).toHaveBeenLastCalledWith(
+  expect(glassFront.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sceneTexture: live.targets[0],
       studioEnvironment: live.textures[0],
       debugEnvironment: live.textures[0],
     })
   );
-  const backGlassBindings = live.draws[2]!.set.mock.lastCall?.[0];
-  const frontGlassBindings = live.draws[3]!.set.mock.lastCall?.[0];
+  const backGlassBindings = glassBack.set.mock.lastCall?.[0];
+  const frontGlassBindings = glassFront.set.mock.lastCall?.[0];
   expect(backGlassBindings).toEqual(
     expect.objectContaining({
       params: expect.objectContaining({
@@ -619,10 +635,10 @@ test("renders the deterministic light once and idles until something changes", a
     },
     sourceTexture: live.targets[10],
   });
-  expect(live.draws[0]!.set).toHaveBeenLastCalledWith({
+  expect(darkLight.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({ lightPlaneZ: PRISM_LIGHT_PLANE_Z }),
   });
-  expect(live.draws[6]!.set).toHaveBeenLastCalledWith({
+  expect(dust.set).toHaveBeenLastCalledWith({
     params: expect.objectContaining({
       outputSize: [200, 100],
       time: 0,
@@ -643,15 +659,15 @@ test("renders the deterministic light once and idles until something changes", a
       }
     ).commands
   ).toEqual([
-    partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+    partialDraw(darkLight, 0, LIGHT_WHITE_VERTICES),
     partialDraw(
-      live.draws[0],
+      darkLight,
       LIGHT_OUTGOING_FIRST_VERTEX,
       LIGHT_OUTGOING_VERTICES
     ),
-    live.draws[2],
+    glassBack,
     partialDraw(
-      live.draws[0],
+      darkLight,
       LIGHT_INTERNAL_FIRST_VERTEX,
       LIGHT_INTERNAL_VERTICES
     ),
@@ -672,20 +688,20 @@ test("renders the deterministic light once and idles until something changes", a
   });
   expect(live.encodedPasses).toEqual([
     [
-      partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+      partialDraw(darkLight, 0, LIGHT_WHITE_VERTICES),
       partialDraw(
-        live.draws[0],
+        darkLight,
         LIGHT_OUTGOING_FIRST_VERTEX,
         LIGHT_OUTGOING_VERTICES
       ),
-      live.draws[2],
+      glassBack,
       partialDraw(
-        live.draws[0],
+        darkLight,
         LIGHT_INTERNAL_FIRST_VERTEX,
         LIGHT_INTERNAL_VERTICES
       ),
     ],
-    [live.effects[0], live.draws[3]],
+    [live.effects[0], glassFront],
     [live.effects[1]],
     [live.effects[2]],
     [live.effects[3]],
@@ -698,7 +714,7 @@ test("renders the deterministic light once and idles until something changes", a
     [live.effects[9]],
     [live.effects[10]],
     [live.effects[12]],
-    [live.effects[13], instancedDraw(live.draws[6], 2200)],
+    [live.effects[13], instancedDraw(dust, 2200)],
   ]);
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
@@ -725,12 +741,13 @@ test("requests supported packed bloom with optional performance timestamps", asy
   await renderer.ready;
 
   expect(requestAdapter).toHaveBeenCalledOnce();
-  expect(mocks.init).toHaveBeenCalledWith({
+  expect(mocks.init).toHaveBeenCalledWith(expect.objectContaining({
+    adapter: expect.objectContaining({ requestDevice: expect.any(Function) }),
     requiredFeatures: [
       "rg11b10ufloat-renderable",
       "timestamp-query",
     ],
-  });
+  }));
   expect(live.targets.slice(2, 8).map(({ format }) => format)).toEqual(
     Array.from({ length: 6 }, () => "rg11b10ufloat")
   );
@@ -759,10 +776,13 @@ test("retries without optional features when device creation rejects them", asyn
   });
   await renderer.ready;
 
+  expect(requestAdapter).toHaveBeenCalledOnce();
+  const reusedAdapter = mocks.init.mock.calls[0]![0]!.adapter;
   expect(mocks.init).toHaveBeenNthCalledWith(1, {
+    adapter: reusedAdapter,
     requiredFeatures: ["rg11b10ufloat-renderable"],
   });
-  expect(mocks.init).toHaveBeenNthCalledWith(2);
+  expect(mocks.init).toHaveBeenNthCalledWith(2, { adapter: reusedAdapter });
   expect(live.targets.slice(2, 10).map(({ format }) => format)).toEqual(
     Array.from({ length: 8 }, () => "rgba16float")
   );
@@ -865,7 +885,9 @@ test("debug previews opt into the orientation environment", async () => {
   });
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   tick(live.loopFrame);
-  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+  expect(
+    drawNamed(live, "prism-rainbow.glass-back").set
+  ).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({ environmentDebug: 1 }),
       studioEnvironment: live.textures[0],
@@ -902,7 +924,7 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
 
   expect(live.instance.fns.bundle).toHaveBeenCalledOnce();
   expect(live.effects).toHaveLength(4);
-  expect(live.draws).toHaveLength(8);
+  expect(live.draws).toHaveLength(6);
   expect(live.targets).toHaveLength(17);
   expect(live.targets.slice(0, 2).map(({ size }) => size)).toEqual([
     [200, 100],
@@ -919,8 +941,6 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
     "prism-rainbow.light.glass-back",
     "prism-rainbow.light.glass-front",
     "prism-rainbow.light.glass-accent",
-    "prism-rainbow.light.wireframe",
-    "prism-rainbow.light.light-wireframe",
   ]);
   expect(lightDrawOptions.some(([options]) => "instances" in options)).toBe(
     false
@@ -1007,6 +1027,7 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  const dust = drawNamed(live, "prism-rainbow.dust");
 
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
@@ -1017,7 +1038,9 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(30);
   const effectSetCounts = live.effects.map(({ set }) => set.mock.calls.length);
-  const drawSetCounts = live.draws.map(({ set }) => set.mock.calls.length);
+  const drawSetCounts = new Map(
+    live.draws.map((draw) => [draw, draw.set.mock.calls.length])
+  );
 
   live.gpuClock.time = 2.5 + 1 / 30;
   tick(live.loopFrame);
@@ -1025,9 +1048,9 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(31);
   expect(live.encodedPasses.at(-1)).toEqual([
     live.effects[13],
-    instancedDraw(live.draws[6], 2200),
+    instancedDraw(dust, 2200),
   ]);
-  expect(live.draws[6]!.set).toHaveBeenLastCalledWith({
+  expect(dust.set).toHaveBeenLastCalledWith({
     params: {
       time: 76 / 30,
     },
@@ -1036,10 +1059,11 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
     expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
   );
   expect(live.effects[13]!.set).toHaveBeenCalledTimes(effectSetCounts[13]!);
-  live.draws.slice(0, 6).forEach(({ set }, index) =>
-    expect(set).toHaveBeenCalledTimes(drawSetCounts[index]!)
+  live.draws.forEach((draw) =>
+    expect(draw.set).toHaveBeenCalledTimes(
+      drawSetCounts.get(draw)! + (draw === dust ? 1 : 0)
+    )
   );
-  expect(live.draws[6]!.set).toHaveBeenCalledTimes(drawSetCounts[6]! + 1);
   expect(live.lightBuffer.write).toHaveBeenCalledOnce();
   renderer.dispose();
 });
@@ -1056,6 +1080,7 @@ test("dark-dust performance samples never rebuild the retained scene", async () 
   });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  const dust = drawNamed(live, "prism-rainbow.dust");
 
   // Leave pending pointer input behind: the scenario must not consume it or
   // rebuild scene/light state while measuring the retained overlay.
@@ -1074,7 +1099,9 @@ test("dark-dust performance samples never rebuild the retained scene", async () 
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
   const effectSetCounts = live.effects.map(({ set }) => set.mock.calls.length);
-  const drawSetCounts = live.draws.map(({ set }) => set.mock.calls.length);
+  const drawSetCounts = new Map(
+    live.draws.map((draw) => [draw, draw.set.mock.calls.length])
+  );
 
   tick(live.loopFrame);
   tick(live.loopFrame);
@@ -1082,16 +1109,16 @@ test("dark-dust performance samples never rebuild the retained scene", async () 
 
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(17);
   expect(live.encodedPasses.slice(-2)).toEqual([
-    [live.effects[13], instancedDraw(live.draws[6], 2200)],
-    [live.effects[13], instancedDraw(live.draws[6], 2200)],
+    [live.effects[13], instancedDraw(dust, 2200)],
+    [live.effects[13], instancedDraw(dust, 2200)],
   ]);
   live.effects.forEach(({ set }, index) =>
     expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
   );
-  live.draws.slice(0, 6).forEach(({ set }, index) =>
-    expect(set).toHaveBeenCalledTimes(drawSetCounts[index]!)
+  live.draws.filter((draw) => draw !== dust).forEach((draw) =>
+    expect(draw.set).toHaveBeenCalledTimes(drawSetCounts.get(draw)!)
   );
-  expect(live.draws[6]!.set.mock.calls.slice(-2)).toEqual([
+  expect(dust.set.mock.calls.slice(-2)).toEqual([
     [{ params: { time: 1 / 30 } }],
     [{ params: { time: 2 / 30 } }],
   ]);
@@ -1116,6 +1143,8 @@ test("the Pass A view keeps the sorted light around the environment-only back fa
   const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  const darkLight = drawNamed(live, "prism-rainbow.light");
+  const glassBack = drawNamed(live, "prism-rainbow.glass-back");
 
   const controls = {
     ...DEFAULT_PRISM_CONTROLS,
@@ -1131,15 +1160,15 @@ test("the Pass A view keeps the sorted light around the environment-only back fa
   });
   expect(live.encodedPasses).toEqual([
     [
-      partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+      partialDraw(darkLight, 0, LIGHT_WHITE_VERTICES),
       partialDraw(
-        live.draws[0],
+        darkLight,
         LIGHT_OUTGOING_FIRST_VERTEX,
         LIGHT_OUTGOING_VERTICES
       ),
-      live.draws[2],
+      glassBack,
       partialDraw(
-        live.draws[0],
+        darkLight,
         LIGHT_INTERNAL_FIRST_VERTEX,
         LIGHT_INTERNAL_VERTICES
       ),
@@ -1162,7 +1191,7 @@ test("the Pass A view keeps the sorted light around the environment-only back fa
   renderer.dispose();
 });
 
-test("dark debug paths clear the wall without restoring its draw", async () => {
+test("dark debug paths clear the wall and create wireframes only on demand", async () => {
   const env = browser();
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
@@ -1192,11 +1221,29 @@ test("dark debug paths clear the wall without restoring its draw", async () => {
   renderer.setControls?.(wireframeControls);
   const nextPass = live.passOptions.length;
   tick(live.loopFrame);
+  const lightWireframe = drawNamed(live, "prism-rainbow.light-wireframe");
   expect(live.passOptions[nextPass]).toEqual({
     target: live.targets[0],
     clear: darkWallClear(wireframeControls.wallColor, wireframeControls.view),
   });
-  expect(live.encodedPasses[nextPass]).not.toContain(live.draws[1]);
+  expect(live.draws.some(({ label }) => label === "prism-rainbow.wall")).toBe(
+    false
+  );
+  expect(live.instance.fns.geometry).toHaveBeenCalledOnce();
+  expect(live.encodedPasses[nextPass]).toContainEqual(
+    partialDraw(lightWireframe, 0, LIGHT_WHITE_VERTICES)
+  );
+
+  renderer.setControls?.({
+    ...wireframeControls,
+    lightWireframe: false,
+    wireframe: true,
+  });
+  const wireframePass = live.passOptions.length;
+  tick(live.loopFrame);
+  const prismWireframe = drawNamed(live, "prism-rainbow.wireframe");
+  expect(live.instance.fns.geometry).toHaveBeenCalledTimes(2);
+  expect(live.encodedPasses[wireframePass + 1]).toContain(prismWireframe);
   renderer.dispose();
 });
 
@@ -1215,6 +1262,7 @@ test("the light wireframe reveals every generated triangle in the light-only vie
     lightWireframe: true,
   });
   tick(live.loopFrame);
+  const lightWireframe = drawNamed(live, "prism-rainbow.light-wireframe");
 
   expect(live.passOptions[0]).toEqual({
     target: live.targets[0],
@@ -1227,9 +1275,9 @@ test("the light wireframe reveals every generated triangle in the light-only vie
       LIGHT_OUTGOING_FIRST_VERTEX,
       LIGHT_OUTGOING_VERTICES
     ),
-    partialDraw(live.draws[5], 0, LIGHT_WHITE_VERTICES),
+    partialDraw(lightWireframe, 0, LIGHT_WHITE_VERTICES),
     partialDraw(
-      live.draws[5],
+      lightWireframe,
       LIGHT_OUTGOING_FIRST_VERTEX,
       LIGHT_OUTGOING_VERTICES
     ),
@@ -1239,12 +1287,12 @@ test("the light wireframe reveals every generated triangle in the light-only vie
       LIGHT_INTERNAL_VERTICES
     ),
     partialDraw(
-      live.draws[5],
+      lightWireframe,
       LIGHT_INTERNAL_FIRST_VERTEX,
       LIGHT_INTERNAL_VERTICES
     ),
   ]);
-  expect(live.draws[5]!.set).toHaveBeenLastCalledWith({
+  expect(lightWireframe.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({ lightPlaneZ: PRISM_LIGHT_PLANE_Z }),
   });
   renderer.dispose();
@@ -1296,6 +1344,8 @@ test("only optical controls rebuild the light mesh", async () => {
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
+  const glassBack = drawNamed(live, "prism-rainbow.glass-back");
+  const dust = drawNamed(live, "prism-rainbow.dust");
 
   // Peeling a layer off only changes how the same mesh is composited.
   renderer.setControls?.({ ...DEFAULT_PRISM_CONTROLS, view: "caustic" });
@@ -1321,7 +1371,7 @@ test("only optical controls rebuild the light mesh", async () => {
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
   tick(live.loopFrame);
-  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+  expect(glassBack.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({ environmentDebug: 0 }),
     })
@@ -1342,7 +1392,7 @@ test("only optical controls rebuild the light mesh", async () => {
   });
   tick(live.loopFrame);
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
-  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+  expect(glassBack.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({
         ior: 1.72,
@@ -1381,7 +1431,7 @@ test("only optical controls rebuild the light mesh", async () => {
       params: { bloomStrength: 1.8 },
     })
   );
-  expect(live.draws[6]!.set).toHaveBeenLastCalledWith(
+  expect(dust.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       params: expect.objectContaining({
         outputSize: [200, 100],
@@ -1393,7 +1443,7 @@ test("only optical controls rebuild the light mesh", async () => {
   );
   expect(live.encodedPasses.at(-1)).toEqual([
     live.effects[13],
-    instancedDraw(live.draws[6], 2200),
+    instancedDraw(dust, 2200),
   ]);
   // A different index of refraction bends every ribbon differently.
   renderer.setControls?.({
@@ -1435,6 +1485,7 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
+  const darkLight = drawNamed(live, "prism-rainbow.light");
 
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
@@ -1458,7 +1509,7 @@ test("fade controls rebuild only the data that cannot stay in the shader", async
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
   tick(live.loopFrame);
-  expect(live.draws[0]!.set).toHaveBeenLastCalledWith({
+  expect(darkLight.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({
       lightEdgeFalloff: 10,
       rainbowFalloffRate: 5.5,
@@ -1477,6 +1528,7 @@ test("FOV updates the automatically distanced camera boundary", async () => {
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writes = live.lightBuffer.write.mock.calls.length;
+  const darkLight = drawNamed(live, "prism-rainbow.light");
   const cameraFov = 56;
 
   renderer.setControls?.({
@@ -1485,7 +1537,7 @@ test("FOV updates the automatically distanced camera boundary", async () => {
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
   tick(live.loopFrame);
-  expect(live.draws[1]!.set).toHaveBeenLastCalledWith({
+  expect(darkLight.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({
       wallHalfExtent: wallExtent(2, CAMERA_DISTANCE, cameraFov),
     }),
@@ -1503,6 +1555,7 @@ test("observes and frames the prism relative to its canvas-local DOM slot", asyn
     initialMode: "dark",
   });
   await renderer.ready;
+  const darkLight = drawNamed(live, "prism-rainbow.light");
 
   expect(env.observe).toHaveBeenCalledWith(env.canvas);
   expect(env.observe).toHaveBeenCalledWith(env.framingElement);
@@ -1511,7 +1564,7 @@ test("observes and frames the prism relative to its canvas-local DOM slot", asyn
 
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   tick(live.loopFrame);
-  const uniforms = live.draws[1]!.set.mock.lastCall?.[0] as {
+  const uniforms = darkLight.set.mock.lastCall?.[0] as {
     scene: { viewProjection: Float32Array };
   };
   const matrix = uniforms.scene.viewProjection;
@@ -1587,6 +1640,7 @@ test("pauses well offscreen and resumes once with the latest layout and controls
   mocks.init.mockResolvedValueOnce(live.instance);
   const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
   await renderer.ready;
+  const darkLight = drawNamed(live, "prism-rainbow.light");
   env.flushAnimationFrames();
 
   expect(env.intersectionObserve).toHaveBeenCalledWith(env.canvas);
@@ -1620,7 +1674,7 @@ test("pauses well offscreen and resumes once with the latest layout and controls
   const resumedTick = live.instance.fns.frameLoop.mock.calls[1]![0];
   resumedTick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalled();
-  expect(live.draws[1]!.set).toHaveBeenLastCalledWith({
+  expect(darkLight.set).toHaveBeenLastCalledWith({
     scene: expect.objectContaining({
       wallColor: [16 / 255, 32 / 255, 48 / 255],
       causticOnly: 1,

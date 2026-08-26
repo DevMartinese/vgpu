@@ -45,7 +45,8 @@ export function renderDarkGraph(
         pass.draw(graph.copyBackground);
         if (runtime.controls.view === "glass") {
           pass.draw(graph.glassFront);
-          if (runtime.controls.wireframe) pass.draw(graph.wireframe);
+          if (runtime.controls.wireframe && graph.wireframe)
+            pass.draw(graph.wireframe);
         }
       }
     );
@@ -180,7 +181,7 @@ function renderBackdrop(
           firstVertex: LIGHT_OUTGOING_FIRST_VERTEX,
           vertices: LIGHT_OUTGOING_VERTICES,
         });
-        if (runtime.controls.lightWireframe) {
+        if (runtime.controls.lightWireframe && graph.lightWireframe) {
           pass.draw(graph.lightWireframe, {
             firstVertex: 0,
             vertices: LIGHT_WHITE_VERTICES,
@@ -197,7 +198,7 @@ function renderBackdrop(
           firstVertex: LIGHT_INTERNAL_FIRST_VERTEX,
           vertices: LIGHT_INTERNAL_VERTICES,
         });
-        if (runtime.controls.lightWireframe) {
+        if (runtime.controls.lightWireframe && graph.lightWireframe) {
           pass.draw(graph.lightWireframe, {
             firstVertex: LIGHT_INTERNAL_FIRST_VERTEX,
             vertices: LIGHT_INTERNAL_VERTICES,
