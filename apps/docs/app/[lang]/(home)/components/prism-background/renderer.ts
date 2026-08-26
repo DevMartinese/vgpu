@@ -55,6 +55,7 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
   ): Promise<PrismPerformanceReport>;
 }
 const DUST_FPS = 30;
+const OFFSCREEN_ROOT_MARGIN_PX = 256;
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
@@ -90,6 +91,12 @@ export function createRenderer(
   let requestedMode = options.initialMode;
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
+  let visibilityObserver: IntersectionObserver | undefined;
+  const pauseWhenInactive =
+    !options.debugPreviews && !options.performanceSampling;
+  let schedulingReady = false;
+  let documentVisible = true;
+  let canvasNearViewport = true;
   let resizeFrame = 0;
   let pendingSize: RenderSize | undefined;
   let pendingFraming: NormalizedViewport | undefined;
@@ -217,9 +224,38 @@ export function createRenderer(
     }
   };
 
+  /** Owns the only start/stop transition for the retained frame loop. */
+  function reconcileLoop(): void {
+    if (!schedulingReady || !gpu) return;
+    const shouldRun =
+      !disposed &&
+      (!pauseWhenInactive || (documentVisible && canvasNearViewport));
+    if (shouldRun === Boolean(loop)) return;
+    if (!shouldRun) {
+      loop?.stop();
+      loop = undefined;
+      return;
+    }
+    // Layout and controls may have changed while no frame was scheduled. A
+    // fresh measurement is queued before frameLoop's first rAF, and the dirty
+    // flag guarantees that first frame presents the retained state.
+    measure();
+    pendingPresent = true;
+    lastDustTime = -1;
+    loop = frameLoop(gpu, tick);
+  }
+
+  const onVisibilityChange = () => {
+    if (!pauseWhenInactive || disposed) return;
+    documentVisible = !document.hidden;
+    if (!documentVisible) interaction.onPointerLeave();
+    reconcileLoop();
+  };
+
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    schedulingReady = false;
     loop?.stop();
     loop = undefined;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
@@ -229,6 +265,8 @@ export function createRenderer(
     framingPending = false;
     observer?.disconnect();
     observer = undefined;
+    visibilityObserver?.disconnect();
+    visibilityObserver = undefined;
     window.removeEventListener(
       "pointermove",
       interaction.onPointerMove as EventListener
@@ -236,6 +274,8 @@ export function createRenderer(
     window.removeEventListener("blur", interaction.onPointerLeave);
     if (typeof window !== "undefined")
       window.removeEventListener("resize", measure);
+    if (pauseWhenInactive && typeof document !== "undefined")
+      document.removeEventListener("visibilitychange", onVisibilityChange);
 
     debugRelay?.setDelegate(NOOP_PRISM_DEBUG_PREVIEW_BRIDGE);
     debugHost?.dispose();
@@ -346,7 +386,30 @@ export function createRenderer(
     await pipelineController.ready;
     if (disposed) return;
     gpuClock = clock(gpu);
-    loop = frameLoop(gpu, tick);
+    if (pauseWhenInactive) {
+      documentVisible =
+        typeof document === "undefined" ? true : !document.hidden;
+      canvasNearViewport = isCanvasNearViewport(options.canvas);
+      if (typeof document !== "undefined")
+        document.addEventListener("visibilitychange", onVisibilityChange);
+      if (typeof IntersectionObserver !== "undefined") {
+        visibilityObserver = new IntersectionObserver(
+          (entries) => {
+            const entry = entries[entries.length - 1];
+            if (!entry || disposed) return;
+            canvasNearViewport = entry.isIntersecting;
+            reconcileLoop();
+          },
+          {
+            rootMargin: `${OFFSCREEN_ROOT_MARGIN_PX}px 0px`,
+            threshold: 0,
+          }
+        );
+        visibilityObserver.observe(options.canvas);
+      }
+    }
+    schedulingReady = true;
+    reconcileLoop();
   };
 
   const ready = initialize().catch((error: unknown) => {
@@ -432,4 +495,20 @@ export function createRenderer(
     resize,
     dispose,
   };
+}
+
+function isCanvasNearViewport(canvas: HTMLCanvasElement): boolean {
+  if (typeof window === "undefined") return true;
+  const rect = canvas.getBoundingClientRect();
+  const viewportHeight = window.innerHeight;
+  if (
+    !Number.isFinite(viewportHeight) ||
+    !Number.isFinite(rect.top) ||
+    !Number.isFinite(rect.bottom)
+  )
+    return true;
+  return (
+    rect.bottom >= -OFFSCREEN_ROOT_MARGIN_PX &&
+    rect.top <= viewportHeight + OFFSCREEN_ROOT_MARGIN_PX
+  );
 }

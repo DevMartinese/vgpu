@@ -84,15 +84,37 @@ function instancedDraw(pipeline: unknown, instances: number) {
 
 function browser() {
   const windowListeners = new Map<string, EventListener>();
+  const documentListeners = new Map<string, EventListener>();
   const canvasListeners = new Map<string, EventListener>();
   const frames = new Map<number, FrameRequestCallback>();
+  let hidden = false;
   let nextFrame = 0;
+  let canvasRect = {
+    left: 0,
+    top: 0,
+    right: 200,
+    bottom: 100,
+    width: 200,
+    height: 100,
+  };
   vi.stubGlobal("window", {
     devicePixelRatio: 2,
+    innerHeight: 768,
     addEventListener: vi.fn((name: string, listener: EventListener) =>
       windowListeners.set(name, listener)
     ),
     removeEventListener: vi.fn((name: string) => windowListeners.delete(name)),
+  });
+  vi.stubGlobal("document", {
+    get hidden() {
+      return hidden;
+    },
+    addEventListener: vi.fn((name: string, listener: EventListener) =>
+      documentListeners.set(name, listener)
+    ),
+    removeEventListener: vi.fn((name: string) =>
+      documentListeners.delete(name)
+    ),
   });
   vi.stubGlobal(
     "requestAnimationFrame",
@@ -107,17 +129,39 @@ function browser() {
   );
   const disconnect = vi.fn();
   const observe = vi.fn();
+  let resizeCallback: ResizeObserverCallback | undefined;
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
       observe = observe;
       disconnect = disconnect;
+    }
+  );
+  const intersectionDisconnect = vi.fn();
+  const intersectionObserve = vi.fn();
+  let intersectionCallback: IntersectionObserverCallback | undefined;
+  let intersectionOptions: IntersectionObserverInit | undefined;
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(
+        callback: IntersectionObserverCallback,
+        options?: IntersectionObserverInit
+      ) {
+        intersectionCallback = callback;
+        intersectionOptions = options;
+      }
+      observe = intersectionObserve;
+      disconnect = intersectionDisconnect;
     }
   );
 
   const captured = new Set<number>();
   const canvas = {
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
+    getBoundingClientRect: () => canvasRect,
     addEventListener: vi.fn((name: string, listener: EventListener) =>
       canvasListeners.set(name, listener)
     ),
@@ -139,9 +183,44 @@ function browser() {
     framingElement,
     canvasListeners,
     windowListeners,
+    documentListeners,
     frames,
     observe,
     disconnect,
+    intersectionObserve,
+    intersectionDisconnect,
+    get intersectionOptions() {
+      return intersectionOptions;
+    },
+    setHidden(next: boolean, dispatch = false) {
+      hidden = next;
+      if (dispatch) {
+        const listener = documentListeners.get("visibilitychange");
+        listener?.(new Event("visibilitychange"));
+      }
+    },
+    setCanvasRect(next: Partial<typeof canvasRect>) {
+      canvasRect = { ...canvasRect, ...next };
+    },
+    resizeObserved() {
+      resizeCallback?.([], {} as ResizeObserver);
+    },
+    intersect(isIntersecting: boolean) {
+      intersectionCallback?.(
+        [
+          {
+            isIntersecting,
+            target: canvas,
+          } as unknown as IntersectionObserverEntry,
+        ],
+        {} as IntersectionObserver
+      );
+    },
+    flushAnimationFrames(timestamp = 16) {
+      const pending = [...frames.entries()];
+      frames.clear();
+      for (const [, callback] of pending) callback(timestamp);
+    },
   };
 }
 
@@ -1131,6 +1210,112 @@ test("the camera follows the pointer without rebuilding an unchanged light", asy
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
   renderer.dispose();
+});
+
+test("pauses well offscreen and resumes once with the latest layout and controls", async () => {
+  const env = browser();
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
+  await renderer.ready;
+  env.flushAnimationFrames();
+
+  expect(env.intersectionObserve).toHaveBeenCalledWith(env.canvas);
+  expect(env.intersectionOptions).toEqual({
+    rootMargin: "256px 0px",
+    threshold: 0,
+  });
+  expect(env.documentListeners.has("visibilitychange")).toBe(true);
+  expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
+
+  env.intersect(false);
+  env.intersect(false);
+  expect(live.stop).toHaveBeenCalledOnce();
+
+  renderer.setControls?.({
+    ...DEFAULT_PRISM_CONTROLS,
+    view: "caustic",
+    wallColor: "#102030",
+  });
+  env.setCanvasRect({ right: 320, bottom: 180, width: 320, height: 180 });
+  env.resizeObserved();
+  renderer.invalidate();
+  expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
+
+  env.intersect(true);
+  env.intersect(true);
+  expect(live.instance.fns.frameLoop).toHaveBeenCalledTimes(2);
+  env.flushAnimationFrames(32);
+  expect(live.surface.resize).toHaveBeenLastCalledWith([640, 360]);
+
+  const resumedTick = live.instance.fns.frameLoop.mock.calls[1]![0];
+  resumedTick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalled();
+  expect(live.draws[1]!.set).toHaveBeenLastCalledWith({
+    scene: expect.objectContaining({
+      wallColor: [16 / 255, 32 / 255, 48 / 255],
+      causticOnly: 1,
+    }),
+  });
+
+  env.intersect(false);
+  expect(live.stop).toHaveBeenCalledTimes(2);
+  renderer.dispose();
+  expect(live.stop).toHaveBeenCalledTimes(2);
+  expect(env.intersectionDisconnect).toHaveBeenCalledOnce();
+  expect(env.documentListeners.has("visibilitychange")).toBe(false);
+  expect(live.surface.dispose).toHaveBeenCalledOnce();
+  expect(live.instance.dispose).toHaveBeenCalledOnce();
+});
+
+test("stays stopped when initialization finishes hidden and offscreen", async () => {
+  const env = browser();
+  env.setHidden(true);
+  env.setCanvasRect({ top: 2_000, bottom: 2_100 });
+  const live = gpu();
+  const pending = deferred<typeof live.instance>();
+  mocks.init.mockReturnValueOnce(pending.promise);
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
+  pending.resolve(live.instance);
+  await renderer.ready;
+
+  expect(live.instance.fns.frameLoop).not.toHaveBeenCalled();
+  env.setHidden(false, true);
+  expect(live.instance.fns.frameLoop).not.toHaveBeenCalled();
+  env.setCanvasRect({ top: 0, bottom: 100 });
+  env.intersect(true);
+  expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
+
+  renderer.dispose();
+  expect(live.stop).toHaveBeenCalledOnce();
+});
+
+test.each([
+  ["debug previews", { debugPreviews: true }],
+  ["performance sampling", { performanceSampling: true }],
+] as const)("%s bypass inactive scheduling", async (_label, optIn) => {
+  const env = browser();
+  env.setHidden(true);
+  env.setCanvasRect({ top: 2_000, bottom: 2_100 });
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    ...optIn,
+  });
+  await renderer.ready;
+
+  expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
+  expect(env.intersectionObserve).not.toHaveBeenCalled();
+  expect(env.documentListeners.has("visibilitychange")).toBe(false);
+  env.setHidden(false, true);
+  env.intersect(false);
+  expect(live.stop).not.toHaveBeenCalled();
+
+  renderer.dispose();
+  expect(live.stop).toHaveBeenCalledOnce();
 });
 
 test("coalesces resizes and updates both scene targets plus the light mesh", async () => {
