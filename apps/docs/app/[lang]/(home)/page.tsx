@@ -79,7 +79,7 @@ const HomePage = () => (
         opt any body copy into Geist Serif. */}
     <div>
       <Hero />
-      <main className="mx-auto max-w-6xl px-6 pb-16 lg:px-12 lg:pb-20">
+      <main className="mx-auto max-w-6xl px-6 pb-16 pt-24 min-[768px]:pt-0 lg:px-12 lg:pb-20">
         <OneShaderEverySurfaceSection />
         <ShaderCodeScalesSection />
         <AgentCommandSection />

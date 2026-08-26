@@ -1,0 +1,594 @@
+import type { Frame, Gpu, Surface, Target } from "vgpu";
+import { clock, frameLoop, surface } from "vgpu";
+
+import type {
+  BrowserRendererOptions,
+  ExampleRenderer,
+  RenderSize,
+} from "@/lib/example-renderer";
+import { prismOptionalFeatures } from "./capabilities";
+import {
+  createPrismDebugPreviewRelay,
+  NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+} from "./debug/preview-bridge";
+import type { PrismDebugPreviewBridge } from "./debug/preview-bridge";
+import type { PrismDebugPreviewHost } from "./debug/gpu";
+import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
+import { createPrismPipelineController } from "./pipeline-controller";
+import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
+import {
+  automaticPointerPosition,
+  createPrismInteraction,
+} from "./runtime/interaction";
+import { createPrismRuntime, destroyPrismRuntime } from "./runtime/resources";
+import {
+  setRuntimeControls,
+  setRuntimeFramingViewport,
+  setRuntimeLampAim,
+  setRuntimeOrbit,
+} from "./runtime/state";
+import type { PrismRuntime } from "./runtime/types";
+import type { PrismThumbnailOptions } from "./thumbnail";
+import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
+import type {
+  PrismPerformanceReport,
+  PrismPerformanceRunOptions,
+} from "./performance/types";
+import type { PrismPerformanceSampler } from "./performance/sampler";
+
+export type { PrismThumbnailOptions } from "./thumbnail";
+
+/** Keep thumbnail-only scene code outside the interactive homepage chunk. */
+export async function renderThumbnail(
+  gpu: Gpu,
+  output: Target,
+  options: PrismThumbnailOptions = {}
+): Promise<void> {
+  const thumbnail = await import("./thumbnail");
+  return thumbnail.renderThumbnail(gpu, output, options);
+}
+
+export interface PrismRenderer extends ExampleRenderer<PrismControls> {
+  /** Stable bridge identity; GPU-backed previews can replace its internals. */
+  readonly debugBridge: PrismDebugPreviewBridge;
+  debugSources(): readonly PrismDebugSource[];
+  setMode(mode: PrismPipelineMode): Promise<void>;
+  /** Available only when the renderer was created for `?prism-perf`. */
+  measurePerformance(
+    options?: PrismPerformanceRunOptions
+  ): Promise<PrismPerformanceReport>;
+}
+const DUST_FPS = 30;
+const DESKTOP_MAX_RENDER_FPS = 90;
+const MOBILE_MAX_RENDER_FPS = 30;
+const OFFSCREEN_ROOT_MARGIN_PX = 256;
+const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
+const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
+
+export interface PrismBrowserRendererOptions
+  extends BrowserRendererOptions<PrismControls> {
+  /** DOM slot whose canvas-relative bounds should contain the prism. */
+  readonly framingElement?: HTMLElement;
+  /** Explicit theme selected by the React integration layer. */
+  readonly initialMode: PrismPipelineMode;
+  /** Loads preview-only WebGPU code; must only be enabled for `?debug`. */
+  readonly debugPreviews?: boolean;
+  /** Dynamically loads the deterministic sampler for `?prism-perf`. */
+  readonly performanceSampling?: boolean;
+}
+
+export function createRenderer(
+  options: PrismBrowserRendererOptions
+): PrismRenderer {
+  const performanceDpr = options.performanceSampling
+    ? requestedPerformanceDpr(window.location?.search)
+    : undefined;
+  const debugRelay = options.debugPreviews
+    ? createPrismDebugPreviewRelay()
+    : undefined;
+  let disposed = false;
+  let reportedError = false;
+  let controls: PrismControls =
+    options.initialControls ?? DEFAULT_PRISM_CONTROLS;
+  let gpu: Gpu | undefined;
+  let gpuClock: ReturnType<typeof clock> | undefined;
+  let canvasSurface: Surface | undefined;
+  let runtime: PrismRuntime | undefined;
+  let pipelineController:
+    | ReturnType<typeof createPrismPipelineController>
+    | undefined;
+  let debugHost: PrismDebugPreviewHost | undefined;
+  let performanceSampler: PrismPerformanceSampler | undefined;
+  let requestedMode = options.initialMode;
+  let loop: { stop(): void } | undefined;
+  let observer: ResizeObserver | undefined;
+  let visibilityObserver: IntersectionObserver | undefined;
+  const pauseWhenInactive =
+    !options.debugPreviews && !options.performanceSampling;
+  let schedulingReady = false;
+  let documentVisible = true;
+  let canvasNearViewport = true;
+  let resizeFrame = 0;
+  let pendingSize: RenderSize | undefined;
+  let pendingFraming: NormalizedViewport | undefined;
+  let framingPending = false;
+  /** Set whenever the picture would differ from the frame already on screen. */
+  let pendingPresent = true;
+  /** Wakes preview-only passes without forcing the production scene to redraw. */
+  let debugPending = false;
+  let lastDustTime = -1;
+  let renderTimeBudget = 0;
+  let hasRenderedCappedFrame = false;
+  const mobileAutoPointer =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia(MOBILE_AUTO_POINTER_QUERY)
+      : undefined;
+  const interaction = createPrismInteraction(options.canvas, () => {
+    pendingPresent = true;
+  });
+  const onPointerMove = (event: PointerEvent) => {
+    if (mobileAutoPointer?.matches) return;
+    interaction.onPointerMove(event);
+  };
+
+  const handleFailure = (error: unknown) => {
+    if (disposed) return;
+    if (!reportedError) {
+      reportedError = true;
+      try {
+        options.onError?.(error);
+      } catch {
+        /* reporting must not block teardown */
+      }
+    }
+    dispose();
+  };
+
+  const reportRecoverableFailure = (error: unknown) => {
+    if (disposed) return;
+    try {
+      options.onError?.(error);
+    } catch {
+      /* reporting a recoverable failure must not affect the active renderer */
+    }
+  };
+
+  const applyResize = () => {
+    resizeFrame = 0;
+    const size = pendingSize;
+    const framing = pendingFraming;
+    const shouldApplyFraming = framingPending;
+    pendingSize = undefined;
+    pendingFraming = undefined;
+    framingPending = false;
+    if (disposed || !size || !canvasSurface || !pipelineController || !runtime)
+      return;
+    try {
+      canvasSurface.resize([
+        Math.max(1, Math.round(size.width * size.dpr)),
+        Math.max(1, Math.round(size.height * size.dpr)),
+      ]);
+      pipelineController.resize(canvasSurface.size);
+      if (shouldApplyFraming) setRuntimeFramingViewport(runtime, framing);
+      debugHost?.invalidate();
+      pendingPresent = true;
+    } catch (error) {
+      handleFailure(error);
+    }
+  };
+
+  const resize = (size: RenderSize) => {
+    if (disposed || size.width <= 0 || size.height <= 0) return;
+    pendingSize = size;
+    if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize);
+  };
+
+  const measure = () => {
+    const rect = options.canvas.getBoundingClientRect();
+    if (options.framingElement) {
+      pendingFraming = viewportWithinCanvas(
+        rect,
+        options.framingElement.getBoundingClientRect()
+      );
+      framingPending = true;
+    }
+    resize({
+      width: rect.width,
+      height: rect.height,
+      dpr:
+        performanceDpr ??
+        Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
+    });
+  };
+
+  const tick = (currentFrame: Frame) => {
+    const pipeline = pipelineController?.pipeline;
+    if (disposed || !runtime || !pipeline || !canvasSurface) return;
+    const performanceFrame = performanceSampler?.beginFrame(pipeline.mode);
+    if (!performanceFrame && mobileAutoPointer?.matches) {
+      interaction.setNormalizedPointer(
+        automaticPointerPosition(gpuClock?.time ?? 0)
+      );
+    }
+    const aim = performanceFrame
+      ? performanceFrame.aim
+      : interaction.stepAim();
+    const orbit = performanceFrame
+      ? performanceFrame.orbit
+      : interaction.stepOrbit();
+    if (!performanceFrame && !shouldRenderAtCappedRate()) return;
+    const updateScene = performanceFrame
+      ? performanceFrame.updateScene
+      : !!aim || !!orbit || pendingPresent;
+    const dustTime =
+      performanceFrame?.dustTime ??
+      (gpuClock ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS : 0);
+    const dustMoved =
+      pipeline.mode === "dark" &&
+      controls.view === "glass" &&
+      dustTime !== lastDustTime;
+    if (!performanceFrame && !updateScene && !dustMoved && !debugPending)
+      return;
+    if (performanceFrame || updateScene || dustMoved) {
+      try {
+        if (aim) setRuntimeLampAim(runtime, aim[0], aim[1]);
+        if (orbit) setRuntimeOrbit(runtime, orbit[0], orbit[1]);
+        if (aim || orbit) debugHost?.invalidate();
+        pipeline.bind(dustTime, { updateScene });
+        pipeline.render(
+          currentFrame,
+          canvasSurface,
+          performanceFrame
+            ? { updateScene, profile: performanceFrame.profile }
+            : { updateScene }
+        );
+        pendingPresent = false;
+        lastDustTime = dustTime;
+        if (performanceFrame) performanceSampler?.endFrame(performanceFrame);
+      } catch (error) {
+        performanceSampler?.fail(error);
+        handleFailure(error);
+        return;
+      }
+    }
+    debugPending = false;
+    try {
+      debugHost?.render(currentFrame, gpuClock?.time ?? 0);
+    } catch (error) {
+      reportRecoverableFailure(error);
+    }
+  };
+
+  /** Caps mobile at 30 FPS and larger layouts at 90 without changing easing. */
+  function shouldRenderAtCappedRate(): boolean {
+    if (options.performanceSampling) return true;
+    if (!hasRenderedCappedFrame) {
+      hasRenderedCappedFrame = true;
+      return true;
+    }
+    const delta = gpuClock?.deltaTime ?? 0;
+    // A zero delta is possible on the first frame and in deterministic mocks.
+    if (!Number.isFinite(delta) || delta <= 0) return true;
+    const renderInterval =
+      1 /
+      (mobileAutoPointer?.matches
+        ? MOBILE_MAX_RENDER_FPS
+        : DESKTOP_MAX_RENDER_FPS);
+    renderTimeBudget = Math.min(
+      renderTimeBudget + delta,
+      renderInterval * 2
+    );
+    if (renderTimeBudget + 1e-9 < renderInterval) return false;
+    renderTimeBudget = Math.max(0, renderTimeBudget - renderInterval);
+    return true;
+  }
+
+  /** Owns the only start/stop transition for the retained frame loop. */
+  function reconcileLoop(): void {
+    if (!schedulingReady || !gpu) return;
+    const shouldRun =
+      !disposed &&
+      (!pauseWhenInactive || (documentVisible && canvasNearViewport));
+    if (shouldRun === Boolean(loop)) return;
+    if (!shouldRun) {
+      loop?.stop();
+      loop = undefined;
+      return;
+    }
+    // Layout and controls may have changed while no frame was scheduled. A
+    // fresh measurement is queued before frameLoop's first rAF, and the dirty
+    // flag guarantees that first frame presents the retained state.
+    measure();
+    pendingPresent = true;
+    lastDustTime = -1;
+    renderTimeBudget = 0;
+    hasRenderedCappedFrame = false;
+    loop = frameLoop(gpu, tick);
+  }
+
+  const onVisibilityChange = () => {
+    if (!pauseWhenInactive || disposed) return;
+    documentVisible = !document.hidden;
+    if (!documentVisible) interaction.onPointerLeave();
+    reconcileLoop();
+  };
+
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    schedulingReady = false;
+    loop?.stop();
+    loop = undefined;
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
+    pendingSize = undefined;
+    pendingFraming = undefined;
+    framingPending = false;
+    observer?.disconnect();
+    observer = undefined;
+    visibilityObserver?.disconnect();
+    visibilityObserver = undefined;
+    window.removeEventListener(
+      "pointermove",
+      onPointerMove as EventListener
+    );
+    window.removeEventListener("blur", interaction.onPointerLeave);
+    if (typeof window !== "undefined")
+      window.removeEventListener("resize", measure);
+    if (pauseWhenInactive && typeof document !== "undefined")
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+
+    debugRelay?.setDelegate(NOOP_PRISM_DEBUG_PREVIEW_BRIDGE);
+    debugHost?.dispose();
+    debugHost = undefined;
+    debugRelay?.dispose();
+    performanceSampler?.dispose();
+    performanceSampler = undefined;
+
+    const controller = pipelineController;
+    const ownedRuntime = runtime;
+    const ownedSurface = canvasSurface;
+    const ownedGpu = gpu;
+    pipelineController = undefined;
+    runtime = undefined;
+    canvasSurface = undefined;
+    gpu = undefined;
+    gpuClock = undefined;
+
+    const finishResourceCleanup = () => {
+      if (ownedRuntime) destroyPrismRuntime(ownedRuntime);
+      ownedSurface?.dispose();
+      ownedGpu?.dispose();
+    };
+    const pendingCleanup = controller?.destroy();
+    if (pendingCleanup) {
+      void pendingCleanup.then(finishResourceCleanup, finishResourceCleanup);
+    } else {
+      finishResourceCleanup();
+    }
+  }
+
+  const initialize = async () => {
+    const { init } = await import("vgpu");
+    if (disposed) return;
+    let requiredFeatures: readonly GPUFeatureName[] = [];
+    try {
+      const adapter = await navigator.gpu?.requestAdapter();
+      requiredFeatures = prismOptionalFeatures(
+        adapter?.features,
+        options.performanceSampling === true
+      );
+    } catch {
+      // The regular device request remains the authoritative availability
+      // check. A failed optional probe simply preserves all fallback paths.
+    }
+    let nextGpu;
+    try {
+      nextGpu = await init(
+        requiredFeatures.length > 0 ? { requiredFeatures } : undefined
+      );
+    } catch (error) {
+      if (requiredFeatures.length === 0) throw error;
+      // Adapter capabilities may become stale between the optional probe and
+      // device creation. Keep the hero alive on the exact fp16 fallback.
+      nextGpu = await init();
+    }
+    if (disposed) {
+      nextGpu.dispose();
+      return;
+    }
+    gpu = nextGpu;
+    canvasSurface = surface(gpu, options.canvas, {
+      dpr: performanceDpr ?? [1, 2],
+    });
+    runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow", {
+      debugEnvironment: options.debugPreviews,
+    });
+    setRuntimeControls(runtime, controls);
+    if (options.performanceSampling) {
+      try {
+        const { createPrismPerformanceSampler } = await import("./performance");
+        if (disposed || !gpu || !runtime) return;
+        performanceSampler = createPrismPerformanceSampler({ gpu, runtime });
+      } catch (error) {
+        reportRecoverableFailure(error);
+      }
+    }
+    pipelineController = createPrismPipelineController({
+      runtime,
+      output: canvasSurface,
+      initialMode: requestedMode,
+      onActivate: () => {
+        pendingPresent = true;
+        lastDustTime = -1;
+        debugHost?.invalidate();
+      },
+    });
+    if (options.debugPreviews) {
+      try {
+        const { createPrismDebugPreviewHost } = await import("./debug/gpu");
+        if (disposed || !gpu || !runtime || !pipelineController) return;
+        debugHost = createPrismDebugPreviewHost({
+          gpu,
+          runtime,
+          getPipeline: () => pipelineController?.pipeline,
+          invalidate: () => {
+            debugPending = true;
+          },
+          onError: reportRecoverableFailure,
+        });
+        debugRelay?.setDelegate(debugHost.bridge);
+      } catch (error) {
+        reportRecoverableFailure(error);
+      }
+    }
+    window.addEventListener(
+      "pointermove",
+      onPointerMove as EventListener,
+      { passive: true }
+    );
+    window.addEventListener("blur", interaction.onPointerLeave);
+    observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measure);
+    observer?.observe(options.canvas);
+    if (options.framingElement) observer?.observe(options.framingElement);
+    window.addEventListener("resize", measure);
+    measure();
+    await pipelineController.ready;
+    if (disposed) return;
+    gpuClock = clock(gpu);
+    if (pauseWhenInactive) {
+      documentVisible =
+        typeof document === "undefined" ? true : !document.hidden;
+      canvasNearViewport = isCanvasNearViewport(options.canvas);
+      if (typeof document !== "undefined")
+        document.addEventListener("visibilitychange", onVisibilityChange);
+      if (typeof IntersectionObserver !== "undefined") {
+        visibilityObserver = new IntersectionObserver(
+          (entries) => {
+            const entry = entries[entries.length - 1];
+            if (!entry || disposed) return;
+            canvasNearViewport = entry.isIntersecting;
+            reconcileLoop();
+          },
+          {
+            rootMargin: `${OFFSCREEN_ROOT_MARGIN_PX}px 0px`,
+            threshold: 0,
+          }
+        );
+        visibilityObserver.observe(options.canvas);
+      }
+    }
+    schedulingReady = true;
+    reconcileLoop();
+  };
+
+  const ready = initialize().catch((error: unknown) => {
+    if (disposed) return;
+    handleFailure(error);
+    throw error;
+  });
+
+  return {
+    ready,
+    debugBridge: debugRelay?.bridge ?? NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+    debugSources() {
+      return pipelineController?.debugSources() ?? [];
+    },
+    async setMode(mode) {
+      if (disposed) return;
+      requestedMode = mode;
+      if (!pipelineController) {
+        await ready;
+        return;
+      }
+      try {
+        await pipelineController.setMode(mode);
+        if (disposed) return;
+        pendingPresent = true;
+        lastDustTime = -1;
+        debugHost?.invalidate();
+      } catch (error) {
+        if (disposed) return;
+        // The controller deliberately retains the previous active pipeline
+        // when a candidate module or prepare fails. Report and reject the
+        // switch without tearing that valid renderer down.
+        reportRecoverableFailure(error);
+        throw error;
+      }
+    },
+    async measurePerformance(measureOptions = {}) {
+      if (disposed) throw new Error("Cannot sample a disposed prism renderer.");
+      await ready;
+      const sampler = performanceSampler;
+      const controller = pipelineController;
+      const output = canvasSurface;
+      if (!sampler || !controller?.pipeline || !output) {
+        throw new Error(
+          "Prism performance sampling is disabled. Reload with ?prism-perf."
+        );
+      }
+      const previousMode = controller.pipeline.mode;
+      const mode = measureOptions.mode ?? previousMode;
+      if (mode !== previousMode) {
+        requestedMode = mode;
+        await controller.setMode(mode);
+      }
+      try {
+        return await sampler.start({
+          ...measureOptions,
+          mode,
+          resolution: output.size,
+          invalidate: () => {
+            pendingPresent = true;
+          },
+        });
+      } finally {
+        if (!disposed && mode !== previousMode && pipelineController) {
+          requestedMode = previousMode;
+          await pipelineController.setMode(previousMode);
+          pendingPresent = true;
+          lastDustTime = -1;
+        }
+      }
+    },
+    setControls(next) {
+      if (disposed) return;
+      controls = { ...next };
+      pendingPresent = true;
+      if (runtime) setRuntimeControls(runtime, controls);
+      debugHost?.invalidate();
+    },
+    invalidate() {
+      pendingPresent = true;
+      debugHost?.invalidate();
+    },
+    resize,
+    dispose,
+  };
+}
+
+function requestedPerformanceDpr(search: string | undefined): 1 | 2 | undefined {
+  const value = new URLSearchParams(search).get(PERFORMANCE_DPR_QUERY);
+  if (value === "1") return 1;
+  if (value === "2") return 2;
+  return undefined;
+}
+
+function isCanvasNearViewport(canvas: HTMLCanvasElement): boolean {
+  if (typeof window === "undefined") return true;
+  const rect = canvas.getBoundingClientRect();
+  const viewportHeight = window.innerHeight;
+  if (
+    !Number.isFinite(viewportHeight) ||
+    !Number.isFinite(rect.top) ||
+    !Number.isFinite(rect.bottom)
+  )
+    return true;
+  return (
+    rect.bottom >= -OFFSCREEN_ROOT_MARGIN_PX &&
+    rect.top <= viewportHeight + OFFSCREEN_ROOT_MARGIN_PX
+  );
+}
