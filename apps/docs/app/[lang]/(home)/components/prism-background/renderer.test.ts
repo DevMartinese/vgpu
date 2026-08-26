@@ -738,6 +738,55 @@ test("requests supported packed bloom with optional performance timestamps", asy
   renderer.dispose();
 });
 
+test("retries without optional features when device creation rejects them", async () => {
+  const env = browser();
+  const requestAdapter = vi.fn(async () => ({
+    features: new Set<GPUFeatureName>(["rg11b10ufloat-renderable"]),
+  }));
+  vi.stubGlobal("navigator", { gpu: { requestAdapter } });
+  const live = gpu();
+  mocks.init
+    .mockRejectedValueOnce(new Error("optional feature unavailable"))
+    .mockResolvedValueOnce(live.instance);
+
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+  });
+  await renderer.ready;
+
+  expect(mocks.init).toHaveBeenNthCalledWith(1, {
+    requiredFeatures: ["rg11b10ufloat-renderable"],
+  });
+  expect(mocks.init).toHaveBeenNthCalledWith(2);
+  expect(live.targets.slice(2, 10).map(({ format }) => format)).toEqual(
+    Array.from({ length: 8 }, () => "rgba16float")
+  );
+  renderer.dispose();
+});
+
+test("uses an explicit DPR only for performance sampling", async () => {
+  const env = browser();
+  Object.assign(window, {
+    location: { search: "?prism-perf=light&prism-perf-dpr=2" },
+  });
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+    performanceSampling: true,
+  });
+  await renderer.ready;
+
+  expect(live.instance.fns.surface).toHaveBeenCalledWith(env.canvas, {
+    dpr: 2,
+  });
+  renderer.dispose();
+});
+
 test("debug previews opt into the orientation environment", async () => {
   const env = browser();
   const live = gpu();

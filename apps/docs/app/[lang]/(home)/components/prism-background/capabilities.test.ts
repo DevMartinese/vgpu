@@ -58,4 +58,3 @@ describe("bloom target formats", () => {
     ).toEqual(Array.from({ length: 4 }, () => FALLBACK_BLOOM_FORMAT));
   });
 });
-

@@ -35,4 +35,3 @@ export function bloomFormatForLevel(
     ? PACKED_BLOOM_FORMAT
     : FALLBACK_BLOOM_FORMAT;
 }
-

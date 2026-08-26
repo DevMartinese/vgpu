@@ -57,6 +57,7 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
 }
 const DUST_FPS = 30;
 const OFFSCREEN_ROOT_MARGIN_PX = 256;
+const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
@@ -73,6 +74,9 @@ export interface PrismBrowserRendererOptions
 export function createRenderer(
   options: PrismBrowserRendererOptions
 ): PrismRenderer {
+  const performanceDpr = options.performanceSampling
+    ? requestedPerformanceDpr(window.location?.search)
+    : undefined;
   const debugRelay = options.debugPreviews
     ? createPrismDebugPreviewRelay()
     : undefined;
@@ -175,7 +179,9 @@ export function createRenderer(
     resize({
       width: rect.width,
       height: rect.height,
-      dpr: Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
+      dpr:
+        performanceDpr ??
+        Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
     });
   };
 
@@ -328,15 +334,25 @@ export function createRenderer(
       // The regular device request remains the authoritative availability
       // check. A failed optional probe simply preserves all fallback paths.
     }
-    const nextGpu = await init(
-      requiredFeatures.length > 0 ? { requiredFeatures } : undefined
-    );
+    let nextGpu;
+    try {
+      nextGpu = await init(
+        requiredFeatures.length > 0 ? { requiredFeatures } : undefined
+      );
+    } catch (error) {
+      if (requiredFeatures.length === 0) throw error;
+      // Adapter capabilities may become stale between the optional probe and
+      // device creation. Keep the hero alive on the exact fp16 fallback.
+      nextGpu = await init();
+    }
     if (disposed) {
       nextGpu.dispose();
       return;
     }
     gpu = nextGpu;
-    canvasSurface = surface(gpu, options.canvas, { dpr: [1, 2] });
+    canvasSurface = surface(gpu, options.canvas, {
+      dpr: performanceDpr ?? [1, 2],
+    });
     runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow", {
       debugEnvironment: options.debugPreviews,
     });
@@ -504,6 +520,13 @@ export function createRenderer(
     resize,
     dispose,
   };
+}
+
+function requestedPerformanceDpr(search: string | undefined): 1 | 2 | undefined {
+  const value = new URLSearchParams(search).get(PERFORMANCE_DPR_QUERY);
+  if (value === "1") return 1;
+  if (value === "2") return 2;
+  return undefined;
 }
 
 function isCanvasNearViewport(canvas: HTMLCanvasElement): boolean {
