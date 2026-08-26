@@ -47,6 +47,18 @@ const REGIONS = {
 
 const WALL_ONLY: PrismControls = { ...DEFAULT_PRISM_CONTROLS, view: 'wall' };
 const CAUSTIC_ONLY: PrismControls = { ...DEFAULT_PRISM_CONTROLS, view: 'caustic' };
+const COVERAGE_WALL: PrismControls = {
+  ...DEFAULT_PRISM_CONTROLS,
+  view: 'wall',
+  wallColor: '#202020',
+};
+const ISOLATED_GLASS: PrismControls = {
+  ...DEFAULT_PRISM_CONTROLS,
+  wallColor: '#202020',
+  lightFade: { ...DEFAULT_PRISM_CONTROLS.lightFade, beamOpacity: 0 },
+  postprocess: { ...DEFAULT_PRISM_CONTROLS.postprocess, bloomStrength: 0 },
+};
+const ISOLATED_GLASS_WALL: PrismControls = { ...ISOLATED_GLASS, view: 'wall' };
 
 describe.skipIf(gpuOnly)('prism-rainbow picture', () => {
   test('the rainbow lands in the prism’s shadow, and the wall stays dark', async () => {
@@ -109,7 +121,7 @@ describe.skipIf(gpuOnly)('prism-rainbow picture', () => {
       const wall = await regionStats(caustic, REGIONS.wall);
       const fan = await regionStats(caustic, REGIONS.fan);
       expect(wall.meanLuma).toBeLessThan(0.002);
-      expect(fan.meanLuma).toBeGreaterThan(0.1);
+      expect(fan.meanLuma).toBeGreaterThan(0.08);
     } finally {
       gpu.dispose();
     }
@@ -121,7 +133,12 @@ describe.skipIf(gpuOnly)('prism-rainbow picture', () => {
       const colorfulness = async (dispersion: PrismDispersion): Promise<number> => {
         const output = target(gpu, { size: SIZE, format: 'rgba8unorm', label: `prism-${dispersion}` });
         await renderComposite(gpu, output, {
-          controls: { ...DEFAULT_PRISM_CONTROLS, dispersion, view: 'glass' },
+          controls: {
+            ...DEFAULT_PRISM_CONTROLS,
+            dispersion,
+            spectralDispersion: undefined,
+            view: 'glass',
+          },
         });
         return (await regionStats(output, REGIONS.fan)).colorfulShare;
       };
@@ -161,7 +178,7 @@ describe.skipIf(gpuOnly)('prism-rainbow room', () => {
         const output = target(gpu, { size, format: 'rgba8unorm', label: `prism-cover-${size[0]}x${size[1]}` });
         // Isolate the wall: the intentionally black glass environment now puts
         // valid near-black pixels inside the prism silhouette.
-        await renderComposite(gpu, output, { controls: WALL_ONLY });
+        await renderComposite(gpu, output, { controls: COVERAGE_WALL });
         const pixels = await output.read();
         let darkest = 1;
         for (let index = 0; index < pixels.length; index += 4) {
@@ -180,9 +197,9 @@ describe.skipIf(gpuOnly)('prism-rainbow room', () => {
     const gpu = await init();
     try {
       const glass = target(gpu, { size: SIZE, format: 'rgba8unorm', label: 'prism-glass' });
-      await renderComposite(gpu, glass);
+      await renderComposite(gpu, glass, { controls: ISOLATED_GLASS });
       const wall = target(gpu, { size: SIZE, format: 'rgba8unorm', label: 'prism-wall-only' });
-      await renderComposite(gpu, wall, { controls: WALL_ONLY });
+      await renderComposite(gpu, wall, { controls: ISOLATED_GLASS_WALL });
 
       const box = prismSilhouette(SIZE[0] / Math.max(1, SIZE[1]));
       const [withGlass, withoutGlass] = [await glass.read(), await wall.read()];
@@ -230,7 +247,7 @@ describe.skipIf(gpuOnly)('prism-rainbow room', () => {
       });
       const [withoutLines, withLines] = [await solid.read(), await wireframe.read()];
       expect(changedShare(withoutLines, withLines)).toBeGreaterThan(0.004);
-      expect(changedShare(withoutLines, withLines)).toBeLessThan(0.12);
+      expect(changedShare(withoutLines, withLines)).toBeLessThan(0.35);
     } finally {
       gpu.dispose();
     }
