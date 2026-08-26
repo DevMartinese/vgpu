@@ -11,7 +11,10 @@ import type { LightPipelineGraph } from "./types";
 
 export function bindLightGraph(
   graph: LightPipelineGraph,
-  runtime: PrismRuntime
+  runtime: PrismRuntime,
+  updateScene = true,
+  revealProgress = 1,
+  beamWidthReveal = 1
 ): void {
   const backdrop = graph.backdropHDR;
   const scene = graph.sceneHDR;
@@ -24,6 +27,13 @@ export function bindLightGraph(
   }
   if (!studio) {
     throw new Error("prepare() must create prism environments before bind().");
+  }
+  if (!updateScene) {
+    graph.present.set({
+      sceneTexture: scene,
+      params: lightPresentUniforms(runtime, revealProgress),
+    });
+    return;
   }
   // Bindings are statically required even when the debug environment is not.
   // Reusing the studio view keeps the production path allocation-free.
@@ -39,7 +49,7 @@ export function bindLightGraph(
     shadow: prismShadowUniforms(runtime.view.viewProjection),
   });
   graph.caustic.set({
-    scene: sceneUniforms(runtime),
+    scene: sceneUniforms(runtime, beamWidthReveal),
     caustic: lightCausticUniforms(runtime),
     causticProfile: assets.causticProfile,
     causticSampler: graph.materialSampler,
@@ -70,9 +80,9 @@ export function bindLightGraph(
   graph.wireframe.set({
     params: { viewProjection: runtime.view.viewProjection },
   });
-  graph.lightWireframe.set({ scene: sceneUniforms(runtime) });
+  graph.lightWireframe.set({ scene: sceneUniforms(runtime, beamWidthReveal) });
   graph.present.set({
     sceneTexture: scene,
-    params: lightPresentUniforms(runtime),
+    params: lightPresentUniforms(runtime, revealProgress),
   });
 }

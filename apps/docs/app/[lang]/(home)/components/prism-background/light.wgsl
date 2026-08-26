@@ -7,6 +7,7 @@
 // wavelengths. The fragment stage only applies intensity and beam falloff.
 
 import { Scene } from "./scene.wgsl";
+import { beamWidthReveal } from "./materials/shared/beam-reveal.wgsl";
 import { decodeLightVertex } from "./materials/shared/light-vertex.wgsl";
 import { spectralSample } from "./materials/shared/spectral.wgsl";
 
@@ -18,6 +19,7 @@ struct VertexOut {
   @location(1) profile: f32,
   @location(2) intensity: f32,
   @location(3) travel: f32,
+  @location(4) @interpolate(flat) revealProfile: f32,
 };
 
 @vertex
@@ -43,6 +45,7 @@ fn vs_main(
   out.profile = metadata.profile;
   out.intensity = max(rawIntensity, 0.0);
   out.travel = metadata.travel;
+  out.revealProfile = metadata.revealProfile;
   return out;
 }
 
@@ -51,6 +54,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let radius = abs(in.profile);
   let radialFalloff = exp(-scene.lightEdgeFalloff * radius * radius)
     * (1.0 - smoothstep(0.55, 1.0, radius));
+  let widthReveal = beamWidthReveal(
+    in.revealProfile,
+    scene.beamWidthReveal,
+  );
   // Geometric dilution falls quickly near the effective source, then leaves a
   // progressively softer tail. Unlike the previous exponential plus cutoff,
   // this never introduces a second abrupt fade near the wall.
@@ -61,7 +68,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     max(scene.rainbowFalloffPower, 0.0001),
   );
   return vec4f(
-    in.color * in.intensity * radialFalloff * longitudinalFalloff
+    in.color * in.intensity * radialFalloff * widthReveal * longitudinalFalloff
       * max(scene.lightOpacity, 0.0),
     0.0,
   );

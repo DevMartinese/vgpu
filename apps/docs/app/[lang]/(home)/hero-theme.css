@@ -12,9 +12,12 @@ html.light {
   --home-page-background: #fafafa;
 }
 
-[data-hero-theme],
-[data-prism-background] {
+[data-hero-theme] {
   background-color: var(--home-hero-background);
+}
+
+[data-prism-background] {
+  background-color: var(--home-page-background);
 }
 
 [data-hero-theme] {

@@ -18,6 +18,7 @@ struct DustParams {
   prismB: vec2f,
   prismC: vec2f,
   prismFrontZ: f32,
+  revealProgress: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: DustParams;
@@ -285,5 +286,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let lightColor = linearToSrgb3(clamp(normalizedLight, vec3f(0.0), vec3f(1.0)));
   let energy = illumination * radial * in.sparkle * DUST_EXPOSURE;
   let displayEnergy = linearToSrgb3(tonemapAces(vec3f(energy))).r;
-  return vec4f(lightColor * displayEnergy * in.opacity, 0.0);
+  let reveal = clamp(params.revealProgress, 0.0, 1.0);
+  if (reveal <= 0.0) { discard; }
+  return vec4f(lightColor * displayEnergy * in.opacity * reveal, 0.0);
 }

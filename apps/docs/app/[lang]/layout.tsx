@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
+  SITE_OG_IMAGE_PATH,
   SITE_ORIGIN,
   localizedSitePath,
   siteUrl,
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
     url: siteUrl("/"),
     images: [
       {
-        url: siteUrl("/opengraph-image"),
+        url: siteUrl(SITE_OG_IMAGE_PATH),
         width: 1200,
         height: 630,
         alt: "vgpu — the WebGPU library designed for agents",

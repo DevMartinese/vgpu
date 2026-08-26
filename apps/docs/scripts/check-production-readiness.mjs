@@ -124,7 +124,7 @@ async function checkHomepage(baseUrl) {
   for (const property of ["og:type", "og:title", "og:description", "og:url", "og:image"]) {
     assert(html.includes(`property="${property}"`), `homepage: ${property} is missing`);
   }
-  assert(html.includes("https://vgpu.sh/opengraph-image"), "homepage: canonical OG image URL is missing");
+  assert(html.includes("https://vgpu.sh/hero/og.webp"), "homepage: canonical OG image URL is missing");
   assert(html.includes("/docs/examples-api"), "homepage: examples API reference is not discoverable");
   assert(html.includes("/openapi.json"), "homepage: OpenAPI description is not discoverable");
   for (const trustPath of ["/about", "/contact"]) {

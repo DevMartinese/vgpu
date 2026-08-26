@@ -22,6 +22,7 @@ export struct LightVertexMetadata {
   travel: f32,
   spectralIndex: u32,
   white: u32,
+  revealProfile: f32,
 }
 
 export fn decodeLightVertex(
@@ -41,6 +42,7 @@ export fn decodeLightVertex(
       0.0,
       0u,
       1u,
+      BEAM_BOUNDARY_PROFILES[quad + upper],
     );
   }
 
@@ -54,14 +56,20 @@ export fn decodeLightVertex(
       0.0,
       spectralIndex,
       0u,
+      BEAM_BOUNDARY_PROFILES[slice + upper],
     );
   }
 
   let outgoingQuad = spectralQuad - internalQuads;
+  let outgoingSlice = outgoingQuad % beamSlices;
   return LightVertexMetadata(
     0.0,
     QUAD_END_TRAVEL[corner],
     outgoingQuad / beamSlices + upper,
     0u,
+    0.5 * (
+      BEAM_BOUNDARY_PROFILES[outgoingSlice]
+        + BEAM_BOUNDARY_PROFILES[outgoingSlice + 1u]
+    ),
   );
 }

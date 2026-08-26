@@ -21,6 +21,8 @@ export struct Scene {
   lightEdgeFalloff: f32,
   rainbowFalloffRate: f32,
   rainbowFalloffPower: f32,
+  /** Initial reveal aperture shared by white, internal, and spectral beams. */
+  beamWidthReveal: f32,
 }
 
 /** Maps top-origin texture coordinates to the wall plane in world space. */

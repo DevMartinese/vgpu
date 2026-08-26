@@ -16,6 +16,10 @@ export interface PrismPipelineRenderOptions {
 export interface PrismPipelineBindOptions {
   /** Skip scene-owned writes when only a retained overlay changes. */
   readonly updateScene?: boolean;
+  /** Display-space reveal applied only by the final presentation layer. */
+  readonly revealProgress?: number;
+  /** Aperture applied to white, internal, and outgoing light ribbons. */
+  readonly beamWidthReveal?: number;
 }
 
 export interface PrismPassProfile {

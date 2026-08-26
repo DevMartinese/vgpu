@@ -244,6 +244,9 @@ describe("light pipeline baked assets", () => {
   test("light present supports selectable tone mapping", () => {
     expect(presentWgsl.wgsl).toContain("params.toneMapping");
     expect(presentWgsl.wgsl).toContain("applyPrismToneMapping");
+    expect(presentWgsl.wgsl).toContain(
+      "mix(params.backgroundColor, presented, reveal)"
+    );
     expect(toneMappingWgsl.wgsl).toContain("tonemapAces");
     expect(toneMappingWgsl.wgsl).toContain("tonemapNeutral");
     expect(toneMappingWgsl.wgsl).toContain("tonemapReinhard");

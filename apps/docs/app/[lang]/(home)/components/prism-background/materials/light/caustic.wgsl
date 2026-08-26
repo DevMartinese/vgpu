@@ -1,4 +1,5 @@
 import { Scene } from "../../scene.wgsl";
+import { beamWidthReveal } from "../shared/beam-reveal.wgsl";
 import { decodeLightVertex } from "../shared/light-vertex.wgsl";
 import { spectralSample } from "../shared/spectral.wgsl";
 import {
@@ -36,6 +37,7 @@ struct VertexOut {
   @location(3) travel: f32,
   @location(4) wavelength: f32,
   @location(5) worldPosition: vec2f,
+  @location(6) @interpolate(flat) revealProfile: f32,
 };
 
 @vertex
@@ -68,6 +70,7 @@ fn vs_main(
   out.intensity = max(rawIntensity, 0.0);
   out.travel = metadata.travel;
   out.worldPosition = position;
+  out.revealProfile = metadata.revealProfile;
   return out;
 }
 
@@ -135,6 +138,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let radius = abs(in.profile);
   let radial = exp(-scene.lightEdgeFalloff * radius * radius)
     * (1.0 - smoothstep(0.55, 1.0, radius));
+  let widthReveal = beamWidthReveal(
+    in.revealProfile,
+    scene.beamWidthReveal,
+  );
   let distance = clamp(in.travel / max(caustic.travelScale, 0.001), 0.0, 1.0);
   let wavelengthUv = clamp((700.0 - max(in.wavelength, 400.0)) / 300.0, 0.0, 1.0);
   let baked = textureSample(causticProfile, causticSampler, vec2f(distance, wavelengthUv));
@@ -149,7 +156,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     ),
   );
   let surfaceResponse = wallNormalResponse(in);
-  let energy = max(in.intensity, 0.0) * radial * outgoingFalloff
+  let energy = max(in.intensity, 0.0) * radial * widthReveal * outgoingFalloff
     * max(scene.lightOpacity, 0.0) * baked.a;
   let bounded = 1.0 - exp(-energy * max(caustic.strength, 0.0));
   let farMix = smoothstep(0.16, 0.92, distance) * caustic.farDesaturation;

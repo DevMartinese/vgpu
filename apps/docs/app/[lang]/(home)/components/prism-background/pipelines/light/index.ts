@@ -97,9 +97,15 @@ export function createLightPipeline(
       if (destroyed) return;
       resizeLightTargets(graph, size);
     },
-    bind() {
+    bind(_time, options) {
       if (destroyed) return;
-      bindLightGraph(graph, runtime);
+      bindLightGraph(
+        graph,
+        runtime,
+        options?.updateScene ?? true,
+        options?.revealProgress ?? 1,
+        options?.beamWidthReveal ?? 1
+      );
       debugDraws?.bind();
     },
     render(currentFrame, output, renderOptions) {

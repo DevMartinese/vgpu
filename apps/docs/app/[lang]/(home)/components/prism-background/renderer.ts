@@ -15,6 +15,7 @@ import type { PrismDebugPreviewBridge } from "./debug/preview-bridge";
 import type { PrismDebugPreviewHost } from "./debug/gpu";
 import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
 import { createPrismPipelineController } from "./pipeline-controller";
+import { heroRevealProgress } from "./pipelines/presentation";
 import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
 import {
   automaticPointerPosition,
@@ -64,6 +65,7 @@ const MOBILE_MAX_RENDER_FPS = 30;
 const OFFSCREEN_ROOT_MARGIN_PX = 256;
 const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
 const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
@@ -119,10 +121,16 @@ export function createRenderer(
   let lastDustTime = -1;
   let renderTimeBudget = 0;
   let hasRenderedCappedFrame = false;
+  let revealStartTime: number | undefined;
+  let lastRevealProgress = -1;
+  let lastBeamWidthReveal = -1;
   const mobileAutoPointer =
     typeof window.matchMedia === "function"
       ? window.matchMedia(MOBILE_AUTO_POINTER_QUERY)
       : undefined;
+  const prefersReducedMotion =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(REDUCED_MOTION_QUERY).matches;
   const interaction = createPrismInteraction(options.canvas, () => {
     pendingPresent = true;
   });
@@ -217,9 +225,14 @@ export function createRenderer(
       ? performanceFrame.orbit
       : interaction.stepOrbit();
     if (!performanceFrame && !shouldRenderAtCappedRate()) return;
+    const reveal = currentRevealProgress();
+    const revealProgress = reveal.opacity;
+    const beamWidthReveal = reveal.beamWidth;
+    const revealChanged = revealProgress !== lastRevealProgress;
+    const beamRevealChanged = beamWidthReveal !== lastBeamWidthReveal;
     const updateScene = performanceFrame
       ? performanceFrame.updateScene
-      : !!aim || !!orbit || pendingPresent;
+      : !!aim || !!orbit || pendingPresent || beamRevealChanged;
     const dustTime =
       performanceFrame?.dustTime ??
       (gpuClock ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS : 0);
@@ -227,14 +240,24 @@ export function createRenderer(
       pipeline.mode === "dark" &&
       controls.view === "glass" &&
       dustTime !== lastDustTime;
-    if (!performanceFrame && !updateScene && !dustMoved && !debugPending)
+    if (
+      !performanceFrame &&
+      !updateScene &&
+      !dustMoved &&
+      !debugPending &&
+      !revealChanged
+    )
       return;
-    if (performanceFrame || updateScene || dustMoved) {
+    if (performanceFrame || updateScene || dustMoved || revealChanged) {
       try {
         if (aim) setRuntimeLampAim(runtime, aim[0], aim[1]);
         if (orbit) setRuntimeOrbit(runtime, orbit[0], orbit[1]);
         if (aim || orbit) debugHost?.invalidate();
-        pipeline.bind(dustTime, { updateScene });
+        pipeline.bind(dustTime, {
+          updateScene,
+          revealProgress,
+          beamWidthReveal,
+        });
         pipeline.render(
           currentFrame,
           canvasSurface,
@@ -244,6 +267,8 @@ export function createRenderer(
         );
         pendingPresent = false;
         lastDustTime = dustTime;
+        lastRevealProgress = revealProgress;
+        lastBeamWidthReveal = beamWidthReveal;
         if (performanceFrame) performanceSampler?.endFrame(performanceFrame);
       } catch (error) {
         performanceSampler?.fail(error);
@@ -258,6 +283,18 @@ export function createRenderer(
       reportRecoverableFailure(error);
     }
   };
+
+  function currentRevealProgress(): {
+    readonly opacity: number;
+    readonly beamWidth: number;
+  } {
+    if (options.performanceSampling || prefersReducedMotion) {
+      return { opacity: 1, beamWidth: 1 };
+    }
+    const time = gpuClock?.time ?? 0;
+    revealStartTime ??= time;
+    return heroRevealProgress(time - revealStartTime);
+  }
 
   /** Caps mobile at 30 FPS and larger layouts at 90 without changing easing. */
   function shouldRenderAtCappedRate(): boolean {
