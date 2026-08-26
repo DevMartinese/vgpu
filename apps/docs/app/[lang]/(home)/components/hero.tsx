@@ -6,6 +6,7 @@ import { preload } from "react-dom";
 import { HeroTabs } from "./hero-tabs";
 import { WALL_GLOBAL_LIGHT_MASK_URL } from "./prism-background/assets/light/manifest";
 import { PrismBackground } from "./prism-background/prism-background";
+import { HERO_CANVAS_ENABLED } from "./release-flags";
 import "../hero-glass-button.css";
 import "../hero-theme.css";
 
@@ -16,12 +17,14 @@ import "../hero-theme.css";
  * stays server-rendered and layered above it.
  */
 export function Hero() {
-  preload(WALL_GLOBAL_LIGHT_MASK_URL, {
-    as: "fetch",
-    crossOrigin: "anonymous",
-    fetchPriority: "high",
-    type: "image/webp",
-  });
+  if (HERO_CANVAS_ENABLED) {
+    preload(WALL_GLOBAL_LIGHT_MASK_URL, {
+      as: "fetch",
+      crossOrigin: "anonymous",
+      fetchPriority: "high",
+      type: "image/webp",
+    });
+  }
 
   return (
     <HeroTabProvider>
