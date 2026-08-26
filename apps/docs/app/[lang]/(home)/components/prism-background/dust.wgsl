@@ -29,12 +29,12 @@ struct VertexOut {
   @builtin(position) position: vec4f,
   @location(0) pointCoord: vec2f,
   @location(1) lightUv: vec2f,
-  @location(2) @interpolate(flat) sparkle: f32,
-  @location(3) @interpolate(flat) softness: f32,
-  @location(4) @interpolate(flat) prismUvA: vec2f,
-  @location(5) @interpolate(flat) prismUvB: vec2f,
-  @location(6) @interpolate(flat) prismUvC: vec2f,
-  @location(7) @interpolate(flat) opacity: f32,
+  @location(2) @interpolate(flat, either) sparkle: f32,
+  @location(3) @interpolate(flat, either) softness: f32,
+  @location(4) @interpolate(flat, either) prismUvA: vec2f,
+  @location(5) @interpolate(flat, either) prismUvB: vec2f,
+  @location(6) @interpolate(flat, either) prismUvC: vec2f,
+  @location(7) @interpolate(flat, either) opacity: f32,
 };
 
 const TAU: f32 = 6.28318530718;

@@ -8,7 +8,7 @@ import { Scene } from "./scene.wgsl";
 struct VertexOut {
   @builtin(position) position: vec4f,
   @location(0) barycentric: vec3f,
-  @location(1) @interpolate(flat) quadIndex: u32,
+  @location(1) @interpolate(flat, either) quadIndex: u32,
 };
 
 @vertex
