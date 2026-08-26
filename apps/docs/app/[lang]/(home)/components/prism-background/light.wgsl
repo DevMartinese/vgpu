@@ -19,7 +19,7 @@ struct VertexOut {
   @location(1) profile: f32,
   @location(2) intensity: f32,
   @location(3) travel: f32,
-  @location(4) @interpolate(flat) revealProfile: f32,
+  @location(4) revealProfile: f32,
 };
 
 @vertex

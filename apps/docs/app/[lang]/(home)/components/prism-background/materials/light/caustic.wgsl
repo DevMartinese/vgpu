@@ -37,7 +37,7 @@ struct VertexOut {
   @location(3) travel: f32,
   @location(4) wavelength: f32,
   @location(5) worldPosition: vec2f,
-  @location(6) @interpolate(flat) revealProfile: f32,
+  @location(6) revealProfile: f32,
 };
 
 @vertex
