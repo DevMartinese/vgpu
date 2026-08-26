@@ -363,9 +363,9 @@ export const PRISM_POSTPROCESS_RANGES = {
 } as const;
 
 export const DEFAULT_POSTPROCESS_CONTROLS: PostprocessControls = {
-  bloomStrength: 1,
-  bloomThreshold: 0.05,
-  bloomRadius: 1,
+  bloomStrength: 0.7,
+  bloomThreshold: 0.1,
+  bloomRadius: 0.25,
 };
 
 export function clampBeamWidth(width: number): number {

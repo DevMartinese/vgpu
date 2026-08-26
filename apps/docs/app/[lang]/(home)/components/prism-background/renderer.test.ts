@@ -787,6 +787,33 @@ test("uses an explicit DPR only for performance sampling", async () => {
   renderer.dispose();
 });
 
+test("caps a 120 Hz interactive loop at 90 rendered frames", async () => {
+  const env = browser();
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  live.gpuClock.deltaTime = 1 / 120;
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+  });
+  await renderer.ready;
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+
+  for (let sourceFrame = 0; sourceFrame < 120; sourceFrame++) {
+    env.windowListeners.get("pointermove")?.({
+      pointerId: 1,
+      clientX: sourceFrame % 2 === 0 ? 0 : 200,
+      clientY: sourceFrame % 3 === 0 ? 0 : 100,
+    } as unknown as Event);
+    tick(live.loopFrame);
+  }
+
+  // Light mode encodes three passes per rendered frame.
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(90 * 3);
+  renderer.dispose();
+});
+
 test("debug previews opt into the orientation environment", async () => {
   const env = browser();
   const live = gpu();

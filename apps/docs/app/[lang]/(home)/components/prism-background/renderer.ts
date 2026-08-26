@@ -56,6 +56,8 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
   ): Promise<PrismPerformanceReport>;
 }
 const DUST_FPS = 30;
+const MAX_RENDER_FPS = 90;
+const MAX_RENDER_INTERVAL = 1 / MAX_RENDER_FPS;
 const OFFSCREEN_ROOT_MARGIN_PX = 256;
 const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
 
@@ -111,6 +113,8 @@ export function createRenderer(
   /** Wakes preview-only passes without forcing the production scene to redraw. */
   let debugPending = false;
   let lastDustTime = -1;
+  let renderTimeBudget = 0;
+  let hasRenderedCappedFrame = false;
   const interaction = createPrismInteraction(options.canvas, () => {
     pendingPresent = true;
   });
@@ -195,6 +199,7 @@ export function createRenderer(
     const orbit = performanceFrame
       ? performanceFrame.orbit
       : interaction.stepOrbit();
+    if (!performanceFrame && !shouldRenderAtCappedRate()) return;
     const updateScene = performanceFrame
       ? performanceFrame.updateScene
       : !!aim || !!orbit || pendingPresent;
@@ -237,6 +242,25 @@ export function createRenderer(
     }
   };
 
+  /** Keeps the interactive renderer below 90 FPS without changing easing. */
+  function shouldRenderAtCappedRate(): boolean {
+    if (options.performanceSampling) return true;
+    if (!hasRenderedCappedFrame) {
+      hasRenderedCappedFrame = true;
+      return true;
+    }
+    const delta = gpuClock?.deltaTime ?? 0;
+    // A zero delta is possible on the first frame and in deterministic mocks.
+    if (!Number.isFinite(delta) || delta <= 0) return true;
+    renderTimeBudget = Math.min(
+      renderTimeBudget + delta,
+      MAX_RENDER_INTERVAL * 2
+    );
+    if (renderTimeBudget + 1e-9 < MAX_RENDER_INTERVAL) return false;
+    renderTimeBudget = Math.max(0, renderTimeBudget - MAX_RENDER_INTERVAL);
+    return true;
+  }
+
   /** Owns the only start/stop transition for the retained frame loop. */
   function reconcileLoop(): void {
     if (!schedulingReady || !gpu) return;
@@ -255,6 +279,8 @@ export function createRenderer(
     measure();
     pendingPresent = true;
     lastDustTime = -1;
+    renderTimeBudget = 0;
+    hasRenderedCappedFrame = false;
     loop = frameLoop(gpu, tick);
   }
 
