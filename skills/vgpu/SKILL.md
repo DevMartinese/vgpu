@@ -5,9 +5,9 @@ description: >-
   vgpu/mock, vgpu/scene, and vgpu/client. Use @vgpu/render/inspect, /utils, /edit,
   and /perf only as slim tooling subpaths. Bundles performance guides and the API
   reference; load one doc at a time.
-vgpuVersion: 0.3.0
-gitSha: 39dc6b3b98e7abfd7a276410f6f41143ddff64c8
-generatedAt: 2026-08-26T05:03:45.738Z
+vgpuVersion: 0.3.1-rc.0
+gitSha: 74558485c7c7073e910627e95ee429ce169d89a6
+generatedAt: 2026-08-26T05:27:55.790Z
 ---
 
 # vgpu
@@ -48,6 +48,7 @@ Writing or optimizing a shader? Read **performance-model** first, then the rest 
 - **Browser testing with Playwright WebGPU** — Browser tests should exercise the same public API users copy: init(), surface(gpu, canvas, opts), explicit targets, and deterministic frame submiss…  `references/guides/browser-testing.docs.md`
 - **External ticker** — By default vgpu owns the clock: every frame(gpu) moves clock(gpu).time forward by the wall-clock delta since the last frame, and frameLoop(gpu, cb)…  `references/guides/external-ticker.docs.md`
 - **Getting started** — Start with the public vgpu package.  `references/guides/getting-started.docs.md`
+- **MCP** — Connect coding agents directly to VGPU documentation and verified examples through the Model Context Protocol.  `references/guides/mcp.docs.md`
 - **Measuring** — Measure the thing you intend to optimize: CPU encoding, pipeline warm-up, bind-group churn, target memory, or shader cost.  `references/guides/measuring.docs.md`
 - **Overview** — Share one GPUDevice between vgpu and a machine learning runtime so model outputs stay on the GPU.  `references/guides/ml.docs.md`
 - **Quickstart: Browser** — In this quickstart you run an ONNX model with ONNX Runtime Web's WebGPU execution provider and consume its output with vgpu shaders — on one shared…  `references/guides/ml-browser.docs.md`
