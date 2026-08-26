@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import { generatePermutations } from "flags/next";
 import { translations } from "@/geistdocs";
 import { heroCanvas, homepageFlags } from "@/flags";
-import { HomePage } from "../../../(home)/home-page";
+import { HomePage } from "../../home-page";
 
-export { homeMetadata as metadata } from "../../../(home)/home-metadata";
+export { homeMetadata as metadata } from "../../home-metadata";
 
 export async function generateStaticParams() {
   if (!process.env.FLAGS_SECRET) return [];

@@ -21,18 +21,11 @@ const PrismDebugGraph = lazy(() =>
   }))
 );
 
-const HERO_BACKGROUND_PROPERTY = "--home-hero-background";
-const CSS_HEX_COLOR = /^#[\da-f]{6}$/i;
 const PRISM_PERFORMANCE_QUERY = "prism-perf";
-
-function heroBackgroundColor(canvas: HTMLCanvasElement): string {
-  const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
-  if (!hero) return DEFAULT_PRISM_CONTROLS.wallColor;
-  const value = getComputedStyle(hero)
-    .getPropertyValue(HERO_BACKGROUND_PROPERTY)
-    .trim();
-  return CSS_HEX_COLOR.test(value) ? value : DEFAULT_PRISM_CONTROLS.wallColor;
-}
+const PRISM_WALL_COLOR: Record<PrismPipelineMode, string> = {
+  dark: "#000000",
+  light: "#d2ccc2",
+};
 
 function currentPrismMode(): PrismPipelineMode {
   return document.documentElement.classList.contains("light")
@@ -98,7 +91,7 @@ function PrismCanvas() {
     );
     const initialControls = {
       ...DEFAULT_PRISM_CONTROLS,
-      wallColor: heroBackgroundColor(canvas),
+      wallColor: PRISM_WALL_COLOR[initialMode],
     };
     controlsRef.current = initialControls;
     setDebugControls(initialControls);
@@ -131,7 +124,7 @@ function PrismCanvas() {
       const mode = currentPrismMode();
       if (mode === "light") preloadLightAssets();
       preloadPrismPipeline(mode);
-      const wallColor = heroBackgroundColor(canvas);
+      const wallColor = PRISM_WALL_COLOR[mode];
       setDebugBaselineControls((current) =>
         current.wallColor === wallColor
           ? current
