@@ -1,8 +1,10 @@
 import { draw, effect } from "vgpu";
 
+import bloomBlurPairedWgsl from "../../bloom-blur-paired.wgsl";
 import bloomBlurWgsl from "../../bloom-blur.wgsl";
 import bloomCompositeWgsl from "../../bloom-composite.wgsl";
 import bloomExtractWgsl from "../../bloom-extract.wgsl";
+import { BLOOM_BLUR_SAMPLING } from "../../bloom-pairing";
 import { BLOOM_LEVELS } from "../../bloom";
 import copyLinearWgsl from "../../copy-linear.wgsl";
 import dustWgsl from "../../dust.wgsl";
@@ -45,14 +47,25 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
   const bloomExtract = effect(gpu, bloomExtractWgsl, {
     label: `${label}.bloom-extract`,
   });
-  const bloomBlur = Array.from({ length: BLOOM_LEVELS }, (_, level) => ({
-    horizontal: effect(gpu, bloomBlurWgsl, {
-      label: `${label}.bloom-${level}-horizontal`,
-    }),
-    vertical: effect(gpu, bloomBlurWgsl, {
-      label: `${label}.bloom-${level}-vertical`,
-    }),
-  })) as unknown as BloomBlurEffects;
+  const bloomBlur = Array.from({ length: BLOOM_LEVELS }, (_, level) => {
+    const sampling = BLOOM_BLUR_SAMPLING[level]!;
+    return {
+      horizontal: effect(
+        gpu,
+        sampling.horizontal === "bilinear-pairs"
+          ? bloomBlurPairedWgsl
+          : bloomBlurWgsl,
+        { label: `${label}.bloom-${level}-horizontal` }
+      ),
+      vertical: effect(
+        gpu,
+        sampling.vertical === "bilinear-pairs"
+          ? bloomBlurPairedWgsl
+          : bloomBlurWgsl,
+        { label: `${label}.bloom-${level}-vertical` }
+      ),
+    };
+  }) as unknown as BloomBlurEffects;
   const bloomComposite = effect(gpu, bloomCompositeWgsl, {
     label: `${label}.bloom-composite`,
   });

@@ -1,8 +1,6 @@
 import {
-  BLOOM_KERNEL_TAPS,
   BLOOM_LEVEL_FACTORS,
   PARTICLE_LIGHT_FIRST_LEVEL,
-  bloomKernelWeights,
   bloomSpread,
 } from "../../bloom";
 import {
@@ -18,10 +16,7 @@ import {
   PRISM_TRIANGLE,
 } from "../../types";
 import type { DarkPipelineGraph } from "./types";
-
-const BLOOM_KERNEL_WEIGHTS = BLOOM_KERNEL_TAPS.map((tapCount) =>
-  bloomKernelWeights(tapCount)
-);
+import { bloomBlurUniforms } from "./bloom-uniforms";
 
 export function bindDarkGraph(
   graph: DarkPipelineGraph,
@@ -102,29 +97,15 @@ export function bindDarkGraph(
       level === 0 || level === PARTICLE_LIGHT_FIRST_LEVEL
         ? targets.vertical
         : bloomTargets[level - 1]!.vertical;
-    const coefficients = BLOOM_KERNEL_WEIGHTS[level]!;
-    const commonParams = {
-      texelSize: [
-        1 / targets.horizontal.size[0],
-        1 / targets.horizontal.size[1],
-      ],
-      tapCount: BLOOM_KERNEL_TAPS[level]!,
-      coefficients0: coefficients.slice(0, 4),
-      coefficients1: coefficients.slice(4, 8),
-      coefficients2: coefficients.slice(8, 12),
-      coefficients3: coefficients.slice(12, 16),
-      coefficients4: coefficients.slice(16, 20),
-      coefficients5: coefficients.slice(20, 24),
-    };
     bloom.horizontal.set({
       sourceTexture: horizontalSource,
       sourceSampler: runtime.sceneSampler,
-      params: { ...commonParams, direction: [1, 0] },
+      params: bloomBlurUniforms(level, "horizontal", targets.horizontal.size),
     });
     bloom.vertical.set({
       sourceTexture: targets.horizontal,
       sourceSampler: runtime.sceneSampler,
-      params: { ...commonParams, direction: [0, 1] },
+      params: bloomBlurUniforms(level, "vertical", targets.vertical.size),
     });
   });
   graph.bloomComposite.set({
