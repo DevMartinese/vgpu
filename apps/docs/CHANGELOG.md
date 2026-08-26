@@ -1,5 +1,20 @@
 # docs
 
+## 0.1.5
+
+### Patch Changes
+
+- Updated dependencies [0b9b564]
+- Updated dependencies [f4b4b27]
+- Updated dependencies [e2b4c4a]
+  - @vgpu/cli@0.2.1
+  - vgpu@0.3.1
+  - @vgpu/wgsl@0.3.1
+  - @vgpu/core@0.3.1
+  - @vgpu/adapter-mock@0.3.1
+  - @vgpu/adapter-node@0.3.1
+  - @vgpu/wgsl-std@0.3.1
+
 ## 0.1.4
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @vgpu/core
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [e2b4c4a]
+  - @vgpu/wgsl@0.3.1
+
 ## 0.3.0
 
 ### Patch Changes

@@ -5,9 +5,9 @@ description: >-
   vgpu/mock, vgpu/scene, and vgpu/client. Use @vgpu/render/inspect, /utils, /edit,
   and /perf only as slim tooling subpaths. Bundles performance guides and the API
   reference; load one doc at a time.
-vgpuVersion: 0.3.0
-gitSha: 215f957a68140bf8175785e1185d4b2293c4e9bb
-generatedAt: 2026-08-26T04:14:47.147Z
+vgpuVersion: 0.3.1-rc.0
+gitSha: 678dfaf3b9ca7acee5dc369219b5ef8c941ce477
+generatedAt: 2026-08-26T04:52:06.569Z
 ---
 
 # vgpu
