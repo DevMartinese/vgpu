@@ -315,6 +315,7 @@ function gpu() {
       })),
     },
     device: {
+      features: new Set<string>(),
       createBuffer: vi.fn(() => lightBuffer),
       createTexture: vi.fn((options: Record<string, unknown>) => {
         const created = {
@@ -821,6 +822,71 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   );
   expect(live.draws[6]!.set).toHaveBeenCalledTimes(drawSetCounts[6]! + 1);
   expect(live.lightBuffer.write).toHaveBeenCalledOnce();
+  renderer.dispose();
+});
+
+test("dark-dust performance samples never rebuild the retained scene", async () => {
+  const env = browser();
+  const live = gpu();
+  vi.stubGlobal("navigator", {});
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    performanceSampling: true,
+  });
+  await renderer.ready;
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+
+  // Leave pending pointer input behind: the scenario must not consume it or
+  // rebuild scene/light state while measuring the retained overlay.
+  env.windowListeners.get("pointermove")?.({
+    pointerId: 1,
+    clientX: 15,
+    clientY: 85,
+  } as unknown as Event);
+  const reportPromise = renderer.measurePerformance({
+    scenario: "dark-dust",
+    frames: 2,
+    warmupFrames: 0,
+  });
+  await Promise.resolve();
+
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
+  const effectSetCounts = live.effects.map(({ set }) => set.mock.calls.length);
+  const drawSetCounts = live.draws.map(({ set }) => set.mock.calls.length);
+
+  tick(live.loopFrame);
+  tick(live.loopFrame);
+  const report = await reportPromise;
+
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(17);
+  expect(live.encodedPasses.slice(-2)).toEqual([
+    [live.effects[13], instancedDraw(live.draws[6], 2200)],
+    [live.effects[13], instancedDraw(live.draws[6], 2200)],
+  ]);
+  live.effects.forEach(({ set }, index) =>
+    expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
+  );
+  live.draws.slice(0, 6).forEach(({ set }, index) =>
+    expect(set).toHaveBeenCalledTimes(drawSetCounts[index]!)
+  );
+  expect(live.draws[6]!.set.mock.calls.slice(-2)).toEqual([
+    [{ params: { time: 1 / 30 } }],
+    [{ params: { time: 2 / 30 } }],
+  ]);
+  expect(live.lightBuffer.write).toHaveBeenCalledOnce();
+  expect(report).toMatchObject({
+    mode: "dark",
+    scenario: "dark-dust",
+    requested: { frames: 2, warmupFrames: 1 },
+    recordedFrames: 2,
+    lightMesh: { rebuilds: 0 },
+    passes: { "dark.output": { encodedFrames: 2 } },
+  });
+  expect(Object.keys(report.passes)).toEqual(["dark.output"]);
+
   renderer.dispose();
 });
 

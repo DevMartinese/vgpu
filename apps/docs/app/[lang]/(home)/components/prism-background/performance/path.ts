@@ -1,4 +1,5 @@
 const TAU = Math.PI * 2;
+const DUST_FPS = 30;
 
 export interface PrismPerformanceInput {
   readonly aim: readonly [number, number];
@@ -20,6 +21,11 @@ export function deterministicPerformanceInput(
     aim: [y, x],
     orbit: [x * 2 - 1, y * 2 - 1],
   };
+}
+
+/** Repeatable dust clock: exactly one production dust tick per rendered frame. */
+export function deterministicDustTime(frame: number): number {
+  return frame / DUST_FPS;
 }
 
 function clamp01(value: number): number {

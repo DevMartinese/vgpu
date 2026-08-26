@@ -62,6 +62,7 @@ test("samples warmup + deterministic frames and reports CPU, mesh, passes, and G
   const report = await reportPromise;
 
   expect(report.mode).toBe("light");
+  expect(report.scenario).toBe("pointer");
   expect(report.resolution).toEqual([800, 450]);
   expect(report.recordedFrames).toBe(4);
   expect(report.timing.frameInterval).toMatchObject({
@@ -86,4 +87,74 @@ test("samples warmup + deterministic frames and reports CPU, mesh, passes, and G
   expect(restoreState).toHaveBeenCalledWith([0.5, 0.5], [0, 0]);
   expect(invalidate).toHaveBeenCalledTimes(2);
   expect(disposeTimer).toHaveBeenCalledOnce();
+});
+
+test("samples only retained dark dust after a mandatory cache warmup", async () => {
+  vi.useFakeTimers();
+  let clock = 0;
+  const runtime = {
+    lampArc: 0.5,
+    lampTarget: 0.5,
+    orbit: [0, 0],
+  } as unknown as PrismRuntime;
+  const gpu = {
+    device: { features: new Set<string>() },
+  } as unknown as Gpu;
+  const sampler = createPrismPerformanceSampler({
+    gpu,
+    runtime,
+    now: () => clock,
+    drain: async () => {},
+    restoreState: vi.fn(),
+  });
+  const reportPromise = sampler.start({
+    mode: "dark",
+    scenario: "dark-dust",
+    resolution: [800, 450],
+    frames: 3,
+    warmupFrames: 0,
+    invalidate: vi.fn(),
+  });
+
+  for (let index = 0; index < 4; index += 1) {
+    clock = index * 16;
+    const frame = sampler.beginFrame("dark")!;
+    expect(frame).toMatchObject({
+      scenario: "dark-dust",
+      updateScene: index === 0,
+      dustTime: index / 30,
+    });
+    expect(frame.aim).toBeUndefined();
+    expect(frame.orbit).toBeUndefined();
+    frame.profile.pass("dark.output");
+    clock += 1;
+    sampler.endFrame(frame);
+  }
+  await vi.runAllTimersAsync();
+  const report = await reportPromise;
+
+  expect(report).toMatchObject({
+    mode: "dark",
+    scenario: "dark-dust",
+    requested: { frames: 3, warmupFrames: 1 },
+    recordedFrames: 3,
+    lightMesh: { rebuilds: 0, totalUploadedBytes: 0 },
+    passes: { "dark.output": { encodedFrames: 3 } },
+  });
+  expect(Object.keys(report.passes)).toEqual(["dark.output"]);
+});
+
+test("rejects the dark-dust scenario on the light pipeline", async () => {
+  const runtime = {} as PrismRuntime;
+  const gpu = {} as Gpu;
+  const sampler = createPrismPerformanceSampler({ gpu, runtime });
+
+  await expect(
+    sampler.start({
+      mode: "light",
+      scenario: "dark-dust",
+      resolution: [800, 450],
+      invalidate: vi.fn(),
+    })
+  ).rejects.toThrow('The "dark-dust" scenario requires the dark pipeline.');
 });

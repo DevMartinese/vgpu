@@ -92,12 +92,19 @@ export function parsePrismPerformanceUrl(
   search: string
 ): PrismPerformanceRunOptions | undefined {
   const params = new URLSearchParams(search);
-  const mode = params.get("prism-perf");
-  if (mode !== "light" && mode !== "dark") return undefined;
+  const workload = params.get("prism-perf");
+  if (
+    workload !== "light" &&
+    workload !== "dark" &&
+    workload !== "dark-dust"
+  )
+    return undefined;
+  const mode = workload === "dark-dust" ? "dark" : workload;
   const frames = positiveInteger(params.get(FRAME_QUERY));
   const warmupFrames = nonNegativeInteger(params.get(WARMUP_QUERY));
   return {
     mode,
+    ...(workload === "dark-dust" ? { scenario: "dark-dust" as const } : {}),
     ...(frames === undefined ? {} : { frames }),
     ...(warmupFrames === undefined ? {} : { warmupFrames }),
   };

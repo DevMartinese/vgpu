@@ -3,6 +3,8 @@ import type { PrismPipelineMode } from "../pipelines/types";
 export const PRISM_PERFORMANCE_FRAMES = 120;
 export const PRISM_PERFORMANCE_WARMUP_FRAMES = 16;
 
+export type PrismPerformanceScenario = "pointer" | "dark-dust";
+
 export interface PrismPerformanceRunOptions {
   /** Rendered frames retained after warmup. Defaults to 120. */
   readonly frames?: number;
@@ -10,6 +12,8 @@ export interface PrismPerformanceRunOptions {
   readonly warmupFrames?: number;
   /** Optional pipeline to sample. The previous pipeline is restored afterwards. */
   readonly mode?: PrismPipelineMode;
+  /** Workload to drive. Defaults to the existing deterministic pointer path. */
+  readonly scenario?: PrismPerformanceScenario;
   /** Reject a stalled/hidden run after this many milliseconds. */
   readonly maxMs?: number;
 }
@@ -35,6 +39,7 @@ export interface PrismPerformanceReport {
   readonly version: 1;
   readonly capturedAt: string;
   readonly mode: PrismPipelineMode;
+  readonly scenario: PrismPerformanceScenario;
   readonly resolution: readonly [number, number];
   readonly requested: {
     readonly frames: number;

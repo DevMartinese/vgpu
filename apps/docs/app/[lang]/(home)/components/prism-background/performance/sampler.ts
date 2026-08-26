@@ -4,7 +4,7 @@ import { timer as createGpuTimer } from "vgpu";
 import type { PrismPassProfile, PrismPipelineMode } from "../pipelines/types";
 import { setRuntimeLampAim, setRuntimeOrbit } from "../runtime/state";
 import type { PrismLightMeshMeasurement, PrismRuntime } from "../runtime/types";
-import { deterministicPerformanceInput } from "./path";
+import { deterministicDustTime, deterministicPerformanceInput } from "./path";
 import { summarizePerformance } from "./statistics";
 import {
   PRISM_PERFORMANCE_FRAMES,
@@ -12,6 +12,7 @@ import {
   type PrismPerformancePassReport,
   type PrismPerformanceReport,
   type PrismPerformanceRunOptions,
+  type PrismPerformanceScenario,
 } from "./types";
 
 const DEFAULT_MAX_MS = 20_000;
@@ -33,8 +34,11 @@ export interface PrismPerformanceSampler {
 }
 
 export interface PrismPerformanceFrame {
-  readonly aim: readonly [number, number];
-  readonly orbit: readonly [number, number];
+  readonly scenario: PrismPerformanceScenario;
+  readonly updateScene: boolean;
+  readonly aim?: readonly [number, number];
+  readonly orbit?: readonly [number, number];
+  readonly dustTime?: number;
   readonly profile: PrismPassProfile;
   readonly startedAt: number;
 }
@@ -42,6 +46,7 @@ export interface PrismPerformanceFrame {
 interface ActiveRun {
   readonly id: number;
   readonly mode: PrismPipelineMode;
+  readonly scenario: PrismPerformanceScenario;
   readonly resolution: readonly [number, number];
   readonly frames: number;
   readonly warmupFrames: number;
@@ -121,16 +126,34 @@ export function createPrismPerformanceSampler({
         new Error("A prism performance sample is already running.")
       );
 
+    const scenario = options.scenario ?? "pointer";
+    if (scenario !== "pointer" && scenario !== "dark-dust") {
+      return Promise.reject(
+        new Error(`Unknown prism performance scenario: ${String(scenario)}.`)
+      );
+    }
+    if (scenario === "dark-dust" && options.mode !== "dark") {
+      return Promise.reject(
+        new Error('The "dark-dust" scenario requires the dark pipeline.')
+      );
+    }
+
     const frames = integerWithin(
       options.frames ?? PRISM_PERFORMANCE_FRAMES,
       1,
       2_000
     );
-    const warmupFrames = integerWithin(
+    const requestedWarmupFrames = integerWithin(
       options.warmupFrames ?? PRISM_PERFORMANCE_WARMUP_FRAMES,
       0,
       1_000
     );
+    // The first dark-dust warmup explicitly fills the retained presentation.
+    // Keeping it outside the sample guarantees every recorded frame is dust-only.
+    const warmupFrames =
+      scenario === "dark-dust"
+        ? Math.max(1, requestedWarmupFrames)
+        : requestedWarmupFrames;
     const maxMs = integerWithin(options.maxMs ?? DEFAULT_MAX_MS, 500, 120_000);
     let resolve!: (report: PrismPerformanceReport) => void;
     let reject!: (error: Error) => void;
@@ -151,6 +174,7 @@ export function createPrismPerformanceSampler({
     const run: ActiveRun = {
       id: ++nextRunId,
       mode: options.mode,
+      scenario,
       resolution: [...options.resolution],
       frames,
       warmupFrames,
@@ -206,11 +230,19 @@ export function createPrismPerformanceSampler({
       run.frameIntervals.push(startedAt - run.lastFrameAt);
     }
     run.lastFrameAt = startedAt;
-    const input = deterministicPerformanceInput(run.frameIndex, run.frames);
+    const input =
+      run.scenario === "pointer"
+        ? deterministicPerformanceInput(run.frameIndex, run.frames)
+        : undefined;
     const frame: InternalFrame = {
       sampled,
       startedAt,
-      ...input,
+      scenario: run.scenario,
+      updateScene: run.scenario === "pointer" || run.frameIndex === 0,
+      ...(input ?? {}),
+      ...(run.scenario === "dark-dust"
+        ? { dustTime: deterministicDustTime(run.frameIndex) }
+        : {}),
       profile: {
         pass(name) {
           if (sampled)
@@ -266,6 +298,7 @@ export function createPrismPerformanceSampler({
       version: 1,
       capturedAt: new Date().toISOString(),
       mode: run.mode,
+      scenario: run.scenario,
       resolution: run.resolution,
       requested: { frames: run.frames, warmupFrames: run.warmupFrames },
       recordedFrames: run.cpuEncode.length,

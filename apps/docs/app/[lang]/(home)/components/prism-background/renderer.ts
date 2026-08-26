@@ -182,19 +182,25 @@ export function createRenderer(
     const pipeline = pipelineController?.pipeline;
     if (disposed || !runtime || !pipeline || !canvasSurface) return;
     const performanceFrame = performanceSampler?.beginFrame(pipeline.mode);
-    const aim = performanceFrame?.aim ?? interaction.stepAim();
-    const orbit = performanceFrame?.orbit ?? interaction.stepOrbit();
-    const updateScene =
-      !!performanceFrame || !!aim || !!orbit || pendingPresent;
-    const dustTime = gpuClock
-      ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS
-      : 0;
+    const aim = performanceFrame
+      ? performanceFrame.aim
+      : interaction.stepAim();
+    const orbit = performanceFrame
+      ? performanceFrame.orbit
+      : interaction.stepOrbit();
+    const updateScene = performanceFrame
+      ? performanceFrame.updateScene
+      : !!aim || !!orbit || pendingPresent;
+    const dustTime =
+      performanceFrame?.dustTime ??
+      (gpuClock ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS : 0);
     const dustMoved =
       pipeline.mode === "dark" &&
       controls.view === "glass" &&
       dustTime !== lastDustTime;
-    if (!updateScene && !dustMoved && !debugPending) return;
-    if (updateScene || dustMoved) {
+    if (!performanceFrame && !updateScene && !dustMoved && !debugPending)
+      return;
+    if (performanceFrame || updateScene || dustMoved) {
       try {
         if (aim) setRuntimeLampAim(runtime, aim[0], aim[1]);
         if (orbit) setRuntimeOrbit(runtime, orbit[0], orbit[1]);

@@ -62,6 +62,16 @@ test("parses URL autostart while preserving empty manual mode", () => {
       "?prism-perf=light&prism-perf-frames=0&prism-perf-warmup=-2"
     )
   ).toEqual({ mode: "light" });
+  expect(
+    parsePrismPerformanceUrl(
+      "?prism-perf=dark-dust&prism-perf-frames=120&prism-perf-warmup=16"
+    )
+  ).toEqual({
+    mode: "dark",
+    scenario: "dark-dust",
+    frames: 120,
+    warmupFrames: 16,
+  });
 });
 
 class FakeElement extends EventTarget {
@@ -82,6 +92,7 @@ function sampleReport(): PrismPerformanceReport {
     version: 1,
     capturedAt: "2026-08-26T00:00:00.000Z",
     mode: "light",
+    scenario: "pointer",
     resolution: [800, 450],
     requested: { frames: 120, warmupFrames: 16 },
     recordedFrames: 120,
