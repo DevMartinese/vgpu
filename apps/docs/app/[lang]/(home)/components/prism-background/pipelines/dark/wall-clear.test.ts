@@ -11,12 +11,15 @@ describe("dark wall clear", () => {
   });
 
   test("converts CSS bytes to linear RGB and keeps an opaque clear", () => {
-    expect(darkWallClear("#102080", "glass")).toEqual([
+    const expected = [
       0.005181516702338386,
       0.014443843596092545,
       0.21586050011389926,
       1,
-    ]);
+    ];
+    darkWallClear("#102080", "glass").forEach((value, channel) =>
+      expect(value).toBeCloseTo(expected[channel]!, 15)
+    );
     expect(darkWallClear("ffffff", "wall")).toEqual([1, 1, 1, 1]);
   });
 

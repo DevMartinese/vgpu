@@ -1,5 +1,5 @@
 import type { GeistdocsAgentReadinessConfig } from "@vercel/geistdocs/config";
-import { VgpuWordmark } from "@/components/vgpu-wordmark";
+import { VgpuWordmark } from "./components/vgpu-wordmark";
 import { AGENT_INSTRUCTIONS, AGENT_USE_CASES } from "./lib/agent-guidance";
 
 // TGEIST-11 follow-up (branding sweep): this whole file is the scaffold
