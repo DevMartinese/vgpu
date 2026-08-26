@@ -260,7 +260,6 @@ test("coalesces resize, responds to input/layout, and delegates owned teardown",
     centerX: 0.8,
     centerY: 0.3,
     mouseYaw: 0.15,
-    sideFade: 1,
   });
 
   env.setNow(100);
@@ -287,7 +286,6 @@ test("coalesces resize, responds to input/layout, and delegates owned teardown",
     centerX: 0,
     centerY: 0,
     mouseYaw: 0,
-    sideFade: 0,
   });
 
   env.fireIntersection(false);

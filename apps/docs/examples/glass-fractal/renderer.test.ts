@@ -18,7 +18,7 @@ const guiState = vi.hoisted(() => ({
     destroy: ReturnType<typeof vi.fn>;
     options: Record<string, unknown>;
   }>,
-  shapeChange: undefined as ((value: string) => void) | undefined,
+  properties: [] as string[],
 }));
 
 vi.mock("vgpu", () => ({
@@ -74,7 +74,7 @@ vi.mock("lil-gui", () => {
       return this;
     }
     onChange(callback: (value: string) => void) {
-      if (this.property === "shape") guiState.shapeChange = callback;
+      void callback;
       return this;
     }
     updateDisplay() {
@@ -85,6 +85,7 @@ vi.mock("lil-gui", () => {
   class Folder {
     add(object: Record<string, unknown>, property: string) {
       void object;
+      guiState.properties.push(property);
       return new Controller(property);
     }
     addColor(object: Record<string, unknown>, property: string) {
@@ -123,12 +124,6 @@ function deferred<T>() {
     reject = fail;
   });
   return { promise, reject, resolve };
-}
-
-function changeShape(value: string) {
-  if (!guiState.shapeChange)
-    throw new Error("Shape controller is unavailable.");
-  guiState.shapeChange(value);
 }
 
 function setup(options: { reducedMotion?: boolean } = {}) {
@@ -304,7 +299,7 @@ function setup(options: { reducedMotion?: boolean } = {}) {
 afterEach(async () => {
   await vi.dynamicImportSettled();
   guiState.instances.length = 0;
-  guiState.shapeChange = undefined;
+  guiState.properties.length = 0;
   vi.resetAllMocks();
   vi.unstubAllGlobals();
 });
@@ -317,6 +312,7 @@ test("mounts container-scoped lil-gui and delegates owned teardown", async () =>
   expect(mocks.loadAssets.mock.calls[0]?.[1]).toBeInstanceOf(AbortSignal);
   expect(guiState.instances[0]?.options.container).toBe(env.parent);
   expect(guiState.instances[0]?.options.title).toBe("Glass fractal material");
+  expect(guiState.properties).not.toContain("shape");
   expect(mocks.renderScene).toHaveBeenCalled();
   expect(mocks.setSettings.mock.calls.at(-1)?.[3]).toMatchObject({
     floorGrid: false,
@@ -336,30 +332,30 @@ test("mounts container-scoped lil-gui and delegates owned teardown", async () =>
   expect(env.documentListeners.size).toBe(0);
 });
 
-test("shape control supports reduced motion and animated forward/reverse morphs", async () => {
+test("public shape selector supports reduced motion and animated forward/reverse morphs", async () => {
   const reduced = setup({ reducedMotion: true });
   const reducedRenderer = createRenderer({ canvas: reduced.canvas });
   await reducedRenderer.ready;
-  changeShape("Orb");
+  reducedRenderer.setSphereMix(1);
   reduced.fireFrame(1);
   expect(mocks.setSettings.mock.calls.at(-1)?.[3].glass.sphereMix).toBe(1);
   reducedRenderer.dispose();
 
   guiState.instances.length = 0;
-  guiState.shapeChange = undefined;
+  guiState.properties.length = 0;
   vi.resetAllMocks();
   vi.unstubAllGlobals();
   const animated = setup();
   const renderer = createRenderer({ canvas: animated.canvas });
   await renderer.ready;
-  changeShape("Orb");
+  renderer.setSphereMix(1);
   animated.fireFrame(1040);
   expect(mocks.setSettings.mock.calls.at(-1)?.[3]).toMatchObject({
     glass: { sphereMix: 1 },
     morphDirection: 1,
   });
 
-  changeShape("Fractal");
+  renderer.setSphereMix(0);
   animated.fireFrame(1560);
   expect(mocks.setSettings.mock.calls.at(-1)?.[3]).toMatchObject({
     glass: { sphereMix: 0.0625 },
@@ -398,7 +394,7 @@ test("visibility pauses and resumes the animated orb", async () => {
   const env = setup({ reducedMotion: true });
   const renderer = createRenderer({ canvas: env.canvas });
   await renderer.ready;
-  changeShape("Orb");
+  renderer.setSphereMix(1);
   expect(env.frames.size).toBe(2);
   env.fireIntersection(false);
   expect(env.frames.size).toBe(1);

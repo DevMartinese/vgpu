@@ -263,6 +263,17 @@ test("mounts a container-scoped GUI with the exact default and stress choices", 
   renderer.dispose();
 });
 
+test("does not compile the blit against a Surface outside frame", async () => {
+  const env = setup();
+  const renderer = createRenderer({ canvas: env.canvas });
+  await renderer.ready;
+
+  expect(env.blits[0]!.compile).not.toHaveBeenCalled();
+  env.renderFrame();
+  expect(pipeline.renderScene).toHaveBeenCalledOnce();
+  renderer.dispose();
+});
+
 test("50 to 100 to 50 invalidates and destroys the stale stress generation", async () => {
   const env = setup();
   const renderer = createRenderer({ canvas: env.canvas });
@@ -359,7 +370,7 @@ test("commits only the latest complete resize generation", async () => {
   expect(pipeline.renderScene).toHaveBeenLastCalledWith(
     { id: "frame" },
     secondScene,
-    env.blits[2],
+    env.blits[1],
     env.targets[2],
     env.output,
     2.4
@@ -367,17 +378,13 @@ test("commits only the latest complete resize generation", async () => {
   renderer.dispose();
 });
 
-test("waits for every lazy preparation and preserves a synchronous primary failure", async () => {
+test("prepares the scene before the blit and preserves a synchronous primary failure", async () => {
   const env = setup();
   const primary = new Error("scene allocation failed");
   const cleanup = new Error("candidate cleanup failed");
-  const compile = deferred<void>();
   pipeline.createScene.mockImplementationOnce(() => {
     throw primary;
   });
-  pipeline.createBlit.mockImplementationOnce(() => ({
-    compile: vi.fn(() => compile.promise),
-  }));
   env.gpu.fns.target.mockImplementationOnce(
     (options: { size: readonly [number, number] }) => {
       const candidate = {
@@ -393,10 +400,8 @@ test("waits for every lazy preparation and preserves a synchronous primary failu
   );
 
   const renderer = createRenderer({ canvas: env.canvas });
-  await vi.waitFor(() => expect(pipeline.createBlit).toHaveBeenCalledOnce());
-  expect(env.gpu.dispose).not.toHaveBeenCalled();
-  compile.resolve();
   await expect(renderer.ready).rejects.toBe(primary);
+  expect(pipeline.createBlit).not.toHaveBeenCalled();
   expect(env.targets[0]!.destroy).toHaveBeenCalledOnce();
   expect(env.gpu.dispose).toHaveBeenCalledOnce();
 });
