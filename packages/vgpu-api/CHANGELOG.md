@@ -1,5 +1,24 @@
 # vgpu
 
+## 0.3.1
+
+### Patch Changes
+
+- 0b9b564: Expose the existing documentation and verified examples workflows as two MCP tools. Add a local
+  `vgpu mcp` stdio server with opt-in, output-directory-confined example downloads and publish a
+  read-only Streamable HTTP endpoint at `https://vgpu.sh/api/mcp` using the stateless modern MCP
+  transport.
+- f4b4b27: Make online `vgpu examples` commands work on macOS and Windows. `search`, `show`, and `cat` now
+  use an in-memory cache when Linux's descriptor-anchored persistent cache is unavailable. On macOS,
+  `pull` uses a portable symlink-checked staging path and preserves atomic publication and recovery.
+  Linux keeps its persistent offline cache and `/proc/self/fd` hardening unchanged.
+- Updated dependencies [e2b4c4a]
+  - @vgpu/wgsl@0.3.1
+  - @vgpu/core@0.3.1
+  - @vgpu/adapter-mock@0.3.1
+  - @vgpu/adapter-node@0.3.1
+  - @vgpu/wgsl-std@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

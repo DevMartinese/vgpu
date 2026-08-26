@@ -1,7 +1,7 @@
 {
   "name": "docs",
   "description": "vgpu documentation site (geistdocs).",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "scripts": {
     "predev": "node scripts/prepare-ort-assets.mjs && node scripts/prepare-depth-models.mjs && node scripts/ingest-examples.mjs",
@@ -24,7 +24,7 @@
     "check:production-readiness": "node scripts/check-production-readiness.mjs",
     "build:workspace": "pnpm --dir ../.. run build",
     "translate": "npx @vercel/geistdocs translate",
-    "$comment:tgeist-05": "TGEIST-05: `test:remark` unit-tests the M1-M9 remark plugins (node:test, no runner dependency: the root vitest config only picks up *.test.ts under apps/docs, so this .mjs suite still needs its own runner). `check:mdast-parity` is gate (c) of Decision 4 \u2014 it also asserts every surviving fence language is one Shiki can load (M4) and that no *.docs.md / bare logical link survives (M7/M8).",
+    "$comment:tgeist-05": "TGEIST-05: `test:remark` unit-tests the M1-M9 remark plugins (node:test, no runner dependency: the root vitest config only picks up *.test.ts under apps/docs, so this .mjs suite still needs its own runner). `check:mdast-parity` is gate (c) of Decision 4 — it also asserts every surviving fence language is one Shiki can load (M4) and that no *.docs.md / bare logical link survives (M7/M8).",
     "test:remark": "node --test lib/remark-geist/remark-geist.test.mjs",
     "check:mdast-parity": "node scripts/check-mdast-parity.mjs",
     "$comment:tgeist-06": "TGEIST-06: `check:examples-api-tracing` runs after next build and asserts the generated artifact tree really is bundled into each of the 4 routes (they read it with fs at request time, so only outputFileTracingIncludes puts it in the lambda). Its sibling `check:examples-api-transplant` (gate G2: the byte-identity diff of this app's examples API against the pre-migration app's copy) was deleted at cutover, together with the copy it compared against.",
