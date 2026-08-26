@@ -297,6 +297,12 @@ describe("light pipeline ownership", () => {
     try {
       await settleMicrotasks();
       expect(settled).toBe(false);
+      // Graph compilation no longer waits behind either asset loading or the
+      // environment bake. Debug-only wireframes are absent from this inventory.
+      expect(
+        getMockGPUDeviceInstrumentation(gpu.device.gpu)
+          .createRenderPipelineAsyncDescriptors
+      ).toHaveLength(8);
 
       environment.resolve();
       await expect(preparing).rejects.toBe(assetFailure);

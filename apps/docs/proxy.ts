@@ -1,14 +1,52 @@
-import { createProxy } from "@vercel/geistdocs/proxy";
+import {
+  createProxy,
+  type GeistdocsProxyHook,
+} from "@vercel/geistdocs/proxy";
+import { precompute } from "flags/next";
+import { NextResponse } from "next/server";
+import { homepageFlags } from "@/flags";
 import { config as geistdocsConfig } from "@/lib/geistdocs/config";
 import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
 import { createUnmatchedMarkdownNotFoundResponse } from "@/lib/geistdocs/markdown-not-found";
+
+const rewriteHomepageVariant: GeistdocsProxyHook = async ({
+  defaultLanguage,
+  languages,
+  request,
+}) => {
+  const pathname = request.nextUrl.pathname.replace(/\/+$/u, "") || "/";
+  const language =
+    pathname === "/"
+      ? defaultLanguage
+      : languages.find(
+          (candidate) =>
+            candidate !== defaultLanguage && pathname === `/${candidate}`,
+        );
+
+  // Open-source checkouts do not have the signing secret. In that case the
+  // regular homepage remains the safe, canvas-disabled fallback.
+  if (!language || !process.env.FLAGS_SECRET) return null;
+
+  // The signed value becomes part of the internal URL, so each variant keeps
+  // its own static cache entry and one visitor cannot poison another's page.
+  const code = await precompute(homepageFlags);
+  const url = request.nextUrl.clone();
+  url.pathname = `/${language}/hero-variant/${code}`;
+  return NextResponse.rewrite(url);
+};
 
 const proxy = createProxy({
   config: geistdocsConfig,
   trackMarkdownRequest: trackMdRequest,
   before: () => null,
-  after: ({ defaultLanguage, languages, request }) =>
-    createUnmatchedMarkdownNotFoundResponse(request, { defaultLanguage, languages }),
+  after: [
+    rewriteHomepageVariant,
+    ({ defaultLanguage, languages, request }) =>
+      createUnmatchedMarkdownNotFoundResponse(request, {
+        defaultLanguage,
+        languages,
+      }),
+  ],
   // Keep negotiation deliberately narrow. `/` is the homepage representation;
   // docs retain their explicit catch-all. No root wildcard is allowed to capture
   // `/examples`, `/api`, or future application routes.
@@ -85,7 +123,7 @@ const proxy = createProxy({
 // of the geistdocs rewrite just like `/models/**` and `/ort/**` above.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|openapi.json$|opengraph-image(?:/|$)|\\.well-known/api-catalog(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|openapi.json$|opengraph-image(?:/|$)|\\.well-known/api-catalog(?:/|$)|\\.well-known/vercel/flags(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 

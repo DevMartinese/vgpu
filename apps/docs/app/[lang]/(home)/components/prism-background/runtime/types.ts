@@ -27,7 +27,8 @@ export interface PrismRuntime {
   readonly lightVertices: Float32Array<ArrayBuffer>;
   readonly lightGeometry: GeometryLike;
   readonly prism: Geometry;
-  readonly prismWireframe: Geometry;
+  /** Allocated only when a debug wireframe is first requested. */
+  prismWireframe?: Geometry;
   readonly sceneSampler: GPUSampler;
   readonly environmentSampler: GPUSampler;
   /** Allocates the authored orientation map only for the opt-in debug UI. */

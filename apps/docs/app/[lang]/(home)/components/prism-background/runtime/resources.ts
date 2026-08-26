@@ -1,4 +1,4 @@
-import type { Gpu } from "vgpu";
+import type { Geometry, Gpu } from "vgpu";
 import { sampler } from "vgpu";
 
 import { cameraView } from "../camera";
@@ -64,10 +64,6 @@ export function createPrismRuntime(
   });
   lightBuffer.write(initialMesh.vertices);
   const prism = prismGeometry(gpu, `${label}.prism`);
-  const prismWireframe = prismWireframeGeometry(
-    gpu,
-    `${label}.prism-wireframe`
-  );
 
   return {
     gpu,
@@ -90,7 +86,6 @@ export function createPrismRuntime(
       vertexCount: lightVertexCount(),
     },
     prism,
-    prismWireframe,
     sceneSampler: sampler(gpu, {
       minFilter: "linear",
       magFilter: "linear",
@@ -109,6 +104,15 @@ export function createPrismRuntime(
     framing: IDENTITY_PROJECTION_FRAMING,
     view: cameraView(aspect, 0, 0, CAMERA_DISTANCE, controls.cameraFov),
   };
+}
+
+/** Uploads debug-only prism edges on first use, then shares them across modes. */
+export function ensurePrismWireframeGeometry(runtime: PrismRuntime): Geometry {
+  runtime.prismWireframe ??= prismWireframeGeometry(
+    runtime.gpu,
+    `${runtime.label}.prism-wireframe`
+  );
+  return runtime.prismWireframe;
 }
 
 /** Builds the shared environment once; the debug map is strictly opt-in. */
@@ -150,5 +154,6 @@ export function destroyPrismRuntime(runtime: PrismRuntime): void {
   runtime.environmentReady = undefined;
   runtime.lightBuffer.destroy();
   runtime.prism.destroy();
-  runtime.prismWireframe.destroy();
+  runtime.prismWireframe?.destroy();
+  runtime.prismWireframe = undefined;
 }

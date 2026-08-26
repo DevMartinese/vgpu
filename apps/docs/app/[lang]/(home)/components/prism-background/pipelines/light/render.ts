@@ -40,7 +40,8 @@ export function renderLightGraph(
         if (runtime.controls.view === "glass") {
           pass.draw(graph.glassFront);
           pass.draw(graph.glassAccent);
-          if (runtime.controls.wireframe) pass.draw(graph.wireframe);
+          if (runtime.controls.wireframe && graph.wireframe)
+            pass.draw(graph.wireframe);
         }
       }
     );
@@ -94,7 +95,7 @@ function renderBackdrop(
           vertices: LIGHT_INTERNAL_VERTICES,
         });
       }
-      if (runtime.controls.lightWireframe) {
+      if (runtime.controls.lightWireframe && graph.lightWireframe) {
         pass.draw(graph.lightWireframe);
       }
     }

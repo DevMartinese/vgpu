@@ -16,6 +16,7 @@ import wallCommonWgsl from "../materials/light/wall-common.wgsl";
 import wallDebugWgsl from "../materials/light/wall-debug.wgsl";
 import wallNormalWgsl from "../materials/light/wall-normal.wgsl";
 import wallWgsl from "../materials/light/wall.wgsl";
+import { bakeLightAssetTextures } from "../assets/light/bake";
 import bakeWgsl from "../assets/light/bake.wgsl";
 import downsampleWgsl from "../assets/light/downsample.wgsl";
 import { generateCausticProfile } from "../assets/light/generate-caustic";
@@ -152,6 +153,53 @@ describe("light pipeline baked assets", () => {
     expect(
       reflectSource(downsampleWgsl.wgsl).entryPoints.map((entry) => entry.name)
     ).toEqual(["main"]);
+  });
+
+  test("starts every compute pipeline compilation without a serial wait", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new Error("offline")))
+    );
+    const failure = new Error("stop after observing concurrent compilation");
+    let rejectFirst!: (reason: Error) => void;
+    const firstPipeline = new Promise<GPUComputePipeline>(
+      (_resolve, reject) => {
+        rejectFirst = reject;
+      }
+    );
+    const createComputePipelineAsync = vi.fn(
+      (descriptor: GPUComputePipelineDescriptor) =>
+        createComputePipelineAsync.mock.calls.length === 1
+          ? firstPipeline
+          : Promise.resolve({} as GPUComputePipeline)
+    );
+    const currentGpu = {
+      gpu: {
+        createShaderModule: vi.fn(() => ({})),
+        createComputePipelineAsync,
+      },
+    } as unknown as Gpu;
+
+    try {
+      const baking = bakeLightAssetTextures(currentGpu);
+      await vi.waitFor(() =>
+        expect(createComputePipelineAsync).toHaveBeenCalledTimes(4)
+      );
+      expect(
+        createComputePipelineAsync.mock.calls.map(
+          ([descriptor]) => descriptor.compute.entryPoint
+        )
+      ).toEqual([
+        "wall_material",
+        "caustic_profile",
+        "main",
+        "wall_lighting_fallback",
+      ]);
+      rejectFirst(failure);
+      await expect(baking).rejects.toBe(failure);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test("debug shaders publish every material inspection entry", () => {

@@ -14,8 +14,8 @@ import lightWgsl from "../../light.wgsl";
 import lightWireframeWgsl from "../../light-wireframe.wgsl";
 import particleLightDownsampleWgsl from "../../particle-light-downsample.wgsl";
 import presentWgsl from "../../present.wgsl";
+import { ensurePrismWireframeGeometry } from "../../runtime/resources";
 import type { PrismRuntime } from "../../runtime/types";
-import wallWgsl from "../../wall.wgsl";
 import wireframeWgsl from "../../wireframe.wgsl";
 import copyPresentationWgsl from "./copy-presentation.wgsl";
 import type { BloomBlurEffects, DarkPipelineGraph } from "./types";
@@ -33,13 +33,6 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
     cull: "none",
     depth: false,
     label: `${label}.light`,
-  });
-  const wall = draw(gpu, {
-    shader: wallWgsl,
-    vertices: 6,
-    cull: "back",
-    depth: false,
-    label: `${label}.wall`,
   });
   const copyBackground = effect(gpu, copyLinearWgsl, {
     label: `${label}.pass-b-copy-a`,
@@ -91,22 +84,6 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
     depth: false,
     label: `${label}.glass-front`,
   });
-  const wireframe = draw(gpu, {
-    shader: wireframeWgsl,
-    geometry: runtime.prismWireframe,
-    cull: "none",
-    depth: false,
-    blend: "premultiplied",
-    label: `${label}.wireframe`,
-  });
-  const lightWireframe = draw(gpu, {
-    shader: lightWireframeWgsl,
-    geometry: runtime.lightGeometry,
-    cull: "none",
-    depth: false,
-    blend: "premultiplied",
-    label: `${label}.light-wireframe`,
-  });
   const dust = draw(gpu, {
     shader: dustWgsl,
     vertices: 6,
@@ -119,7 +96,6 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
 
   return {
     light,
-    wall,
     copyBackground,
     bloomExtract,
     bloomBlur,
@@ -129,8 +105,34 @@ export function createDarkGraph(runtime: PrismRuntime): DarkPipelineGraph {
     copyPresentation,
     glassBack,
     glassFront,
-    wireframe,
-    lightWireframe,
     dust,
   };
+}
+
+/** Creates debug-only draws when their controls are first enabled. */
+export function ensureDarkWireframeDraws(
+  graph: DarkPipelineGraph,
+  runtime: PrismRuntime
+): void {
+  const { gpu, label } = runtime;
+  if (runtime.controls.wireframe && !graph.wireframe) {
+    graph.wireframe = draw(gpu, {
+      shader: wireframeWgsl,
+      geometry: ensurePrismWireframeGeometry(runtime),
+      cull: "none",
+      depth: false,
+      blend: "premultiplied",
+      label: `${label}.wireframe`,
+    });
+  }
+  if (runtime.controls.lightWireframe && !graph.lightWireframe) {
+    graph.lightWireframe = draw(gpu, {
+      shader: lightWireframeWgsl,
+      geometry: runtime.lightGeometry,
+      cull: "none",
+      depth: false,
+      blend: "premultiplied",
+      label: `${label}.light-wireframe`,
+    });
+  }
 }

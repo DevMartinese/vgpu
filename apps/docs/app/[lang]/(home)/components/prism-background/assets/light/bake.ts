@@ -34,17 +34,21 @@ export async function bakeLightAssetTextures(
       code: downsampleWgsl.wgsl,
       label: "prism.light.downsample",
     });
-    const [wallMaterialPipeline, causticPipeline, downsamplePipeline] =
-      await Promise.all([
-        createPipeline(gpu.gpu, bakeModule, "wall_material"),
-        createPipeline(gpu.gpu, bakeModule, "caustic_profile"),
-        createPipeline(gpu.gpu, downsampleModule, "main"),
-      ]);
-    const wallLightingPipeline = await createPipeline(
-      gpu.gpu,
-      bakeModule,
-      wallMask ? "wall_lighting" : "wall_lighting_fallback"
-    );
+    const [
+      wallMaterialPipeline,
+      causticPipeline,
+      downsamplePipeline,
+      wallLightingPipeline,
+    ] = await Promise.all([
+      createPipeline(gpu.gpu, bakeModule, "wall_material"),
+      createPipeline(gpu.gpu, bakeModule, "caustic_profile"),
+      createPipeline(gpu.gpu, downsampleModule, "main"),
+      createPipeline(
+        gpu.gpu,
+        bakeModule,
+        wallMask ? "wall_lighting" : "wall_lighting_fallback"
+      ),
+    ]);
     baked.push(
       createBakedTexture(gpu, LIGHT_ASSET_MANIFEST["wall-material"]),
       createBakedTexture(gpu, LIGHT_ASSET_MANIFEST["wall-lighting"]),

@@ -1,5 +1,11 @@
 import type { Frame, Gpu, Surface, Target } from "vgpu";
-import { clock, frameLoop, surface } from "vgpu";
+import { clock, frameLoop, init, surface } from "vgpu";
+import {
+  Device,
+  validateRequiredFeatures,
+  type CreateDeviceOptions,
+  type VGPUAdapter,
+} from "vgpu/core";
 
 import type {
   BrowserRendererOptions,
@@ -66,6 +72,21 @@ const OFFSCREEN_ROOT_MARGIN_PX = 256;
 const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
 const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+/** Lets vgpu request its device from the adapter already probed for features. */
+function reuseBrowserAdapter(adapter: GPUAdapter): VGPUAdapter {
+  return {
+    async requestDevice(options: CreateDeviceOptions = {}) {
+      validateRequiredFeatures(adapter.features, options.requiredFeatures);
+      const device = await adapter.requestDevice({
+        label: options.label,
+        requiredFeatures: options.requiredFeatures,
+        requiredLimits: options.requiredLimits,
+      });
+      return new Device(device, adapter.info ?? null);
+    },
+  };
+}
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
@@ -406,29 +427,32 @@ export function createRenderer(
   }
 
   const initialize = async () => {
-    const { init } = await import("vgpu");
+    const browserAdapter = await Promise.resolve()
+      .then(() => navigator.gpu?.requestAdapter())
+      .catch(() => undefined);
     if (disposed) return;
     let requiredFeatures: readonly GPUFeatureName[] = [];
-    try {
-      const adapter = await navigator.gpu?.requestAdapter();
+    let adapter: VGPUAdapter | undefined;
+    if (browserAdapter) {
       requiredFeatures = prismOptionalFeatures(
-        adapter?.features,
+        browserAdapter.features,
         options.performanceSampling === true
       );
-    } catch {
-      // The regular device request remains the authoritative availability
-      // check. A failed optional probe simply preserves all fallback paths.
+      adapter = reuseBrowserAdapter(browserAdapter);
     }
+    const baseInitOptions = adapter ? { adapter } : undefined;
     let nextGpu;
     try {
       nextGpu = await init(
-        requiredFeatures.length > 0 ? { requiredFeatures } : undefined
+        requiredFeatures.length > 0
+          ? { ...baseInitOptions, requiredFeatures }
+          : baseInitOptions
       );
     } catch (error) {
       if (requiredFeatures.length === 0) throw error;
       // Adapter capabilities may become stale between the optional probe and
       // device creation. Keep the hero alive on the exact fp16 fallback.
-      nextGpu = await init();
+      nextGpu = await init(baseInitOptions);
     }
     if (disposed) {
       nextGpu.dispose();

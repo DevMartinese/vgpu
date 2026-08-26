@@ -1,5 +1,6 @@
 import { glassUniforms, sceneUniforms } from "../../runtime/uniforms";
 import type { PrismRuntime } from "../../runtime/types";
+import { ensureLightWireframeDraws } from "./create-graph";
 import { lightGlassAccentUniforms } from "./glass-accent";
 import { prismShadowUniforms } from "./shadow/tuning";
 import {
@@ -38,6 +39,7 @@ export function bindLightGraph(
   // Bindings are statically required even when the debug environment is not.
   // Reusing the studio view keeps the production path allocation-free.
   const debug = runtime.debugEnvironment ?? studio;
+  ensureLightWireframeDraws(graph, runtime);
   const glassParams = glassUniforms(runtime, "light");
   graph.wall.set({
     params: lightWallUniforms(runtime),
@@ -77,10 +79,12 @@ export function bindLightGraph(
     debugEnvironment: debug.texture,
     environmentSampler: runtime.environmentSampler,
   });
-  graph.wireframe.set({
+  graph.wireframe?.set({
     params: { viewProjection: runtime.view.viewProjection },
   });
-  graph.lightWireframe.set({ scene: sceneUniforms(runtime, beamWidthReveal) });
+  graph.lightWireframe?.set({
+    scene: sceneUniforms(runtime, beamWidthReveal),
+  });
   graph.present.set({
     sceneTexture: scene,
     params: lightPresentUniforms(runtime, revealProgress),

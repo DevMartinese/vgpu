@@ -16,6 +16,7 @@ import {
   PRISM_TRIANGLE,
 } from "../../types";
 import { presentationRevealUniforms } from "../presentation";
+import { ensureDarkWireframeDraws } from "./create-graph";
 import type { DarkPipelineGraph } from "./types";
 import { bloomBlurUniforms } from "./bloom-uniforms";
 
@@ -49,6 +50,7 @@ export function bindDarkGraph(
   // Bindings are statically required even when the debug environment is not.
   // Reusing the studio view keeps the production path allocation-free.
   const debugEnvironment = runtime.debugEnvironment ?? studioEnvironment;
+  ensureDarkWireframeDraws(graph, runtime);
   const reveal = presentationRevealUniforms("dark", revealProgress);
 
   if (!updateScene) {
@@ -63,8 +65,7 @@ export function bindDarkGraph(
 
   const scene = sceneUniforms(runtime, beamWidthReveal);
   graph.light.set({ scene });
-  graph.lightWireframe.set({ scene });
-  graph.wall.set({ scene });
+  graph.lightWireframe?.set({ scene });
   graph.copyBackground.set({ sceneTexture: backgroundTarget });
   graph.glassBack.set({
     params: glassUniforms(runtime, "dark"),
@@ -80,7 +81,7 @@ export function bindDarkGraph(
     debugEnvironment: debugEnvironment.texture,
     environmentSampler: runtime.environmentSampler,
   });
-  graph.wireframe.set({
+  graph.wireframe?.set({
     params: { viewProjection: runtime.view.viewProjection },
   });
   graph.bloomExtract.set({

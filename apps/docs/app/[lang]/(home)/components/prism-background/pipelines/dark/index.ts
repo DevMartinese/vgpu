@@ -138,12 +138,11 @@ function compileGraph(
   const outputSignature = { colors: [output.format] } as const;
   return [
     graph.light.compile(background),
-    graph.wall.compile(background),
     graph.glassBack.compile(background),
-    graph.lightWireframe.compile(background),
+    ...(graph.lightWireframe ? [graph.lightWireframe.compile(background)] : []),
     graph.copyBackground.compile(scene),
     graph.glassFront.compile(scene),
-    graph.wireframe.compile(scene),
+    ...(graph.wireframe ? [graph.wireframe.compile(scene)] : []),
     graph.dust.compile(outputSignature),
     graph.bloomExtract.compile(bloom[0].vertical),
     ...graph.bloomBlur.flatMap((level, index) => [
