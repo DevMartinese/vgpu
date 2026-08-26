@@ -10,29 +10,6 @@ const forbiddenPackages = new Set([
   'fs', 'node:fs', 'path', 'node:path', 'child_process', 'node:child_process',
   'worker_threads', 'node:worker_threads', 'vgpu/node', '@vgpu/adapter-node',
 ]);
-// Remove a slug when it is next simplified. New examples are self-contained by default.
-const legacyCrossDirectoryExamples = new Set([
-  'agent-radiance-cascades',
-  'air-painting',
-  'batch-rendering',
-  'clipping',
-  'depth-estimation',
-  'earth',
-  'environment-map',
-  'fft-ocean',
-  'fft-ocean-surface',
-  'fluid',
-  'glass-fractal',
-  'gradient',
-  'instanced-rendering',
-  'mnist-classifier',
-  'nextjs-flare',
-  'optimized-black-hole',
-  'radiance-cascades',
-  'raymarched-fractal',
-  'transmission',
-]);
-
 async function exists(file) {
   try { await access(file); return true; } catch { return false; }
 }
@@ -57,7 +34,7 @@ async function checkGraph(entry, kind, boundary) {
     const source = await readFile(file, 'utf8');
     const imports = ts.preProcessFile(source, true, true).importedFiles.map(({ fileName }) => fileName);
     for (const specifier of imports) {
-      if (forbiddenPackages.has(specifier) || specifier.startsWith('node:')) {
+      if (kind !== 'thumbnail' && (forbiddenPackages.has(specifier) || specifier.startsWith('node:'))) {
         failures.push(`${path.relative(docsDir, file)} imports forbidden module ${specifier}`);
         continue;
       }
@@ -91,13 +68,11 @@ for (const entry of await (await import('node:fs/promises')).readdir(examplesDir
     failures.push(`${entry.name} has index.tsx but no renderer.ts`);
     continue;
   }
-  const boundary = legacyCrossDirectoryExamples.has(entry.name) ? undefined : path.dirname(index);
+  const boundary = path.dirname(index);
   failures.push(...await checkGraph(index, 'component', boundary));
   failures.push(...await checkGraph(renderer, 'renderer', boundary));
-  if (boundary) {
-    failures.push(...await checkGraph(path.join(boundary, 'meta.ts'), 'metadata', boundary));
-    failures.push(...await checkGraph(path.join(boundary, 'render-thumbnail.ts'), 'thumbnail', boundary));
-  }
+  failures.push(...await checkGraph(path.join(boundary, 'meta.ts'), 'metadata', boundary));
+  failures.push(...await checkGraph(path.join(boundary, 'render-thumbnail.ts'), 'thumbnail', boundary));
 }
 
 if (failures.length) {

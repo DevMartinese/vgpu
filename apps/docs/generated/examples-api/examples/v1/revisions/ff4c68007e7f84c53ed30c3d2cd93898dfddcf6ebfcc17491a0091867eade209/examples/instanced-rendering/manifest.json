@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "contractId": "vgpu-examples/v1",
+  "revision": "ff4c68007e7f84c53ed30c3d2cd93898dfddcf6ebfcc17491a0091867eade209",
+  "id": "instanced-rendering",
+  "title": "Instanced Rendering",
+  "description": "One cube mesh + one instance stream, with 125,000 independently animated cubes.",
+  "tags": [
+    "instancing",
+    "indirect-rendering",
+    "performance"
+  ],
+  "capabilities": [
+    "webgpu",
+    "select-control",
+    "instanced-rendering",
+    "offscreen-rendering",
+    "responsive-canvas"
+  ],
+  "aggregateSha256": "cce551bfc6994e4a25e710a0575fc86ebf6b293105ac1e58bb5b2937ac9537c0",
+  "files": [
+    {
+      "path": "index.tsx",
+      "contentType": "text/typescript",
+      "size": 560,
+      "sha256": "5d9d1d99b9d81a4b9af930fa8c8feaa661971594221f22c4c0539d25d1339727",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/ff4c68007e7f84c53ed30c3d2cd93898dfddcf6ebfcc17491a0091867eade209/examples/instanced-rendering/files/index.tsx.raw"
+    },
+    {
+      "path": "renderer.ts",
+      "contentType": "text/typescript",
+      "size": 6541,
+      "sha256": "d0c93fab65e0ab4ffc466dd8b3a7f96069e0fd59b108eb2b5ce9ce7d58f5def7",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/ff4c68007e7f84c53ed30c3d2cd93898dfddcf6ebfcc17491a0091867eade209/examples/instanced-rendering/files/renderer.ts.raw"
+    },
+    {
+      "path": "scene-pipeline.ts",
+      "contentType": "text/typescript",
+      "size": 4892,
+      "sha256": "72e828ab9c828cce4d8a568dbf5ae3c1f919a873392e47970e7f7501999504e7",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/ff4c68007e7f84c53ed30c3d2cd93898dfddcf6ebfcc17491a0091867eade209/examples/instanced-rendering/files/scene-pipeline.ts.raw"
+    },
+    {
+      "path": "scene.wgsl",
+      "contentType": "text/wgsl",
+      "size": 1763,
+      "sha256": "a0e520cad5e2994dd3391118fd2a815acab42b5727d8cdf3a945e8c94048052b",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/ff4c68007e7f84c53ed30c3d2cd93898dfddcf6ebfcc17491a0091867eade209/examples/instanced-rendering/files/scene.wgsl.raw"
+    },
+    {
+      "path": "blit.wgsl",
+      "contentType": "text/wgsl",
+      "size": 348,
+      "sha256": "1d6957358650364304515e7deb8728bf20186482b84dcd361e5525b60c0c6566",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/ff4c68007e7f84c53ed30c3d2cd93898dfddcf6ebfcc17491a0091867eade209/examples/instanced-rendering/files/blit.wgsl.raw"
+    }
+  ]
+}
