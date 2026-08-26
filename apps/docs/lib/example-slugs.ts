@@ -2,7 +2,6 @@ export const exampleSlugs = [
   'gradient',
   'triangle-led-front',
   'anti-aliasing',
-  'post-processing',
   'black-hole',
   'optimized-black-hole',
   'earth',

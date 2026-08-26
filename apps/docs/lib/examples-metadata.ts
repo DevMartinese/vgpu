@@ -5,7 +5,6 @@ import { exampleSlugs, type ExampleSlug } from './example-slugs';
 import { meta as gradientMeta } from '../examples/gradient/meta';
 import { meta as triangleLedFrontMeta } from '../examples/triangle-led-front/meta';
 import { meta as antiAliasingMeta } from '../examples/anti-aliasing/meta';
-import { meta as postProcessingMeta } from '../examples/post-processing/meta';
 import { meta as blackHoleMeta } from '../examples/black-hole/meta';
 import { meta as optimizedBlackHoleMeta } from '../examples/optimized-black-hole/meta';
 import { meta as earthMeta } from '../examples/earth/meta';
@@ -30,7 +29,6 @@ const rawMetadata = {
   gradient: gradientMeta,
   'triangle-led-front': triangleLedFrontMeta,
   'anti-aliasing': antiAliasingMeta,
-  'post-processing': postProcessingMeta,
   'black-hole': blackHoleMeta,
   'optimized-black-hole': optimizedBlackHoleMeta,
   earth: earthMeta,
@@ -64,7 +62,6 @@ export const exampleMetadataBySlug = {
   gradient: withThumbnails(rawMetadata.gradient),
   'triangle-led-front': withThumbnails(rawMetadata['triangle-led-front']),
   'anti-aliasing': withThumbnails(rawMetadata['anti-aliasing']),
-  'post-processing': withThumbnails(rawMetadata['post-processing']),
   'black-hole': withThumbnails(rawMetadata['black-hole']),
   'optimized-black-hole': withThumbnails(rawMetadata['optimized-black-hole']),
   earth: withThumbnails(rawMetadata.earth),
