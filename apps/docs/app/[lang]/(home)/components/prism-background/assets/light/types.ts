@@ -7,9 +7,7 @@ export type LightAssetId =
 
 export interface LightAssetSpec {
   readonly id: LightAssetId;
-  readonly url: string;
   readonly size: readonly [number, number];
-  readonly colorSpace: "linear";
 }
 
 export interface GeneratedLightAsset {

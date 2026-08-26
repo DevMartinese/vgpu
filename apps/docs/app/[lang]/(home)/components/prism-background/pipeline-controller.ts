@@ -34,12 +34,44 @@ export interface PrismPipelineController {
   destroy(): Promise<void> | undefined;
 }
 
+let lightPipelineModule:
+  | Promise<typeof import("./pipelines/light")>
+  | undefined;
+let darkPipelineModule: Promise<typeof import("./pipelines/dark")> | undefined;
+
+function loadLightPipelineModule() {
+  lightPipelineModule ??= import("./pipelines/light").catch(
+    (error: unknown) => {
+      lightPipelineModule = undefined;
+      throw error;
+    }
+  );
+  return lightPipelineModule;
+}
+
+function loadDarkPipelineModule() {
+  darkPipelineModule ??= import("./pipelines/dark").catch((error: unknown) => {
+    darkPipelineModule = undefined;
+    throw error;
+  });
+  return darkPipelineModule;
+}
+
+/** Starts fetching the selected theme pipeline before the GPU is initialized. */
+export function preloadPrismPipeline(mode: PrismPipelineMode): void {
+  const pending =
+    mode === "light" ? loadLightPipelineModule() : loadDarkPipelineModule();
+  void pending.catch(() => {
+    // The controller reports a retry failure through the renderer's onError.
+  });
+}
+
 const defaultFactory: PrismPipelineFactory = (mode, runtime) =>
   mode === "light"
-    ? import("./pipelines/light").then(({ createLightPipeline }) =>
+    ? loadLightPipelineModule().then(({ createLightPipeline }) =>
         createLightPipeline(runtime)
       )
-    : import("./pipelines/dark").then(({ createDarkPipeline }) =>
+    : loadDarkPipelineModule().then(({ createDarkPipeline }) =>
         createDarkPipeline(runtime)
       );
 

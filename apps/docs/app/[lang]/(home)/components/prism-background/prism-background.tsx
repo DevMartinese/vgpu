@@ -12,6 +12,8 @@ import { createRenderer, type PrismRenderer } from "./renderer";
 import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
 import type { PrismControlsUpdater } from "./debug/graph/control-context";
+import { preloadLightAssets } from "./assets/light/preload";
+import { preloadPrismPipeline } from "./pipeline-controller";
 
 const PrismDebugGraph = lazy(() =>
   import("./debug/graph").then(({ PrismDebugGraph: Component }) => ({
@@ -78,6 +80,8 @@ export function PrismBackground() {
     );
     setShowDebug(debugPreviews);
     const initialMode = currentPrismMode();
+    if (initialMode === "light") preloadLightAssets();
+    preloadPrismPipeline(initialMode);
     setDebugMode(initialMode);
     const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
     const framingElement = hero?.querySelector<HTMLElement>(
@@ -116,6 +120,8 @@ export function PrismBackground() {
     };
     const syncTheme = () => {
       const mode = currentPrismMode();
+      if (mode === "light") preloadLightAssets();
+      preloadPrismPipeline(mode);
       const wallColor = heroBackgroundColor(canvas);
       setDebugBaselineControls((current) =>
         current.wallColor === wallColor
