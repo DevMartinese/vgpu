@@ -22,17 +22,16 @@ describe("presentation reveal", () => {
     expect(presentationRevealUniforms("light", 2).revealProgress).toBe(1);
   });
 
-  test("opens the beam after half opacity and finishes after the fade", () => {
+  test("opens the beam after quarter opacity and finishes after the fade", () => {
     expect(heroRevealProgress(0)).toEqual({ opacity: 0, beamWidth: 0 });
-    const halfOpacityTime = 1 - Math.cbrt(0.5);
-    expect(heroRevealProgress(halfOpacityTime).opacity).toBeCloseTo(0.5);
-    expect(heroRevealProgress(halfOpacityTime).beamWidth).toBe(0);
+    const beamStart = 1 - Math.cbrt(0.75);
+    expect(heroRevealProgress(beamStart).opacity).toBeCloseTo(0.25);
+    expect(heroRevealProgress(beamStart).beamWidth).toBe(0);
     expect(heroRevealProgress(1).opacity).toBe(1);
     expect(heroRevealProgress(1).beamWidth).toBeGreaterThan(0);
     expect(heroRevealProgress(1).beamWidth).toBeLessThan(1);
-    const beamStart = halfOpacityTime;
-    const beamMidpoint = beamStart + (1.75 - beamStart) * 0.5;
+    const beamMidpoint = beamStart + (2.5 - beamStart) * 0.5;
     expect(heroRevealProgress(beamMidpoint).beamWidth).toBeCloseTo(0.875);
-    expect(heroRevealProgress(1.75)).toEqual({ opacity: 1, beamWidth: 1 });
+    expect(heroRevealProgress(2.5)).toEqual({ opacity: 1, beamWidth: 1 });
   });
 });
