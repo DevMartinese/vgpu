@@ -96,6 +96,12 @@ npx vgpu examples pull <id> --out ./example
 - [Agent readiness manifest](https://vgpu.sh/agents.md) — how agents should discover and use vgpu
 - [llms.txt](https://vgpu.sh/llms.txt) and [llms-full.txt](https://vgpu.sh/llms-full.txt) — documentation index and full export for LLMs
 - [Examples discovery API](https://vgpu.sh/docs/examples-api) — tokenless and read-only, described by [OpenAPI](https://vgpu.sh/openapi.json)
+- [MCP guide](https://vgpu.sh/docs/mcp) — connect agents to the public read-only endpoint at `https://vgpu.sh/api/mcp`, or run local stdio for package-versioned docs and opt-in example downloads
+
+```bash
+npx vgpu mcp
+npx vgpu mcp --project-from-cwd
+```
 
 ## Packages
 

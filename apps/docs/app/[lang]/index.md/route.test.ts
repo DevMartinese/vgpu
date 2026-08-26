@@ -19,6 +19,8 @@ describe("homepage Markdown", () => {
       "pnpm add vgpu",
       "npx vgpu",
       "/docs/cli",
+      "/docs/mcp",
+      "/api/mcp",
       "/examples",
       "/openapi.json",
       "/agents.md",
