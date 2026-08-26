@@ -2,7 +2,11 @@ import { glassUniforms, sceneUniforms } from "../../runtime/uniforms";
 import type { PrismRuntime } from "../../runtime/types";
 import { lightGlassAccentUniforms } from "./glass-accent";
 import { prismShadowUniforms } from "./shadow/tuning";
-import { lightCausticUniforms, lightWallUniforms } from "./uniforms";
+import {
+  lightCausticUniforms,
+  lightPresentUniforms,
+  lightWallUniforms,
+} from "./uniforms";
 import type { LightPipelineGraph } from "./types";
 
 export function bindLightGraph(
@@ -37,6 +41,7 @@ export function bindLightGraph(
     caustic: lightCausticUniforms(runtime),
     causticProfile: assets.causticProfile,
     causticSampler: graph.materialSampler,
+    wallMaterial: assets.wallMaterial,
   });
   graph.glassBack.set({
     params: glassParams,
@@ -64,5 +69,8 @@ export function bindLightGraph(
     params: { viewProjection: runtime.view.viewProjection },
   });
   graph.lightWireframe.set({ scene: sceneUniforms(runtime) });
-  graph.present.set({ sceneTexture: scene });
+  graph.present.set({
+    sceneTexture: scene,
+    params: lightPresentUniforms(runtime),
+  });
 }

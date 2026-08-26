@@ -153,6 +153,46 @@ export interface LightFadeControls {
   readonly rainbowFalloffPower: number;
 }
 
+export interface LightWallControls {
+  /** Multiplier shared by the large and micro normal layers. */
+  readonly normalStrength: number;
+  /** Transfer exponent applied to the authored global-light mask. */
+  readonly lightmapGamma: number;
+  /** Contrast exponent around shadowPivot; 1 preserves the authored mask. */
+  readonly shadowContrast: number;
+  /** Mask value around which shadow contrast is expanded or compressed. */
+  readonly shadowPivot: number;
+  /** Base exposure retained in the darkest part of the lightmap. */
+  readonly shadowFloor: number;
+  /** Base exposure reached in the brightest part of the lightmap. */
+  readonly highlightExposure: number;
+  /** Neutral incident light added after the wall's direct response. */
+  readonly ambientFill: number;
+}
+
+export interface LightCausticControls {
+  readonly strength: number;
+  readonly coverage: number;
+  /** Mixes wall-normal response into exterior white and spectral light. */
+  readonly normalInfluence: number;
+  /** Elevation of the projected beam above the wall plane, in degrees. */
+  readonly normalElevation: number;
+}
+
+export type LightToneMapping = "aces" | "neutral" | "reinhard" | "clamp";
+
+export interface LightOutputControls {
+  /** Linear scene exposure applied before the selected tone mapper. */
+  readonly exposure: number;
+  readonly toneMapping: LightToneMapping;
+}
+
+export interface LightModeControls {
+  readonly wall: LightWallControls;
+  readonly caustic: LightCausticControls;
+  readonly output: LightOutputControls;
+}
+
 export interface BeamMouseYControls {
   /** Beam incidence in degrees when the pointer is at the top of the viewport. */
   readonly top: number;
@@ -173,6 +213,8 @@ export interface PrismControls {
   readonly beamMouseY: BeamMouseYControls;
   /** Visual attenuation of the finite light sheet. */
   readonly lightFade: LightFadeControls;
+  /** Look-development parameters used only by the light-mode pipeline. */
+  readonly lightMode: LightModeControls;
   /** CSS hex color, interpreted as sRGB before the additive light is applied. */
   readonly wallColor: string;
   /** Draw the generated triangle edges over the glass for topology inspection. */
@@ -213,6 +255,68 @@ export const PRISM_LIGHT_FADE_RANGES = {
   rainbowFalloffRate: { min: 0, max: 40, step: 0.1 },
   rainbowFalloffPower: { min: 0.25, max: 8, step: 0.05 },
 } as const;
+export const PRISM_LIGHT_MODE_RANGES = {
+  wall: {
+    normalStrength: { min: 0, max: 3, step: 0.05 },
+    lightmapGamma: { min: 0.5, max: 4, step: 0.05 },
+    shadowContrast: { min: 0.25, max: 8, step: 0.05 },
+    shadowPivot: { min: 0.05, max: 0.95, step: 0.01 },
+    shadowFloor: { min: 0, max: 1.2, step: 0.01 },
+    highlightExposure: { min: 0.25, max: 8, step: 0.01 },
+    ambientFill: { min: 0, max: 2.5, step: 0.01 },
+  },
+  caustic: {
+    strength: { min: 0, max: 4, step: 0.01 },
+    coverage: { min: 0, max: 1, step: 0.01 },
+    normalInfluence: { min: 0, max: 1, step: 0.01 },
+    normalElevation: { min: 5, max: 85, step: 1 },
+  },
+  output: {
+    exposure: { min: 0.25, max: 2, step: 0.01 },
+  },
+} as const;
+export const PRISM_LIGHT_TONE_MAPPING_ORDER: readonly LightToneMapping[] = [
+  "aces",
+  "neutral",
+  "reinhard",
+  "clamp",
+];
+export const PRISM_LIGHT_TONE_MAPPING_LABELS: Record<
+  LightToneMapping,
+  string
+> = {
+  aces: "ACES",
+  neutral: "Neutral",
+  reinhard: "Reinhard",
+  clamp: "Clamp (none)",
+};
+export const PRISM_LIGHT_TONE_MAPPING_CODES: Record<LightToneMapping, number> = {
+  aces: 0,
+  neutral: 1,
+  reinhard: 2,
+  clamp: 3,
+};
+export const DEFAULT_LIGHT_MODE_CONTROLS: LightModeControls = {
+  wall: {
+    normalStrength: 0.6,
+    lightmapGamma: 0.65,
+    shadowContrast: 6.85,
+    shadowPivot: 0.9,
+    shadowFloor: 0.87,
+    highlightExposure: 3.31,
+    ambientFill: 0.42,
+  },
+  caustic: {
+    strength: 1.9,
+    coverage: 0.86,
+    normalInfluence: 1,
+    normalElevation: 35,
+  },
+  output: {
+    exposure: 1,
+    toneMapping: "aces",
+  },
+};
 /** Vertical field of view of the camera looking at the wall, in degrees. */
 export const CAMERA_FOV_DEGREES = 48;
 /** Fallback camera distance before a DOM framing slot is available. */
@@ -288,6 +392,7 @@ export const DEFAULT_PRISM_CONTROLS: PrismControls = {
   beamWidth: PRISM_DEFAULT_BEAM_WIDTH,
   beamMouseY: DEFAULT_BEAM_MOUSE_Y_CONTROLS,
   lightFade: DEFAULT_LIGHT_FADE_CONTROLS,
+  lightMode: DEFAULT_LIGHT_MODE_CONTROLS,
   wallColor: "#000000",
   wireframe: false,
   lightWireframe: false,

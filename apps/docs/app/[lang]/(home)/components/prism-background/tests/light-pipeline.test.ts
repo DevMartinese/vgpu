@@ -15,6 +15,7 @@ import {
 import { createPrismRuntime, destroyPrismRuntime } from "../runtime/resources";
 import {
   lightCausticUniforms,
+  lightPresentUniforms,
   lightWallUniforms,
 } from "../pipelines/light/uniforms";
 
@@ -45,6 +46,12 @@ describe("light pipeline ownership", () => {
         expect.objectContaining({
           strength: 1.9,
           coverage: 0.86,
+          normalInfluence: 1,
+          normalElevation: 35,
+          materialWorldScale: 0.57 * 2.4,
+          normalStrength: 0.22 * 0.6,
+          microNormalFrequency: 7,
+          microNormalStrength: 1.05 * 0.6,
           farDesaturation: 0.04,
           farBrightness: 0.02,
           travelScale: 1,
@@ -55,15 +62,69 @@ describe("light pipeline ownership", () => {
       expect(lightWallUniforms(runtime)).toEqual(
         expect.objectContaining({
           materialWorldScale: 0.57 * 2.4,
-          normalStrength: 0.22,
+          normalStrength: 0.22 * 0.6,
           microNormalFrequency: 7,
-          microNormalStrength: 1.05,
+          microNormalStrength: 1.05 * 0.6,
           ambient: 0.5,
           lightDirection: [-0.48, 0.56, 0.68],
-          ambientLightStrength: 1.35,
+          ambientLightStrength: 0.42,
+          globalLightTransfer: 0.65,
+          shadowContrast: 6.85,
+          shadowPivot: 0.9,
+          shadowFloor: 0.87,
+          highlightExposure: 3.31,
           prismShadowStrength: 0,
         })
       );
+      expect(lightPresentUniforms(runtime)).toEqual({
+        exposure: 1,
+        toneMapping: 0,
+      });
+      runtime.controls = {
+        ...runtime.controls,
+        lightMode: {
+          wall: {
+            normalStrength: 1.5,
+            lightmapGamma: 3,
+            shadowContrast: 4,
+            shadowPivot: 0.42,
+            shadowFloor: 0.35,
+            highlightExposure: 0.9,
+            ambientFill: 0.8,
+          },
+          caustic: {
+            strength: 2.4,
+            coverage: 0.65,
+            normalInfluence: 0.8,
+            normalElevation: 52,
+          },
+          output: { exposure: 0.75, toneMapping: "neutral" },
+        },
+      };
+      expect(lightWallUniforms(runtime)).toEqual(
+        expect.objectContaining({
+          normalStrength: 0.22 * 1.5,
+          microNormalStrength: 1.05 * 1.5,
+          globalLightTransfer: 3,
+          shadowContrast: 4,
+          shadowPivot: 0.42,
+          shadowFloor: 0.35,
+          highlightExposure: 0.9,
+          ambientLightStrength: 0.8,
+        })
+      );
+      expect(lightCausticUniforms(runtime)).toEqual(
+        expect.objectContaining({
+          strength: 2.4,
+          coverage: 0.65,
+          normalInfluence: 0.8,
+          normalElevation: 52,
+        })
+      );
+      expect(lightPresentUniforms(runtime)).toEqual({
+        exposure: 0.75,
+        toneMapping: 1,
+      });
       await graph.caustic.compile(graph.backdropHDR!);
       const causticPipeline = getMockGPUDeviceInstrumentation(
         gpu.device.gpu
@@ -161,6 +222,11 @@ describe("light pipeline ownership", () => {
       expect(pipeline.debugTarget("scene-hdr")?.primary).toBe(
         pipeline.targets.sceneHDR
       );
+      expect(pipeline.debugTarget("final-output")).toEqual({
+        primary: pipeline.targets.sceneHDR,
+        exposure: 1,
+        toneMapping: 0,
+      });
       expect(pipeline.debugTarget("front-glass")).toEqual({
         primary: pipeline.targets.sceneHDR,
         secondary: pipeline.targets.backdropHDR,

@@ -93,6 +93,7 @@ export function createLightDebugDraws(
         caustic: lightCausticUniforms(runtime),
         causticProfile: assets.causticProfile,
         causticSampler: graph.materialSampler,
+        wallMaterial: assets.wallMaterial,
       });
       prismShadow.set({
         shadow: prismShadowUniforms(runtime.view.viewProjection),

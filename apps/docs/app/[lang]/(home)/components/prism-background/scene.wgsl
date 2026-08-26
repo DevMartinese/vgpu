@@ -3,6 +3,8 @@
 export struct Scene {
   viewProjection: mat4x4f,
   wallHalfExtent: vec2f,
+  /** XY direction in which the white beam travels toward the prism. */
+  inputBeamDirection: vec2f,
   /** User-selected sRGB wall color; the wall pass linearizes it before lighting. */
   wallColor: vec3f,
   /** 1 shows only the generated light over black. */

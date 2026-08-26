@@ -14,6 +14,7 @@ import {
   BackgroundVariant,
   Controls as FlowControls,
   ReactFlow,
+  type EdgeTypes,
   type NodeTypes,
   type OnMove,
   type Viewport,
@@ -37,10 +38,13 @@ import {
 } from "./control-context";
 import { formatPrismControlChanges, writeClipboardText } from "./copy-controls";
 import { createDebugGraphModel, type PrismDebugFlowNode } from "./model";
+import { layoutDebugGraphModel } from "./elk-layout";
+import { ElkEdge } from "./elk-edge";
 import { DebugPopoutPortal, useDebugPopout } from "./popout";
 import { SourceNode } from "./source-node";
 
 const NODE_TYPES: NodeTypes = { prismDebug: SourceNode };
+const EDGE_TYPES: EdgeTypes = { prismDebug: ElkEdge };
 
 export interface PrismDebugGraphProps {
   readonly baselineControls: PrismControls;
@@ -60,10 +64,25 @@ export function PrismDebugGraph({
   onControlsChange,
   sources = debugSourcesForMode(mode),
 }: PrismDebugGraphProps) {
-  const model = useMemo(
+  const baseModel = useMemo(
     () => createDebugGraphModel(sources, bridge, mode),
     [bridge, mode, sources]
   );
+  const [model, setModel] = useState(baseModel);
+  useEffect(() => {
+    let active = true;
+    setModel(baseModel);
+    void layoutDebugGraphModel(baseModel)
+      .then((layout) => {
+        if (active) setModel(layout);
+      })
+      .catch((error: unknown) => {
+        console.error("Unable to auto-layout the Prism debug graph", error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [baseModel]);
   const popout = useDebugPopout();
   const viewportRef = useRef<Viewport>(DEFAULT_VIEWPORT);
   const rememberViewport: OnMove = useCallback((_, viewport) => {
@@ -132,6 +151,7 @@ function GraphSurface({
     <section
       aria-label="Prism render pipeline debug graph"
       className="prism-debug-graph"
+      data-mode={mode}
       data-popout={detached || undefined}
       data-prism-debug-graph
     >
@@ -169,6 +189,7 @@ function GraphSurface({
         defaultViewport={viewportRef.current}
         deleteKeyCode={null}
         edges={model.edges}
+        edgeTypes={EDGE_TYPES}
         elementsSelectable={false}
         minZoom={0.12}
         nodeTypes={NODE_TYPES}

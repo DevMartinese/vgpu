@@ -1,5 +1,9 @@
 import { Scene } from "../../scene.wgsl";
 import { wavelengthToBeamRgb } from "../shared/spectral.wgsl";
+import {
+  evaluateWallNormalsLevel,
+  wallNormalTextureLod,
+} from "./wall-normal.wgsl";
 
 struct CausticParams {
   strength: f32,
@@ -9,12 +13,19 @@ struct CausticParams {
   travelScale: f32,
   falloffRateScale: f32,
   falloffPowerScale: f32,
+  materialWorldScale: f32,
+  normalStrength: f32,
+  microNormalFrequency: f32,
+  microNormalStrength: f32,
+  normalInfluence: f32,
+  normalElevation: f32,
 }
 
 @group(0) @binding(0) var<uniform> scene: Scene;
 @group(0) @binding(1) var<uniform> caustic: CausticParams;
 @group(0) @binding(2) var causticProfile: texture_2d<f32>;
 @group(0) @binding(3) var causticSampler: sampler;
+@group(0) @binding(4) var wallMaterial: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
@@ -23,6 +34,7 @@ struct VertexOut {
   @location(2) intensity: f32,
   @location(3) travel: f32,
   @location(4) wavelength: f32,
+  @location(5) worldPosition: vec2f,
 };
 
 @vertex
@@ -43,7 +55,67 @@ fn vs_main(
   out.intensity = intensity;
   out.travel = travel;
   out.wavelength = wavelength;
+  out.worldPosition = position;
   return out;
+}
+
+fn wallNormalResponse(in: VertexOut) -> f32 {
+  // Derivatives must be evaluated uniformly. Explicit-LOD samples below can
+  // then stay inside the exterior-only branch without sampling the dense
+  // internal spectral mesh.
+  let normalLod = wallNormalTextureLod(
+    in.worldPosition,
+    caustic.materialWorldScale,
+    wallMaterial,
+  );
+  let travelGradient = vec2f(dpdx(in.travel), dpdy(in.travel));
+  let worldPositionDx = dpdx(in.worldPosition);
+  let worldPositionDy = dpdy(in.worldPosition);
+  let hasTravelGradient = dot(travelGradient, travelGradient) > 0.000000000001;
+  // Only the dispersed exterior cells carry both a wavelength and increasing
+  // travel. White light has a negative wavelength; internal spectral strips
+  // keep travel constant at zero.
+  let isExteriorRainbow = in.wavelength >= 0.0 && hasTravelGradient;
+  if (!isExteriorRainbow || caustic.normalInfluence <= 0.0) {
+    return 1.0;
+  }
+
+  let worldTravel = worldPositionDx * travelGradient.x
+    + worldPositionDy * travelGradient.y;
+  var rayDirection = normalize(scene.inputBeamDirection);
+  if (hasTravelGradient && dot(worldTravel, worldTravel) > 0.000000000001) {
+    rayDirection = normalize(worldTravel);
+  }
+
+  let elevation = clamp(caustic.normalElevation, 1.0, 89.0)
+    * 0.01745329252;
+  // The baked wall normals use the projected incident-vector convention.
+  // Negating this tangent swaps lit ridges and cavities along the beam.
+  let incidentLight = normalize(vec3f(
+    rayDirection * cos(elevation),
+    sin(elevation),
+  ));
+  let normal = evaluateWallNormalsLevel(
+    in.worldPosition,
+    caustic.materialWorldScale,
+    caustic.normalStrength,
+    caustic.microNormalFrequency,
+    caustic.microNormalStrength,
+    normalLod,
+    wallMaterial,
+    causticSampler,
+  ).combined;
+  let flatResponse = max(incidentLight.z, 0.05);
+  let relativeResponse = clamp(
+    max(dot(normal, incidentLight), 0.0) / flatResponse,
+    0.0,
+    2.5,
+  );
+  return mix(
+    1.0,
+    relativeResponse,
+    clamp(caustic.normalInfluence, 0.0, 1.0),
+  );
 }
 
 @fragment
@@ -64,6 +136,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
       0.0001,
     ),
   );
+  let surfaceResponse = wallNormalResponse(in);
   let energy = max(in.intensity, 0.0) * radial * outgoingFalloff
     * max(scene.lightOpacity, 0.0) * baked.a;
   let bounded = 1.0 - exp(-energy * max(caustic.strength, 0.0));
@@ -71,8 +144,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let spectral = in.color * mix(vec3f(1.0), baked.rgb, select(0.34, 0.0, in.wavelength < 0.0));
   let neutral = vec3f(max(max(spectral.r, spectral.g), spectral.b) + caustic.farBrightness * distance);
   let tint = clamp(mix(spectral, neutral, farMix) * (0.62 + bounded * 0.68), vec3f(0.0), vec3f(1.45));
-  let coverage = clamp(bounded * caustic.coverage, 0.0, 0.86);
+  let coverage = clamp(bounded * caustic.coverage, 0.0, 1.0);
   // The wall has already been shaded. Emit premultiplied radiance with zero
   // alpha into an additive draw so no wavelength can darken the plaster below.
-  return vec4f(tint * coverage, 0.0);
+  return vec4f(tint * coverage * surfaceResponse, 0.0);
 }

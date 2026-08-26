@@ -14,19 +14,25 @@ export type PrismDebugNodeData = {
 };
 
 export type PrismDebugFlowNode = Node<PrismDebugNodeData, "prismDebug">;
-export type PrismDebugFlowEdge = Edge<Record<string, never>, "smoothstep">;
+export type PrismDebugEdgeData = {
+  readonly labelX?: number;
+  readonly labelY?: number;
+  readonly path?: string;
+};
+export type PrismDebugFlowEdge = Edge<PrismDebugEdgeData, "prismDebug">;
 
 export type PrismDebugGraphModel = {
   readonly nodes: PrismDebugFlowNode[];
   readonly edges: PrismDebugFlowEdge[];
 };
 
-const COLUMN_GAP = 340;
-const NODE_GAP = 24;
-const PREVIEW_NODE_HEIGHT = 190;
-const NON_PREVIEW_NODE_HEIGHT = 58;
-const CONTROL_ROW_HEIGHT = 46;
-const CONTROL_GROUP_HEIGHT = 28;
+const NODE_GAP = 64;
+const COLUMN_GAP = 460;
+const PREVIEW_NODE_HEIGHT = 224;
+const NON_PREVIEW_NODE_HEIGHT = 70;
+const CONTROL_ROW_HEIGHT = 48;
+const CONTROL_GROUP_HEIGHT = 34;
+const CONTROL_PREVIEW_HEIGHT = 112;
 
 /** Builds a deterministic left-to-right layout without React-owned graph state. */
 export function createDebugGraphModel(
@@ -64,8 +70,10 @@ export function createDebugGraphModel(
               id: `${dependency.source}:${target.id}:${index}`,
               source: dependency.source,
               target: target.id,
-              type: "smoothstep",
+              type: "prismDebug",
               label: dependency.operation,
+              labelBgPadding: [6, 3],
+              labelBgBorderRadius: 4,
               selectable: false,
             },
           ]
@@ -76,7 +84,7 @@ export function createDebugGraphModel(
   return { nodes, edges };
 }
 
-function estimatedNodeHeight(
+export function estimatedNodeHeight(
   source: PrismDebugSource,
   mode: PrismPipelineMode
 ): number {
@@ -85,11 +93,16 @@ function estimatedNodeHeight(
     (count, group) => count + group.controls.length,
     0
   );
+  const previewCount = groups.reduce(
+    (count, group) => count + (group.preview ? 1 : 0),
+    0
+  );
   return (
     (source.visualization === "none"
       ? NON_PREVIEW_NODE_HEIGHT
       : PREVIEW_NODE_HEIGHT) +
     groups.length * CONTROL_GROUP_HEIGHT +
+    previewCount * CONTROL_PREVIEW_HEIGHT +
     controlCount * CONTROL_ROW_HEIGHT
   );
 }

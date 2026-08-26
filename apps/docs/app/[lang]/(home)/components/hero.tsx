@@ -18,7 +18,7 @@ export function Hero() {
     <HeroTabProvider>
       <section
         data-hero-theme
-        className="relative -mt-16 h-svh max-h-[50em] overflow-hidden"
+        className="relative -mt-16 h-svh max-h-[80em] overflow-hidden"
       >
         <PrismBackground />
 
@@ -67,7 +67,7 @@ export function Hero() {
               >
                 The WebGPU library, designed for agents.
               </p>
-              <div className="mt-20 w-full max-w-[21em]">
+              <div className="mt-7 w-full max-w-[21em]">
                 <HeroTabs />
               </div>
               <div

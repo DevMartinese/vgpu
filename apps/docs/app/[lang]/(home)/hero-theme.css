@@ -39,7 +39,12 @@ body:has([data-hero-theme]) [data-geistdocs-container] > header {
 html[data-scrolled]
   body:has([data-hero-theme])
   [data-geistdocs-container]
-  > header {
+  > header,
+body:has([data-hero-theme])
+  [data-geistdocs-container]
+  > header:has(
+    [data-slot="navigation-menu-trigger"][data-state="open"]
+  ) {
   background-color: var(--home-page-background);
 }
 
@@ -47,6 +52,18 @@ html[data-scrolled]
   body:has([data-hero-theme]) [data-geistdocs-container] > header {
     transition: none;
   }
+}
+
+/* The Search / Ask AI buttons use the outline variant, whose light-mode fill
+   (`bg-background-100`) reads as an out-of-place white chip over the textured
+   hero. Drop the fill on the home route in light mode; hover still restores a
+   surface, and dark mode's translucent outline is left untouched. */
+html.light
+  body:has([data-hero-theme])
+  [data-geistdocs-container]
+  > header
+  [data-slot="button"] {
+  background-color: transparent;
 }
 
 [data-hero-tabs-rule] {

@@ -33,6 +33,7 @@ function activeControlValues(controls: PrismControls, mode: PrismTheme) {
       transmission: controls.glass.transmission[mode],
       reflection: controls.glass.reflection[mode],
     },
+    ...(mode === "light" ? { lightMode: controls.lightMode } : {}),
     ...(mode === "dark" ? { postprocess: controls.postprocess } : {}),
   };
 }

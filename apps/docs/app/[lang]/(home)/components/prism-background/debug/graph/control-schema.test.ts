@@ -18,7 +18,11 @@ const LIGHT_CONTROL_NODES = [
   "projected-caustic",
   "backdrop-hdr",
   "wall-material",
+  "wall-normal",
+  "global-shadow",
+  "composed-wall",
   "front-glass",
+  "final-output",
 ];
 
 const DARK_CONTROL_NODES = [
@@ -34,9 +38,26 @@ describe("React Flow prism controls", () => {
     const light = controlIds(LIGHT_CONTROL_NODES, "light");
     const dark = controlIds(DARK_CONTROL_NODES, "dark");
 
-    expect(light).toHaveLength(18);
+    expect(light).toHaveLength(31);
     expect(dark).toHaveLength(21);
     expect(light).not.toContain("bloom-strength");
+    expect(light).toEqual(
+      expect.arrayContaining([
+        "normal-strength",
+        "lightmap-gamma",
+        "shadow-contrast",
+        "shadow-pivot",
+        "shadow-floor",
+        "highlight-exposure",
+        "ambient-fill",
+        "caustic-strength",
+        "caustic-coverage",
+        "caustic-normal-influence",
+        "caustic-normal-elevation",
+        "scene-exposure",
+        "tone-mapping",
+      ])
+    );
     expect(dark).toEqual(
       expect.arrayContaining([
         "bloom-threshold",
@@ -78,6 +99,21 @@ describe("React Flow prism controls", () => {
     expect(crown.spectralDispersion).toEqual(PRISM_DISPERSION_PRESETS.crown);
     const custom = base.write(crown, "dark", 1.7);
     expect(preset.read(custom, "dark")).toBe("custom");
+  });
+
+  test("switches the light tone mapper without changing scene exposure", () => {
+    const toneMapping = selectControl("final-output", "tone-mapping");
+    expect(toneMapping.read(DEFAULT_PRISM_CONTROLS, "light")).toBe("aces");
+
+    const next = toneMapping.write(
+      DEFAULT_PRISM_CONTROLS,
+      "light",
+      "neutral"
+    );
+    expect(next.lightMode.output).toEqual({
+      exposure: DEFAULT_PRISM_CONTROLS.lightMode.output.exposure,
+      toneMapping: "neutral",
+    });
   });
 
   test("edits only the active glass theme without mutating defaults", () => {

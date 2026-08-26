@@ -9,9 +9,14 @@ import type { Texture } from "vgpu/core";
 
 import causticDebugWgsl from "../materials/light/caustic-debug.wgsl";
 import causticWgsl from "../materials/light/caustic.wgsl";
+import copyLinearWgsl from "../copy-linear.wgsl";
+import presentWgsl from "../materials/light/present.wgsl";
 import spectralWgsl from "../materials/shared/spectral.wgsl";
+import toneMappingWgsl from "../materials/shared/tone-mapping.wgsl";
 import wallCommonWgsl from "../materials/light/wall-common.wgsl";
 import wallDebugWgsl from "../materials/light/wall-debug.wgsl";
+import wallNormalWgsl from "../materials/light/wall-normal.wgsl";
+import wallWgsl from "../materials/light/wall.wgsl";
 import { generateCausticProfile } from "../assets/light/generate-caustic";
 import {
   applyGlobalLightMask,
@@ -152,12 +157,12 @@ describe("light pipeline baked assets", () => {
   });
 
   test("wall detail is world-space, isotropic, and split into two normal scales", () => {
-    expect(wallCommonWgsl.wgsl).toContain(
+    expect(wallNormalWgsl.wgsl).toContain(
       "worldPosition / max(worldScale, 0.001)"
     );
     expect(wallCommonWgsl.wgsl).toContain("params.microNormalFrequency");
     expect(wallCommonWgsl.wgsl).toContain("params.microNormalStrength");
-    expect(wallCommonWgsl.wgsl).toContain("textureSampleBias");
+    expect(wallNormalWgsl.wgsl).toContain("textureSampleBias");
     expect(wallCommonWgsl.wgsl).toContain("GLOBAL_LIGHT_MASK_ASPECT = 1.5");
     expect(wallCommonWgsl.wgsl).toMatch(
       /wallAspect \/ \w*GLOBAL_LIGHT_MASK_ASPECT/
@@ -169,8 +174,12 @@ describe("light pipeline baked assets", () => {
       "material.r * globalDiffuse"
     );
     expect(wallCommonWgsl.wgsl).toContain("mix(0.25, 1.0, lightFacing)");
-    expect(wallCommonWgsl.wgsl).toContain("GLOBAL_LIGHT_TRANSFER = 2.2");
+    expect(wallCommonWgsl.wgsl).toContain("params.globalLightTransfer");
     expect(wallCommonWgsl.wgsl).toContain("globalLightLinear");
+    expect(wallCommonWgsl.wgsl).toContain("shadowContrastCurve");
+    expect(wallCommonWgsl.wgsl).toContain("params.shadowContrast");
+    expect(wallCommonWgsl.wgsl).toContain("params.shadowPivot");
+    expect(wallCommonWgsl.wgsl).toContain("globalLightShaped");
     expect(wallCommonWgsl.wgsl).toContain("globalBaseExposure");
     expect(wallCommonWgsl.wgsl).toContain(
       "direct * globalBaseExposure + globalIllumination"
@@ -180,14 +189,52 @@ describe("light pipeline baked assets", () => {
     expect(wallCommonWgsl.wgsl).not.toContain(
       "textureSample(wallMaterial, materialSampler, screenUv)"
     );
+    expect(wallDebugWgsl.wgsl).toContain("tonemapAces(composed)");
+    expect(wallDebugWgsl.wgsl).toContain("linearToSrgb3(");
   });
 
   test("caustic output is non-darkening premultiplied radiance", () => {
-    expect(causticWgsl.wgsl).toContain("vec4f(tint * coverage, 0.0)");
+    expect(causticWgsl.wgsl).toContain(
+      "vec4f(tint * coverage * surfaceResponse, 0.0)"
+    );
     expect(causticWgsl.wgsl).toContain(
       "vec4f(position, scene.lightPlaneZ, 1.0)"
     );
     expect(causticWgsl.wgsl).not.toContain("select(0.0, scene.lightPlaneZ");
+    expect(causticWgsl.wgsl).toContain("scene.inputBeamDirection");
+    expect(causticWgsl.wgsl).toContain(
+      "rayDirection * cos(elevation)"
+    );
+    expect(causticWgsl.wgsl).not.toContain(
+      "-rayDirection * cos(elevation)"
+    );
+    expect(causticWgsl.wgsl).toContain("hasTravelGradient");
+    expect(causticWgsl.wgsl).toContain(
+      "in.wavelength >= 0.0 && hasTravelGradient"
+    );
+    expect(causticWgsl.wgsl).not.toContain(
+      "in.wavelength < 0.0 || hasTravelGradient"
+    );
+    expect(causticWgsl.wgsl).toContain("relativeResponse");
+    expect(wallNormalWgsl.wgsl).toContain("textureSampleLevel");
+  });
+
+  test("light present supports selectable tone mapping", () => {
+    expect(presentWgsl.wgsl).toContain("params.toneMapping");
+    expect(presentWgsl.wgsl).toContain("applyPrismToneMapping");
+    expect(toneMappingWgsl.wgsl).toContain("tonemapAces");
+    expect(toneMappingWgsl.wgsl).toContain("tonemapNeutral");
+    expect(toneMappingWgsl.wgsl).toContain("tonemapReinhard");
+    expect(toneMappingWgsl.wgsl).toContain("mode == 3u");
+  });
+
+  test("keeps production targets linear HDR until presentation", () => {
+    expect(wallWgsl.wgsl).not.toContain("tonemap");
+    expect(wallWgsl.wgsl).not.toContain("linearToSrgb");
+    expect(copyLinearWgsl.wgsl).not.toContain("tonemap");
+    expect(copyLinearWgsl.wgsl).not.toContain("linearToSrgb");
+    expect(presentWgsl.wgsl).toContain("applyPrismToneMapping");
+    expect(presentWgsl.wgsl).toContain("linearToSrgb3");
   });
 
   test("destroys successful texture loads when one asset fails", async () => {

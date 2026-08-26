@@ -68,3 +68,56 @@ test("preserves independently customized reflections in both themes", () => {
     controls.glass.reflection
   );
 });
+
+test("fills missing light-mode look controls during Fast Refresh", () => {
+  const legacy = {
+    ...DEFAULT_PRISM_CONTROLS,
+    lightMode: undefined,
+  } as unknown as PrismControls;
+  expect(normalizeControls(legacy).lightMode).toEqual(
+    DEFAULT_PRISM_CONTROLS.lightMode
+  );
+});
+
+test("clamps light-mode look controls to their authored ranges", () => {
+  const controls = {
+    ...DEFAULT_PRISM_CONTROLS,
+    lightMode: {
+      wall: {
+        normalStrength: 99,
+        lightmapGamma: -1,
+        shadowContrast: 99,
+        shadowPivot: -1,
+        shadowFloor: -1,
+        highlightExposure: 99,
+        ambientFill: 99,
+      },
+      caustic: {
+        strength: 99,
+        coverage: -1,
+        normalInfluence: 99,
+        normalElevation: -1,
+      },
+      output: { exposure: 99, toneMapping: "invalid" },
+    },
+  } as unknown as PrismControls;
+
+  expect(normalizeControls(controls).lightMode).toEqual({
+    wall: {
+      normalStrength: 3,
+      lightmapGamma: 0.5,
+      shadowContrast: 8,
+      shadowPivot: 0.05,
+      shadowFloor: 0,
+      highlightExposure: 8,
+      ambientFill: 2.5,
+    },
+    caustic: {
+      strength: 4,
+      coverage: 0,
+      normalInfluence: 1,
+      normalElevation: 5,
+    },
+    output: { exposure: 2, toneMapping: "aces" },
+  });
+});

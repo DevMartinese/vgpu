@@ -1,4 +1,5 @@
 import { LightWall, WallSample, evaluateWall, wallPoint } from "./wall-common.wgsl";
+import { linearToSrgb3, tonemapAces } from "@vgpu/wgsl-std/color";
 
 @group(0) @binding(0) var<uniform> params: LightWall;
 @group(0) @binding(1) var wallMaterial: texture_2d<f32>;
@@ -38,4 +39,7 @@ fn sample(in: VertexOut) -> WallSample {
 @fragment fn fs_global_shadow(in: VertexOut) -> @location(0) vec4f { return vec4f(vec3f(sample(in).globalLight), 1.0); }
 @fragment fn fs_prism_shadow(in: VertexOut) -> @location(0) vec4f { return vec4f(vec3f(sample(in).prismShadow), 1.0); }
 @fragment fn fs_prism_ao(in: VertexOut) -> @location(0) vec4f { return vec4f(vec3f(sample(in).prismAo), 1.0); }
-@fragment fn fs_composed(in: VertexOut) -> @location(0) vec4f { return vec4f(sample(in).composed, 1.0); }
+@fragment fn fs_composed(in: VertexOut) -> @location(0) vec4f {
+  let composed = max(sample(in).composed, vec3f(0.0));
+  return vec4f(linearToSrgb3(tonemapAces(composed)), 1.0);
+}

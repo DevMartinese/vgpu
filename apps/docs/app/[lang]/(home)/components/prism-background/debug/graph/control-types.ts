@@ -51,4 +51,5 @@ export interface DebugControlGroup {
   readonly label: string;
   readonly controls: readonly DebugControl[];
   readonly themeScoped?: boolean;
+  readonly preview?: "shadowCurve";
 }

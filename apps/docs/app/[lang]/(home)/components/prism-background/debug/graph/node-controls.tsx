@@ -9,6 +9,7 @@ import type {
   DebugRangeControl,
   DebugSelectControl,
 } from "./control-types";
+import { ShadowCurvePreview } from "./shadow-curve-preview";
 
 interface NodeControlsProps {
   readonly sourceId: string;
@@ -40,6 +41,9 @@ function ControlGroups({ groups, mode, sourceId }: ControlGroupsProps) {
             {group.label}
             {group.themeScoped ? <span>{mode}</span> : null}
           </legend>
+          {group.preview === "shadowCurve" ? (
+            <ShadowCurvePreview wall={controls.lightMode.wall} />
+          ) : null}
           {group.controls.map((control) => (
             <Control
               key={control.id}

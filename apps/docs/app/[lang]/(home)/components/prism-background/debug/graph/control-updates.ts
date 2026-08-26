@@ -3,6 +3,9 @@ import {
   type GlassReflectionControls,
   type GlassTransmissionControls,
   type LightFadeControls,
+  type LightCausticControls,
+  type LightOutputControls,
+  type LightWallControls,
   type PostprocessControls,
   type PrismControls,
   type PrismDispersion,
@@ -49,6 +52,48 @@ export function withLightFade(
   return {
     ...controls,
     lightFade: { ...controls.lightFade, [field]: value },
+  };
+}
+
+export function withLightWall(
+  controls: PrismControls,
+  field: keyof LightWallControls,
+  value: number
+): PrismControls {
+  return {
+    ...controls,
+    lightMode: {
+      ...controls.lightMode,
+      wall: { ...controls.lightMode.wall, [field]: value },
+    },
+  };
+}
+
+export function withLightCaustic(
+  controls: PrismControls,
+  field: keyof LightCausticControls,
+  value: number
+): PrismControls {
+  return {
+    ...controls,
+    lightMode: {
+      ...controls.lightMode,
+      caustic: { ...controls.lightMode.caustic, [field]: value },
+    },
+  };
+}
+
+export function withLightOutput<Field extends keyof LightOutputControls>(
+  controls: PrismControls,
+  field: Field,
+  value: LightOutputControls[Field]
+): PrismControls {
+  return {
+    ...controls,
+    lightMode: {
+      ...controls.lightMode,
+      output: { ...controls.lightMode.output, [field]: value },
+    },
   };
 }
 

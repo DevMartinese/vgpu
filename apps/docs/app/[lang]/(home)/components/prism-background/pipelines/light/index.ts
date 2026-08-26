@@ -10,6 +10,7 @@ import { PRISM_DEBUG_SOURCES } from "../../debug/sources";
 import { prepareRuntimeEnvironment } from "../../runtime/resources";
 import { resizeRuntime } from "../../runtime/state";
 import type { PrismRuntime } from "../../runtime/types";
+import { PRISM_LIGHT_TONE_MAPPING_CODES } from "../../types";
 import type {
   PrismDebugTargetPreview,
   PrismOutput,
@@ -106,7 +107,7 @@ export function createLightPipeline(
     },
     debugSources: () => PRISM_DEBUG_SOURCES,
     debugTarget(sourceId) {
-      return resolveLightDebugTarget(graph, sourceId);
+      return resolveLightDebugTarget(graph, runtime, sourceId);
     },
     async createDebugDraws() {
       if (destroyed)
@@ -149,13 +150,22 @@ export function createLightPipeline(
 
 function resolveLightDebugTarget(
   graph: LightPipelineGraph,
+  runtime: PrismRuntime,
   sourceId: string
 ): PrismDebugTargetPreview | undefined {
   const backdrop = graph.backdropHDR;
   const scene = graph.sceneHDR;
   if (sourceId === "backdrop-hdr" && backdrop) return { primary: backdrop };
-  if ((sourceId === "scene-hdr" || sourceId === "final-output") && scene)
-    return { primary: scene };
+  if (sourceId === "scene-hdr" && scene) return { primary: scene };
+  if (sourceId === "final-output" && scene)
+    return {
+      primary: scene,
+      exposure: runtime.controls.lightMode.output.exposure,
+      toneMapping:
+        PRISM_LIGHT_TONE_MAPPING_CODES[
+          runtime.controls.lightMode.output.toneMapping
+        ],
+    };
   if (sourceId === "front-glass" && scene && backdrop) {
     return {
       primary: scene,

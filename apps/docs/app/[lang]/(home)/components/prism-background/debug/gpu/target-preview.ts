@@ -37,9 +37,9 @@ export function createTargetPreviewRenderer(
         previewSampler: runtime.sceneSampler,
         params: {
           mode: isDifference ? 1 : 0,
+          toneMapping: preview.toneMapping ?? 0,
           exposure: preview.exposure ?? 1,
           differenceGain: preview.differenceGain ?? (isDifference ? 5 : 1),
-          _padding: 0,
         },
       });
       current.pass({ target: output, clear: [0, 0, 0, 1] }, (pass) => {

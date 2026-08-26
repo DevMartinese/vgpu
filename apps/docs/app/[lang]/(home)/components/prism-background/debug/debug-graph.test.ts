@@ -11,7 +11,8 @@ import {
   PRISM_DEBUG_SOURCES,
   PRISM_DEBUG_SOURCE_IDS,
 } from "./sources";
-import { createDebugGraphModel } from "./graph/model";
+import { createDebugGraphModel, estimatedNodeHeight } from "./graph/model";
+import { layoutDebugGraphModel } from "./graph/elk-layout";
 import { DEFAULT_PRISM_CONTROLS } from "../types";
 
 describe("prism debug graph descriptors", () => {
@@ -50,6 +51,59 @@ describe("prism debug graph descriptors", () => {
         expect(xById.get(edge.source)).toBeLessThan(
           xById.get(edge.target) ?? 0
         );
+      }
+    }
+  );
+
+  it.each([
+    ["light", PRISM_DEBUG_SOURCES],
+    ["dark", PRISM_DARK_DEBUG_SOURCES],
+  ] as const)(
+    "auto-layouts the %s graph without node overlap or routed edge crossings",
+    async (mode, sources) => {
+      const model = await layoutDebugGraphModel(
+        createDebugGraphModel(
+          sources,
+          NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
+          mode
+        )
+      );
+      const rectangles = new Map(
+        model.nodes.map((node) => [
+          node.id,
+          {
+            left: node.position.x,
+            right: node.position.x + 280,
+            top: node.position.y,
+            bottom:
+              node.position.y +
+              estimatedNodeHeight(node.data.source, node.data.mode),
+          },
+        ])
+      );
+      const entries = [...rectangles.entries()];
+
+      for (let index = 0; index < entries.length; index++) {
+        for (let other = index + 1; other < entries.length; other++) {
+          expect(overlaps(entries[index][1], entries[other][1])).toBe(false);
+        }
+      }
+
+      for (const edge of model.edges) {
+        const points = parsePath(edge.data?.path);
+        expect(points.length).toBeGreaterThan(1);
+        for (let index = 1; index < points.length; index++) {
+          for (const [nodeId, rectangle] of rectangles) {
+            if (nodeId === edge.source || nodeId === edge.target) continue;
+            expect(
+              segmentCrossesInterior(
+                points[index - 1],
+                points[index],
+                rectangle
+              )
+            ).toBe(false);
+          }
+        }
       }
     }
   );
@@ -166,4 +220,46 @@ function expectGraph(
       );
     }
   }
+}
+
+type Point = { x: number; y: number };
+type Rectangle = { left: number; right: number; top: number; bottom: number };
+
+function overlaps(first: Rectangle, second: Rectangle): boolean {
+  return !(
+    first.right <= second.left ||
+    second.right <= first.left ||
+    first.bottom <= second.top ||
+    second.bottom <= first.top
+  );
+}
+
+function parsePath(path: string | undefined): Point[] {
+  if (!path) return [];
+  const values = [...path.matchAll(/[ML]\s+(-?[\d.]+)\s+(-?[\d.]+)/g)];
+  return values.map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+}
+
+function segmentCrossesInterior(
+  start: Point,
+  end: Point,
+  rectangle: Rectangle
+): boolean {
+  if (start.x === end.x) {
+    return (
+      start.x > rectangle.left &&
+      start.x < rectangle.right &&
+      Math.max(start.y, end.y) > rectangle.top &&
+      Math.min(start.y, end.y) < rectangle.bottom
+    );
+  }
+  if (start.y === end.y) {
+    return (
+      start.y > rectangle.top &&
+      start.y < rectangle.bottom &&
+      Math.max(start.x, end.x) > rectangle.left &&
+      Math.min(start.x, end.x) < rectangle.right
+    );
+  }
+  return true;
 }

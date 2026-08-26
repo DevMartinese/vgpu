@@ -1,14 +1,11 @@
 import { srgbToLinear3 } from "@vgpu/wgsl-std/color";
 import { evaluateGlassGrounding } from "./glass-grounding.wgsl";
+import { evaluateWallNormalsFromMaterial } from "./wall-normal.wgsl";
 
 const GLOBAL_LIGHT_MASK_ASPECT = 1.5;
 // The art-directed PNG is stored in an unorm KTX channel. Decode its visual
 // (sRGB-like) luminance before using it as incident light in the linear HDR
 // composition. This restores the authored separation between soft shadows.
-const GLOBAL_LIGHT_TRANSFER = 2.2;
-const GLOBAL_LIGHT_DARK_EXPOSURE = 0.52;
-const GLOBAL_LIGHT_BRIGHT_EXPOSURE = 1.08;
-
 export struct LightWall {
   viewProjection: mat4x4f,
   wallHalfExtent: vec2f,
@@ -21,6 +18,11 @@ export struct LightWall {
   microNormalStrength: f32,
   ambient: f32,
   ambientLightStrength: f32,
+  globalLightTransfer: f32,
+  shadowContrast: f32,
+  shadowPivot: f32,
+  shadowFloor: f32,
+  highlightExposure: f32,
   prismShadowStrength: f32,
   prismAoStrength: f32,
   groundingScale: f32,
@@ -42,18 +44,16 @@ export fn wallPoint(params: LightWall, uv: vec2f) -> vec2f {
   return (uv - vec2f(0.5)) * vec2f(2.0, -2.0) * params.wallHalfExtent;
 }
 
-fn wallMaterialUv(worldPosition: vec2f, worldScale: f32) -> vec2f {
-  // The texture repeats in world units, so changing the canvas aspect ratio
-  // reveals more wall instead of stretching the plaster normal map.
-  return worldPosition / max(worldScale, 0.001);
-}
-
-fn normalFromXy(normalXy: vec2f) -> vec3f {
-  let limitedXy = normalXy / max(length(normalXy), 1.0);
-  return normalize(vec3f(
-    limitedXy,
-    sqrt(max(1.0 - dot(limitedXy, limitedXy), 0.0001)),
-  ));
+fn shadowContrastCurve(value: f32, contrast: f32, pivot: f32) -> f32 {
+  let safePivot = clamp(pivot, 0.001, 0.999);
+  let safeContrast = max(contrast, 0.001);
+  if (value < safePivot) {
+    return safePivot * pow(value / safePivot, safeContrast);
+  }
+  return 1.0 - (1.0 - safePivot) * pow(
+    (1.0 - value) / (1.0 - safePivot),
+    safeContrast,
+  );
 }
 
 export fn evaluateWall(
@@ -64,27 +64,24 @@ export fn evaluateWall(
   wallLighting: texture_2d<f32>,
   materialSampler: sampler,
 ) -> WallSample {
-  let materialUv = wallMaterialUv(worldPosition, params.materialWorldScale);
-  let material = textureSample(wallMaterial, materialSampler, materialUv);
-  // A decorrelated, higher-frequency read supplies subtle plaster grain without
-  // baking it into the broad wall undulation. Both layers remain world-locked.
-  let microUv = wallMaterialUv(
-    worldPosition,
-    params.materialWorldScale / max(params.microNormalFrequency, 1.0),
-  ) + vec2f(0.371, 0.613);
-  // A modest negative bias preserves plaster-scale relief after the repeated
-  // micro read selects its mip; linear filtering still suppresses shimmer.
-  let microMaterial = textureSampleBias(
+  let material = textureSample(
     wallMaterial,
     materialSampler,
-    microUv,
-    -2.0,
+    worldPosition / max(params.materialWorldScale, 0.001),
   );
-  let largeNormalXy = (material.gb * 2.0 - 1.0) * params.normalStrength;
-  let microNormalXy = (microMaterial.gb * 2.0 - 1.0) * params.microNormalStrength;
-  let largeNormal = normalFromXy(largeNormalXy);
-  let microNormal = normalFromXy(microNormalXy);
-  let normal = normalFromXy(largeNormalXy + microNormalXy);
+  let normals = evaluateWallNormalsFromMaterial(
+    worldPosition,
+    params.materialWorldScale,
+    params.normalStrength,
+    params.microNormalFrequency,
+    params.microNormalStrength,
+    material,
+    wallMaterial,
+    materialSampler,
+  );
+  let largeNormal = normals.large;
+  let microNormal = normals.micro;
+  let normal = normals.combined;
   let groundingOffset = vec2f(
     worldPosition.x - params.prismCenter.x,
     params.prismCenter.y - worldPosition.y,
@@ -106,7 +103,15 @@ export fn evaluateWall(
   }
   lightingUv = clamp(lightingUv, vec2f(0.001), vec2f(0.999));
   let globalLight = textureSample(wallLighting, materialSampler, lightingUv).r;
-  let globalLightLinear = pow(clamp(globalLight, 0.0, 1.0), GLOBAL_LIGHT_TRANSFER);
+  let globalLightLinear = pow(
+    clamp(globalLight, 0.0, 1.0),
+    max(params.globalLightTransfer, 0.001),
+  );
+  let globalLightShaped = shadowContrastCurve(
+    globalLightLinear,
+    params.shadowContrast,
+    params.shadowPivot,
+  );
   let grounding = textureSample(wallLighting, materialSampler, groundingUv);
   let glassGrounding = evaluateGlassGrounding(grounding.g, grounding.b);
   let prismShadow = mix(1.0, glassGrounding.x, params.prismShadowStrength);
@@ -127,14 +132,14 @@ export fn evaluateWall(
   // radiance. Merely adding it over a uniformly bright wall lifts its shadows,
   // then ACES compresses nearly all of the authored detail into white.
   let globalBaseExposure = mix(
-    GLOBAL_LIGHT_DARK_EXPOSURE,
-    GLOBAL_LIGHT_BRIGHT_EXPOSURE,
-    globalLightLinear,
+    params.shadowFloor,
+    params.highlightExposure,
+    globalLightShaped,
   );
   let globalDiffuse = mix(0.25, 1.0, lightFacing);
   let globalSurfaceResponse = material.r * globalDiffuse;
   let globalIllumination = vec3f(
-    globalLightLinear * params.ambientLightStrength * globalSurfaceResponse
+    globalLightShaped * params.ambientLightStrength * globalSurfaceResponse
   );
   let composed = (
     direct * globalBaseExposure + globalIllumination
@@ -145,7 +150,7 @@ export fn evaluateWall(
     microNormal,
     normal,
     material.a,
-    globalLight,
+    globalLightShaped,
     glassGrounding.x,
     glassGrounding.y,
     composed,

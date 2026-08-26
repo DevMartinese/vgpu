@@ -17,19 +17,26 @@ import {
   PRISM_TRIANGLE,
   type PrismTheme,
 } from "../types";
-import { wallExtent } from "./state";
+import { lampAt, wallExtent } from "./state";
 import type { PrismRuntime } from "./types";
 
 const ENVIRONMENT_ROTATION = rotationMatrix(PRISM_GLASS.environmentRotation);
 
 /** Shared block used by wall and light draws in either theme. */
 export function sceneUniforms(runtime: PrismRuntime): Record<string, unknown> {
+  const light = lampAt(
+    runtime.lampArc,
+    runtime.controls.beamWidth,
+    runtime.lampTarget,
+    runtime.controls.beamMouseY
+  );
   const wallColor = runtime.controls.wallColor.match(
     /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i
   );
   return {
     viewProjection: runtime.view.viewProjection,
     wallHalfExtent: runtimeWallExtent(runtime),
+    inputBeamDirection: light.direction,
     wallColor: wallColor
       ? wallColor.slice(1).map((channel) => Number.parseInt(channel, 16) / 255)
       : [0, 0, 0],

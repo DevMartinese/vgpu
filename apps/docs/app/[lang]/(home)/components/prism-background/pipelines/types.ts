@@ -34,6 +34,8 @@ export interface PrismDebugTargetPreview {
   readonly secondary?: Target;
   readonly mode?: "tone" | "difference";
   readonly exposure?: number;
+  /** Numeric light tone-mapper code; defaults to ACES for generic previews. */
+  readonly toneMapping?: number;
   readonly differenceGain?: number;
 }
 

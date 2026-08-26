@@ -7,9 +7,13 @@ import {
   PRISM_DISPERSION_PRESETS,
   PRISM_GLASS_RANGES,
   PRISM_LIGHT_FADE_RANGES,
+  PRISM_LIGHT_MODE_RANGES,
+  PRISM_LIGHT_TONE_MAPPING_LABELS,
+  PRISM_LIGHT_TONE_MAPPING_ORDER,
   PRISM_POSTPROCESS_RANGES,
   PRISM_SPECTRAL_DISPERSION_RANGES,
   type PrismDispersion,
+  type LightToneMapping,
   type PrismControls,
   type PrismTheme,
 } from "../../types";
@@ -21,6 +25,9 @@ import {
   withCameraFov,
   withDispersionPreset,
   withLightFade,
+  withLightCaustic,
+  withLightOutput,
+  withLightWall,
   withPostprocess,
   withReflection,
   withSpectralDispersion,
@@ -184,6 +191,159 @@ const WALL_CONTROLS: readonly DebugControlGroup[] = [
   },
 ];
 
+const NORMAL_CONTROLS: readonly DebugControlGroup[] = [
+  {
+    label: "Surface relief",
+    controls: [
+      range(
+        "normal-strength",
+        "Normal strength",
+        PRISM_LIGHT_MODE_RANGES.wall.normalStrength,
+        (controls) => controls.lightMode.wall.normalStrength,
+        (controls, _mode, value) =>
+          withLightWall(controls, "normalStrength", value)
+      ),
+    ],
+  },
+];
+
+const GLOBAL_LIGHT_CONTROLS: readonly DebugControlGroup[] = [
+  {
+    label: "Lightmap transfer",
+    preview: "shadowCurve",
+    controls: [
+      range(
+        "lightmap-gamma",
+        "Lightmap gamma",
+        PRISM_LIGHT_MODE_RANGES.wall.lightmapGamma,
+        (controls) => controls.lightMode.wall.lightmapGamma,
+        (controls, _mode, value) =>
+          withLightWall(controls, "lightmapGamma", value)
+      ),
+      range(
+        "shadow-contrast",
+        "Contrast",
+        PRISM_LIGHT_MODE_RANGES.wall.shadowContrast,
+        (controls) => controls.lightMode.wall.shadowContrast,
+        (controls, _mode, value) =>
+          withLightWall(controls, "shadowContrast", value)
+      ),
+      range(
+        "shadow-pivot",
+        "Pivot",
+        PRISM_LIGHT_MODE_RANGES.wall.shadowPivot,
+        (controls) => controls.lightMode.wall.shadowPivot,
+        (controls, _mode, value) =>
+          withLightWall(controls, "shadowPivot", value)
+      ),
+    ],
+  },
+];
+
+const WALL_COMPOSITION_CONTROLS: readonly DebugControlGroup[] = [
+  {
+    label: "Light balance",
+    controls: [
+      range(
+        "shadow-floor",
+        "Shadow floor",
+        PRISM_LIGHT_MODE_RANGES.wall.shadowFloor,
+        (controls) => controls.lightMode.wall.shadowFloor,
+        (controls, _mode, value) =>
+          withLightWall(controls, "shadowFloor", value)
+      ),
+      range(
+        "highlight-exposure",
+        "Highlight exposure",
+        PRISM_LIGHT_MODE_RANGES.wall.highlightExposure,
+        (controls) => controls.lightMode.wall.highlightExposure,
+        (controls, _mode, value) =>
+          withLightWall(controls, "highlightExposure", value)
+      ),
+      range(
+        "ambient-fill",
+        "Ambient fill",
+        PRISM_LIGHT_MODE_RANGES.wall.ambientFill,
+        (controls) => controls.lightMode.wall.ambientFill,
+        (controls, _mode, value) =>
+          withLightWall(controls, "ambientFill", value)
+      ),
+    ],
+  },
+];
+
+const CAUSTIC_CONTROLS: readonly DebugControlGroup[] = [
+  {
+    label: "Caustic compositing",
+    controls: [
+      range(
+        "caustic-strength",
+        "Strength",
+        PRISM_LIGHT_MODE_RANGES.caustic.strength,
+        (controls) => controls.lightMode.caustic.strength,
+        (controls, _mode, value) =>
+          withLightCaustic(controls, "strength", value)
+      ),
+      range(
+        "caustic-coverage",
+        "Coverage",
+        PRISM_LIGHT_MODE_RANGES.caustic.coverage,
+        (controls) => controls.lightMode.caustic.coverage,
+        (controls, _mode, value) =>
+          withLightCaustic(controls, "coverage", value)
+      ),
+      range(
+        "caustic-normal-influence",
+        "Normal influence",
+        PRISM_LIGHT_MODE_RANGES.caustic.normalInfluence,
+        (controls) => controls.lightMode.caustic.normalInfluence,
+        (controls, _mode, value) =>
+          withLightCaustic(controls, "normalInfluence", value)
+      ),
+      range(
+        "caustic-normal-elevation",
+        "Light elevation",
+        PRISM_LIGHT_MODE_RANGES.caustic.normalElevation,
+        (controls) => controls.lightMode.caustic.normalElevation,
+        (controls, _mode, value) =>
+          withLightCaustic(controls, "normalElevation", value)
+      ),
+    ],
+  },
+];
+
+const OUTPUT_CONTROLS: readonly DebugControlGroup[] = [
+  {
+    label: "Tone mapping",
+    controls: [
+      {
+        id: "tone-mapping",
+        label: "Tone mapper",
+        kind: "select",
+        options: PRISM_LIGHT_TONE_MAPPING_ORDER.map((value) => ({
+          value,
+          label: PRISM_LIGHT_TONE_MAPPING_LABELS[value],
+        })),
+        read: (controls) => controls.lightMode.output.toneMapping,
+        write: (controls, _mode, value) =>
+          withLightOutput(
+            controls,
+            "toneMapping",
+            value as LightToneMapping
+          ),
+      },
+      range(
+        "scene-exposure",
+        "Scene exposure",
+        PRISM_LIGHT_MODE_RANGES.output.exposure,
+        (controls) => controls.lightMode.output.exposure,
+        (controls, _mode, value) =>
+          withLightOutput(controls, "exposure", value)
+      ),
+    ],
+  },
+];
+
 const TRANSMISSION_CONTROLS: readonly DebugControlGroup[] = [
   {
     label: "Transmission",
@@ -278,7 +438,11 @@ export function controlGroupsForSource(
     case "dark-scene-hdr":
       return SCENE_CONTROLS;
     case "projected-caustic":
-      return [...BEAM_CONTROLS, ...SPECTRAL_CONTROLS];
+      return [
+        ...BEAM_CONTROLS,
+        ...SPECTRAL_CONTROLS,
+        ...CAUSTIC_CONTROLS,
+      ];
     case "backdrop-hdr":
       return LIGHT_APPEARANCE_CONTROLS;
     case "dark-backdrop-hdr":
@@ -290,11 +454,19 @@ export function controlGroupsForSource(
     case "wall-material":
     case "dark-wall":
       return WALL_CONTROLS;
+    case "wall-normal":
+      return NORMAL_CONTROLS;
+    case "global-shadow":
+      return GLOBAL_LIGHT_CONTROLS;
+    case "composed-wall":
+      return WALL_COMPOSITION_CONTROLS;
     case "front-glass":
     case "dark-front-glass":
       return [...TRANSMISSION_CONTROLS, ...REFLECTION_CONTROLS];
     case "dark-bloom-composite":
       return mode === "dark" ? BLOOM_CONTROLS : [];
+    case "final-output":
+      return OUTPUT_CONTROLS;
     default:
       return [];
   }

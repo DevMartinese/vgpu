@@ -18,6 +18,13 @@ describe("Prism control clipboard changes", () => {
     const controls = {
       ...DEFAULT_PRISM_CONTROLS,
       cameraFov: 55,
+      lightMode: {
+        ...DEFAULT_PRISM_CONTROLS.lightMode,
+        output: {
+          ...DEFAULT_PRISM_CONTROLS.lightMode.output,
+          exposure: 0.8,
+        },
+      },
       glass: {
         ...DEFAULT_PRISM_CONTROLS.glass,
         transmission: {
@@ -44,6 +51,7 @@ describe("Prism control clipboard changes", () => {
             absorption: [0.1, 0.2, 0.3],
           },
         },
+        lightMode: { output: { exposure: 0.8 } },
       },
     });
   });
