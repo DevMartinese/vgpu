@@ -32,15 +32,17 @@ export function bindDarkGraph(
   const sceneTarget = graph.sceneTarget;
   const bloomTargets = graph.bloomTargets;
   const studioEnvironment = runtime.studioEnvironment;
-  const debugEnvironment = runtime.debugEnvironment;
   if (!backgroundTarget || !sceneTarget || !bloomTargets) {
     throw new Error(
       "prepare() must create dark pipeline targets before bind()."
     );
   }
-  if (!studioEnvironment || !debugEnvironment) {
+  if (!studioEnvironment) {
     throw new Error("prepare() must create prism environments before bind().");
   }
+  // Bindings are statically required even when the debug environment is not.
+  // Reusing the studio view keeps the production path allocation-free.
+  const debugEnvironment = runtime.debugEnvironment ?? studioEnvironment;
 
   const scene = sceneUniforms(runtime);
   graph.light.set({ scene });

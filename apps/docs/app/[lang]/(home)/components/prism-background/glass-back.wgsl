@@ -60,49 +60,33 @@ fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f) -> VertexOu
   return out;
 }
 
-fn planeHitDistance(origin: vec3f, direction: vec3f, outward: vec3f, offset: f32) -> f32 {
-  let denominator = dot(outward, direction);
+fn planeHitDistance(origin: vec3f, direction: vec3f, plane: vec4f) -> f32 {
+  let denominator = dot(plane.xyz, direction);
   if (denominator <= 0.00001) { return NO_HIT; }
-  let distance = (offset - dot(outward, origin)) / denominator;
+  let distance = (plane.w - dot(plane.xyz, origin)) / denominator;
   return select(NO_HIT, distance, distance > SURFACE_EPSILON);
 }
 
 /** Nearest ideal prism plane reached by a ray already inside the glass. */
 fn nextSurface(origin: vec3f, direction: vec3f) -> SurfaceHit {
-  var nearest = planeHitDistance(
-    origin,
-    direction,
-    vec3f(0.0, 0.0, 1.0),
-    params.frontZ,
-  );
-  var normal = vec3f(0.0, 0.0, 1.0);
+  // Keep the old front -> back -> side comparison order for exact tie parity.
+  let frontPlane = params.prismPlanes[3];
+  let backPlane = params.prismPlanes[4];
+  var nearest = planeHitDistance(origin, direction, frontPlane);
+  var normal = frontPlane.xyz;
 
-  let backDistance = planeHitDistance(
-    origin,
-    direction,
-    vec3f(0.0, 0.0, -1.0),
-    -params.backZ,
-  );
+  let backDistance = planeHitDistance(origin, direction, backPlane);
   if (backDistance < nearest) {
     nearest = backDistance;
-    normal = vec3f(0.0, 0.0, -1.0);
+    normal = backPlane.xyz;
   }
 
-  var corners = array<vec2f, 3>(params.prismA, params.prismB, params.prismC);
   for (var index = 0u; index < 3u; index = index + 1u) {
-    let start = corners[index];
-    let edge = corners[(index + 1u) % 3u] - start;
-    let outward2 = normalize(vec2f(edge.y, -edge.x));
-    let outward = vec3f(outward2, 0.0);
-    let distance = planeHitDistance(
-      origin,
-      direction,
-      outward,
-      dot(outward2, start),
-    );
+    let plane = params.prismPlanes[index];
+    let distance = planeHitDistance(origin, direction, plane);
     if (distance < nearest) {
       nearest = distance;
-      normal = outward;
+      normal = plane.xyz;
     }
   }
   return SurfaceHit(nearest, normal);
@@ -180,14 +164,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   );
   let reflectedExitTransmission = select(
     0.0,
-    1.0 - dielectricFresnel(params.ior, reflectedFacing),
+    1.0 - dielectricFresnel(params.fresnelF0, reflectedFacing),
     reflectedExit.escaped != 0u,
   );
   let reflectedEnvironment = sampleEnvironment(reflectedExit.direction)
     * params.reflectionStrength
     * reflectedExitTransmission;
   let facing = clamp(-dot(exit.incidentDirection, exit.inwardNormal), 0.0, 1.0);
-  let fresnel = dielectricFresnel(params.ior, facing);
+  let fresnel = dielectricFresnel(params.fresnelF0, facing);
   let reflectionWeight = select(
     1.0,
     fresnel,

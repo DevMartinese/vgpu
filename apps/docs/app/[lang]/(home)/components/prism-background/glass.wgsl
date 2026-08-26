@@ -72,11 +72,11 @@ fn vs_main(@location(0) position: vec3f, @location(1) normal: vec3f) -> VertexOu
 
 const SURFACE_EPSILON: f32 = 0.0002;
 
-/** Distance to one outward plane `dot(outward, p) = offset`, or `NO_EXIT`. */
-fn planeExitDistance(origin: vec3f, direction: vec3f, outward: vec3f, offset: f32) -> f32 {
-  let denominator = dot(outward, direction);
+/** Distance to one outward plane `dot(plane.xyz, p) = plane.w`, or `NO_EXIT`. */
+fn planeExitDistance(origin: vec3f, direction: vec3f, plane: vec4f) -> f32 {
+  let denominator = dot(plane.xyz, direction);
   if (denominator <= 0.00001) { return NO_EXIT; }
-  let distance = (offset - dot(outward, origin)) / denominator;
+  let distance = (plane.w - dot(plane.xyz, origin)) / denominator;
   return select(NO_EXIT, distance, distance > 0.0001);
 }
 
@@ -88,38 +88,24 @@ fn planeExitDistance(origin: vec3f, direction: vec3f, outward: vec3f, offset: f3
  * uses, and the two caps the extrusion added.
  */
 fn nextSurface(origin: vec3f, direction: vec3f) -> SurfaceHit {
-  var corners = array<vec2f, 3>(params.prismA, params.prismB, params.prismC);
-  let frontDistance = planeExitDistance(
-    origin,
-    direction,
-    vec3f(0.0, 0.0, 1.0),
-    params.frontZ,
-  );
-  let backDistance = planeExitDistance(
-    origin,
-    direction,
-    vec3f(0.0, 0.0, -1.0),
-    -params.backZ,
-  );
+  // Keep the old front -> back -> side comparison order. At a geometric tie,
+  // strict `<` therefore selects the same surface as the previous derivation.
+  let frontPlane = params.prismPlanes[3];
+  let backPlane = params.prismPlanes[4];
+  let frontDistance = planeExitDistance(origin, direction, frontPlane);
+  let backDistance = planeExitDistance(origin, direction, backPlane);
   var nearest = frontDistance;
-  var outwardNormal = vec3f(0.0, 0.0, 1.0);
+  var outwardNormal = frontPlane.xyz;
   if (backDistance < nearest) {
     nearest = backDistance;
-    outwardNormal = vec3f(0.0, 0.0, -1.0);
+    outwardNormal = backPlane.xyz;
   }
   for (var index = 0u; index < 3u; index = index + 1u) {
-    let start = corners[index];
-    let edge = corners[(index + 1u) % 3u] - start;
-    let outward = normalize(vec2f(edge.y, -edge.x));
-    let distance = planeExitDistance(
-      origin,
-      direction,
-      vec3f(outward, 0.0),
-      dot(outward, start),
-    );
+    let plane = params.prismPlanes[index];
+    let distance = planeExitDistance(origin, direction, plane);
     if (distance < nearest) {
       nearest = distance;
-      outwardNormal = vec3f(outward, 0.0);
+      outwardNormal = plane.xyz;
     }
   }
   return SurfaceHit(nearest, outwardNormal);
@@ -171,7 +157,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let incident = -view;
   let facing = clamp(dot(view, normal), 0.0, 1.0);
   let reflectedEnvironment = sampleEnvironment(reflect(incident, normal));
-  let fresnel = dielectricFresnel(params.ior, facing);
+  let fresnel = dielectricFresnel(params.fresnelF0, facing);
   let insideDirection = normalize(refract(incident, normal, 1.0 / params.ior));
   let interiorHit = traceInteriorHit(
     in.worldPosition,

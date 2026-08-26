@@ -21,6 +21,10 @@ export struct Glass {
   environmentExposure: f32,
   environmentDebug: f32,
   environmentTexelAngle: f32,
+  /** Schlick reflectance at normal incidence, derived from `ior` on the CPU. */
+  fresnelF0: f32,
+  /** AB, BC, CA, front and back as `(normal, offset)`. */
+  prismPlanes: array<vec4f, 5>,
 }
 
 export fn glassEnvironment(
@@ -64,8 +68,9 @@ export fn glassEnvironmentLod(direction: vec3f, params: Glass) -> f32 {
   );
 }
 
-export fn dielectricFresnel(ior: f32, facing: f32) -> f32 {
-  let ratio = (ior - 1.0) / (ior + 1.0);
-  let f0 = ratio * ratio;
-  return f0 + (1.0 - f0) * pow(1.0 - clamp(facing, 0.0, 1.0), 5.0);
+export fn dielectricFresnel(f0: f32, facing: f32) -> f32 {
+  let oneMinusFacing = 1.0 - clamp(facing, 0.0, 1.0);
+  let squared = oneMinusFacing * oneMinusFacing;
+  let fifth = squared * squared * oneMinusFacing;
+  return f0 + (1.0 - f0) * fifth;
 }

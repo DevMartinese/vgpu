@@ -17,15 +17,17 @@ export function bindLightGraph(
   const scene = graph.sceneHDR;
   const assets = graph.assets;
   const studio = runtime.studioEnvironment;
-  const debug = runtime.debugEnvironment;
   if (!backdrop || !scene || !assets) {
     throw new Error(
       "prepare() must create light targets and assets before bind()."
     );
   }
-  if (!studio || !debug) {
+  if (!studio) {
     throw new Error("prepare() must create prism environments before bind().");
   }
+  // Bindings are statically required even when the debug environment is not.
+  // Reusing the studio view keeps the production path allocation-free.
+  const debug = runtime.debugEnvironment ?? studio;
   const glassParams = glassUniforms(runtime, "light");
   graph.wall.set({
     params: lightWallUniforms(runtime),

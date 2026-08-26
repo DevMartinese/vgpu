@@ -54,6 +54,8 @@ import {
   LIGHT_WHITE_VERTICES,
   lightVertexCount,
 } from "./light-mesh";
+import { prismPlanes } from "./prism-mesh";
+import { schlickFresnelF0 } from "./runtime/uniforms";
 import { wallExtent } from "./scene";
 import {
   CAMERA_DISTANCE,
@@ -339,7 +341,7 @@ test("renders the deterministic light once and idles until something changes", a
     })
   );
   expect(live.lightBuffer.write).toHaveBeenCalledOnce();
-  expect(live.effects).toHaveLength(17);
+  expect(live.effects).toHaveLength(15);
   expect(live.draws).toHaveLength(7);
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
     1,
@@ -387,8 +389,9 @@ test("renders the deterministic light once and idles until something changes", a
   // One full-resolution MSAA target composites back-side glass and light; a
   // second lets the front interface sample that resolved result. Four pairs of
   // smaller HDR targets hold three bloom scales and one particle-light scale; the
-  // remainder are transient environment mip-bake surfaces.
-  expect(live.targets).toHaveLength(40);
+  // remainder are transient studio-environment mip-bake surfaces. The debug
+  // environment is not allocated by the production renderer.
+  expect(live.targets).toHaveLength(25);
   expect(live.targets[0]!.format).toBe("rgba16float");
   expect(live.targets[1]!.format).toBe("rgba16float");
   expect(live.targets[0]!.msaa).toBe(true);
@@ -407,7 +410,7 @@ test("renders the deterministic light once and idles until something changes", a
     expect(bloomTarget.format).toBe("rgba16float");
     expect(bloomTarget.msaa).toBeUndefined();
   }
-  expect(live.textures).toHaveLength(2);
+  expect(live.textures).toHaveLength(1);
   for (const environmentTexture of live.textures) {
     expect(environmentTexture.options).toEqual(
       expect.objectContaining({
@@ -420,15 +423,10 @@ test("renders the deterministic light once and idles until something changes", a
   }
   expect(live.effects[13]!.compile).toHaveBeenCalledWith(live.targets[10]);
   expect(live.effects[14]!.compile).toHaveBeenCalledWith(live.targets[10]);
-  expect(live.effects[15]!.compile).toHaveBeenCalledWith(live.targets[11]);
-  expect(live.effects[16]!.compile).toHaveBeenCalledWith(live.targets[11]);
   expect(live.effects[13]!.set).toHaveBeenCalledWith({
     params: { debug: 0 },
   });
-  expect(live.effects[15]!.set).toHaveBeenCalledWith({
-    params: { debug: 1 },
-  });
-  expect(live.copyTextureToTexture).toHaveBeenCalledTimes(16);
+  expect(live.copyTextureToTexture).toHaveBeenCalledTimes(8);
   expect(live.effects[0]!.compile).toHaveBeenCalledWith(live.targets[1]);
   expect(live.effects[1]!.compile).toHaveBeenCalledWith(live.targets[3]);
   for (let level = 0; level < 4; level++) {
@@ -456,14 +454,14 @@ test("renders the deterministic light once and idles until something changes", a
   expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       studioEnvironment: live.textures[0],
-      debugEnvironment: live.textures[1],
+      debugEnvironment: live.textures[0],
     })
   );
   expect(live.draws[3]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sceneTexture: live.targets[0],
       studioEnvironment: live.textures[0],
-      debugEnvironment: live.textures[1],
+      debugEnvironment: live.textures[0],
     })
   );
   const backGlassBindings = live.draws[2]!.set.mock.lastCall?.[0];
@@ -473,6 +471,8 @@ test("renders the deterministic light once and idles until something changes", a
       params: expect.objectContaining({
         ior: 1.645,
         absorption: [1, 1, 0.54],
+        fresnelF0: schlickFresnelF0(1.645),
+        prismPlanes: prismPlanes(),
       }),
     })
   );
@@ -530,11 +530,11 @@ test("renders the deterministic light once and idles until something changes", a
 
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   tick(live.loopFrame);
-  // Thirty standalone passes bake both environment pyramids once. Runtime
+  // Fifteen standalone passes bake the studio environment pyramid once. Runtime
   // rendering encodes the sorted background, refractive front, highlight
   // extraction, six visible blur passes, the unthresholded particle reduction,
   // two broad particle blur passes, bloom composition and present.
-  expect(live.instance.fns.frame).toHaveBeenCalledTimes(30);
+  expect(live.instance.fns.frame).toHaveBeenCalledTimes(15);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(14);
   expect(live.encodedPasses).toEqual([
     [
@@ -571,6 +571,37 @@ test("renders the deterministic light once and idles until something changes", a
   renderer.dispose();
 });
 
+test("debug previews opt into the orientation environment", async () => {
+  const env = browser();
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    debugPreviews: true,
+  });
+  await renderer.ready;
+
+  expect(live.textures.map(({ label }) => label)).toEqual([
+    "prism-rainbow.environment-studio.texture",
+    "prism-rainbow.environment-debug.texture",
+  ]);
+  renderer.setControls?.({
+    ...DEFAULT_PRISM_CONTROLS,
+    environmentDebug: true,
+  });
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  tick(live.loopFrame);
+  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: expect.objectContaining({ environmentDebug: 1 }),
+      studioEnvironment: live.textures[0],
+      debugEnvironment: live.textures[1],
+    })
+  );
+  renderer.dispose();
+});
+
 test("an explicit light mode uses the lean pipeline and never schedules dust-only frames", async () => {
   const env = browser();
   const live = gpu();
@@ -597,9 +628,9 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
   await renderer.ready;
 
   expect(live.instance.fns.bundle).toHaveBeenCalledOnce();
-  expect(live.effects).toHaveLength(6);
+  expect(live.effects).toHaveLength(4);
   expect(live.draws).toHaveLength(8);
-  expect(live.targets).toHaveLength(32);
+  expect(live.targets).toHaveLength(17);
   expect(live.targets.slice(0, 2).map(({ size }) => size)).toEqual([
     [200, 100],
     [200, 100],
@@ -632,6 +663,8 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
         params: expect.objectContaining({
           ior: 1.47,
           absorption: [0.1, 0.05, 0],
+          fresnelF0: schlickFresnelF0(1.47),
+          prismPlanes: prismPlanes(),
         }),
       })
     );
@@ -845,7 +878,7 @@ test("only optical controls rebuild the light mesh", async () => {
     wireframe: true,
   });
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
-  // The diagnostic environment changes glass uniforms, but cannot retrace light.
+  // Production ignores the diagnostic toggle and cannot retrace light.
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
     environmentDebug: true,
@@ -854,7 +887,7 @@ test("only optical controls rebuild the light mesh", async () => {
   tick(live.loopFrame);
   expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({
-      params: expect.objectContaining({ environmentDebug: 1 }),
+      params: expect.objectContaining({ environmentDebug: 0 }),
     })
   );
   // Glass material sliders update uniforms without retracing the spectral mesh.
@@ -878,6 +911,7 @@ test("only optical controls rebuild the light mesh", async () => {
       params: expect.objectContaining({
         ior: 1.72,
         absorption: [0.2, 0.15, 0.1],
+        fresnelF0: schlickFresnelF0(1.72),
       }),
     })
   );

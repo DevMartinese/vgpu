@@ -33,12 +33,16 @@ const mismatched = pixelmatch(
   { threshold: 0.1, includeAA: true }
 );
 const pixels = baseline.width * baseline.height;
+const channelErrors = rgbErrorStats(baseline.data, candidate.data);
 const report = {
   width: baseline.width,
   height: baseline.height,
   mismatchedPixels: mismatched,
   mismatchRatio: mismatched / pixels,
-  rgbRmse: rgbRmse(baseline.data, candidate.data),
+  rgbRmse: channelErrors.rmse,
+  rgbP99AbsoluteError: channelErrors.p99,
+  rgbMaxAbsoluteError: channelErrors.max,
+  globalSsim: globalSsim(baseline.data, candidate.data),
   tiledSsim: tiledSsim(
     baseline.data,
     candidate.data,
@@ -54,15 +58,62 @@ function readPng(path) {
   return readFile(path).then((bytes) => PNG.sync.read(bytes));
 }
 
-function rgbRmse(a, b) {
+function rgbErrorStats(a, b) {
   let sum = 0;
+  let max = 0;
+  const histogram = new Uint32Array(256);
   for (let pixel = 0; pixel < a.length; pixel += 4) {
     for (let channel = 0; channel < 3; channel++) {
-      const delta = (a[pixel + channel] - b[pixel + channel]) / 255;
-      sum += delta * delta;
+      const byteDelta = Math.abs(a[pixel + channel] - b[pixel + channel]);
+      const normalized = byteDelta / 255;
+      histogram[byteDelta]++;
+      max = Math.max(max, normalized);
+      sum += normalized * normalized;
     }
   }
-  return Math.sqrt(sum / ((a.length / 4) * 3));
+  const channels = (a.length / 4) * 3;
+  const p99Rank = Math.ceil(channels * 0.99);
+  let cumulative = 0;
+  let p99 = 0;
+  for (let delta = 0; delta < histogram.length; delta++) {
+    cumulative += histogram[delta];
+    if (cumulative >= p99Rank) {
+      p99 = delta / 255;
+      break;
+    }
+  }
+  return { rmse: Math.sqrt(sum / channels), p99, max };
+}
+
+/** Whole-frame SSIM stays stable when a handful of temporal dust tiles change. */
+function globalSsim(a, b) {
+  let meanA = 0;
+  let meanB = 0;
+  const pixels = a.length / 4;
+  for (let index = 0; index < a.length; index += 4) {
+    meanA += luminance(a, index);
+    meanB += luminance(b, index);
+  }
+  meanA /= pixels;
+  meanB /= pixels;
+  let varianceA = 0;
+  let varianceB = 0;
+  let covariance = 0;
+  for (let index = 0; index < a.length; index += 4) {
+    const deltaA = luminance(a, index) - meanA;
+    const deltaB = luminance(b, index) - meanB;
+    varianceA += deltaA * deltaA;
+    varianceB += deltaB * deltaB;
+    covariance += deltaA * deltaB;
+  }
+  const divisor = Math.max(pixels - 1, 1);
+  return ssimFromMoments(
+    meanA,
+    meanB,
+    varianceA / divisor,
+    varianceB / divisor,
+    covariance / divisor
+  );
 }
 
 function tiledSsim(a, b, width, height, tileSize = 8) {
@@ -109,6 +160,10 @@ function tileSsim(a, b, width, height, left, top, size) {
   varianceA /= divisor;
   varianceB /= divisor;
   covariance /= divisor;
+  return ssimFromMoments(meanA, meanB, varianceA, varianceB, covariance);
+}
+
+function ssimFromMoments(meanA, meanB, varianceA, varianceB, covariance) {
   const c1 = 0.01 ** 2;
   const c2 = 0.03 ** 2;
   return (

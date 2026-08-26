@@ -181,7 +181,6 @@ describe("light pipeline ownership", () => {
         prepared: true,
       } as EnvironmentTexture);
     runtime.studioEnvironment = environment();
-    runtime.debugEnvironment = environment();
     runtime.environmentReady = Promise.resolve();
     const assetLoader: LightTextureLoader = {
       async load(currentGpu, spec) {

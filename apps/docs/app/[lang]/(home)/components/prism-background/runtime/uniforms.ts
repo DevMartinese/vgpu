@@ -8,6 +8,7 @@ import {
   LIGHT_INTERNAL_SEGMENTS,
   LIGHT_WHITE_QUADS,
 } from "../light-mesh";
+import { prismPlanes } from "../prism-mesh";
 import {
   PRISM_BACK_Z,
   PRISM_BEAM_SLICES,
@@ -21,6 +22,16 @@ import { lampAt, wallExtent } from "./state";
 import type { PrismRuntime } from "./types";
 
 const ENVIRONMENT_ROTATION = rotationMatrix(PRISM_GLASS.environmentRotation);
+const PRISM_PLANES = prismPlanes();
+
+/** Schlick's normal-incidence reflectance, rounded like the shader's f32 math. */
+export function schlickFresnelF0(ior: number): number {
+  const shaderIor = Math.fround(ior);
+  const ratio = Math.fround(
+    Math.fround(shaderIor - 1) / Math.fround(shaderIor + 1)
+  );
+  return Math.fround(ratio * ratio);
+}
 
 /** Shared block used by wall and light draws in either theme. */
 export function sceneUniforms(runtime: PrismRuntime): Record<string, unknown> {
@@ -74,8 +85,13 @@ export function glassUniforms(
     ior: transmission.ior,
     reflectionStrength: reflection.reflectionStrength,
     environmentExposure: reflection.environmentExposure,
-    environmentDebug: runtime.controls.environmentDebug ? 1 : 0,
+    environmentDebug:
+      runtime.debugEnvironmentEnabled && runtime.controls.environmentDebug
+        ? 1
+        : 0,
     environmentTexelAngle: ENVIRONMENT_TEXEL_ANGLE,
+    fresnelF0: schlickFresnelF0(transmission.ior),
+    prismPlanes: PRISM_PLANES,
   };
 }
 

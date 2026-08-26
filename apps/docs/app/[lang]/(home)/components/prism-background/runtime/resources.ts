@@ -26,10 +26,16 @@ import { settleAllOrThrow } from "./settle";
 import { lampAt, wallExtent } from "./state";
 import type { PrismRuntime } from "./types";
 
+export interface PrismRuntimeOptions {
+  /** Bake the preview-only orientation environment alongside the studio. */
+  readonly debugEnvironment?: boolean;
+}
+
 export function createPrismRuntime(
   gpu: Gpu,
   output: readonly [number, number],
-  label: string
+  label: string,
+  options: PrismRuntimeOptions = {}
 ): PrismRuntime {
   const controls = normalizeControls(DEFAULT_PRISM_CONTROLS);
   const aspect = output[0] / Math.max(1, output[1]);
@@ -92,6 +98,7 @@ export function createPrismRuntime(
       addressModeV: "clamp-to-edge",
     }),
     environmentSampler: createEnvironmentSampler(gpu),
+    debugEnvironmentEnabled: options.debugEnvironment === true,
     controls,
     lightStats: initialMesh.stats,
     lampArc: PRISM_DEFAULT_ARC,
@@ -104,7 +111,7 @@ export function createPrismRuntime(
   };
 }
 
-/** Builds the cubemaps once and shares the same promise across both pipelines. */
+/** Builds the shared environment once; the debug map is strictly opt-in. */
 export function prepareRuntimeEnvironment(
   runtime: PrismRuntime
 ): Promise<void> {
@@ -114,23 +121,24 @@ export function prepareRuntimeEnvironment(
     `${runtime.label}.environment-studio`,
     false
   );
-  runtime.debugEnvironment ??= createEnvironmentTexture(
-    runtime.gpu,
-    `${runtime.label}.environment-debug`,
-    true
+  const environments = [runtime.studioEnvironment];
+  if (runtime.debugEnvironmentEnabled) {
+    runtime.debugEnvironment ??= createEnvironmentTexture(
+      runtime.gpu,
+      `${runtime.label}.environment-debug`,
+      true
+    );
+    environments.push(runtime.debugEnvironment);
+  }
+  runtime.environmentReady = settleAllOrThrow(
+    environments.map((environment) =>
+      prepareEnvironmentTexture(
+        runtime.gpu,
+        environment,
+        runtime.environmentSampler
+      )
+    )
   );
-  runtime.environmentReady = settleAllOrThrow([
-    prepareEnvironmentTexture(
-      runtime.gpu,
-      runtime.studioEnvironment,
-      runtime.environmentSampler
-    ),
-    prepareEnvironmentTexture(
-      runtime.gpu,
-      runtime.debugEnvironment,
-      runtime.environmentSampler
-    ),
-  ]);
   return runtime.environmentReady;
 }
 

@@ -92,7 +92,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let baseRim = band(baseDistance, 0.0, accent.bandWidth * 0.7);
 
   let facing = clamp(dot(view, normal), 0.0, 1.0);
-  let fresnel = dielectricFresnel(params.ior, facing);
+  let fresnel = dielectricFresnel(params.fresnelF0, facing);
   let bevel = pow(clamp(1.0 - abs(normal.z), 0.0, 1.0), 2.2);
   let coverage = clamp(
     accent.baseReflection

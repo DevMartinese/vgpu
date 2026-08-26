@@ -288,7 +288,9 @@ export function createRenderer(
     }
     gpu = nextGpu;
     canvasSurface = surface(gpu, options.canvas, { dpr: [1, 2] });
-    runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow");
+    runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow", {
+      debugEnvironment: options.debugPreviews,
+    });
     setRuntimeControls(runtime, controls);
     if (options.performanceSampling) {
       try {

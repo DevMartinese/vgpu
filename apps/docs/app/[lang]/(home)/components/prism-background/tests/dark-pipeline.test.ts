@@ -20,7 +20,6 @@ describe("dark pipeline debug targets", () => {
         prepared: true,
       } as EnvironmentTexture);
     runtime.studioEnvironment = environment();
-    runtime.debugEnvironment = environment();
     runtime.environmentReady = Promise.resolve();
     const output = target(gpu, { size: [24, 16], format: "rgba8unorm" });
     const pipeline = createDarkPipeline(runtime);

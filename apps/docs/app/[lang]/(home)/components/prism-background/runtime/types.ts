@@ -30,6 +30,8 @@ export interface PrismRuntime {
   readonly prismWireframe: Geometry;
   readonly sceneSampler: GPUSampler;
   readonly environmentSampler: GPUSampler;
+  /** Allocates the authored orientation map only for the opt-in debug UI. */
+  readonly debugEnvironmentEnabled: boolean;
   studioEnvironment?: EnvironmentTexture;
   debugEnvironment?: EnvironmentTexture;
   environmentReady?: Promise<void>;
