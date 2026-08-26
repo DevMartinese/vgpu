@@ -48,6 +48,9 @@ export interface PrismPerformanceReport {
   readonly recordedFrames: number;
   readonly capabilities: {
     readonly timestampQuery: boolean;
+    readonly rg11b10ufloatRenderable: boolean;
+    readonly visibleBloomFormat: GPUTextureFormat;
+    readonly particleLightFormat: GPUTextureFormat;
   };
   readonly timing: {
     /** requestAnimationFrame cadence, including browser/display pacing. */

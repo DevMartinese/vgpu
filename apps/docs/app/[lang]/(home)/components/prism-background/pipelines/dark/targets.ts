@@ -2,6 +2,7 @@ import type { Target } from "vgpu";
 import { target } from "vgpu";
 
 import { BLOOM_LEVEL_DIVISORS, BLOOM_LEVELS } from "../../bloom";
+import { bloomFormatForLevel } from "../../capabilities";
 import type { PrismRuntime } from "../../runtime/types";
 import type { BloomTargets, DarkPipelineGraph } from "./types";
 
@@ -24,18 +25,7 @@ export function ensureDarkTargets(
     label: `${runtime.label}.pass-b-front-glass`,
   });
   graph.bloomTargets ??= Array.from({ length: BLOOM_LEVELS }, (_, level) =>
-    Object.freeze({
-      horizontal: target(runtime.gpu, {
-        size: bloomLevelSize(size, level),
-        format: "rgba16float",
-        label: `${runtime.label}.bloom-${level}-horizontal`,
-      }),
-      vertical: target(runtime.gpu, {
-        size: bloomLevelSize(size, level),
-        format: "rgba16float",
-        label: `${runtime.label}.bloom-${level}-vertical`,
-      }),
-    })
+    bloomLevelTargets(runtime, size, level)
   ) as unknown as BloomTargets;
   graph.presentationTarget ??= target(runtime.gpu, {
     size,
@@ -43,6 +33,26 @@ export function ensureDarkTargets(
     label: `${runtime.label}.retained-dark-presentation`,
   });
   resizeDarkTargets(graph, size);
+}
+
+function bloomLevelTargets(
+  runtime: PrismRuntime,
+  size: readonly [number, number],
+  level: number
+): BloomTargets[number] {
+  const format = bloomFormatForLevel(runtime.gpu.device.features, level);
+  return Object.freeze({
+    horizontal: target(runtime.gpu, {
+      size: bloomLevelSize(size, level),
+      format,
+      label: `${runtime.label}.bloom-${level}-horizontal`,
+    }),
+    vertical: target(runtime.gpu, {
+      size: bloomLevelSize(size, level),
+      format,
+      label: `${runtime.label}.bloom-${level}-vertical`,
+    }),
+  });
 }
 
 export function resizeDarkTargets(

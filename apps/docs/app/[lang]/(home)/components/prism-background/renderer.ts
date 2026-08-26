@@ -6,6 +6,7 @@ import type {
   ExampleRenderer,
   RenderSize,
 } from "@/lib/example-renderer";
+import { prismOptionalFeatures } from "./capabilities";
 import {
   createPrismDebugPreviewRelay,
   NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
@@ -316,17 +317,19 @@ export function createRenderer(
   const initialize = async () => {
     const { init } = await import("vgpu");
     if (disposed) return;
-    let timestampQuery = false;
-    if (options.performanceSampling) {
-      try {
-        const adapter = await navigator.gpu?.requestAdapter();
-        timestampQuery = adapter?.features.has("timestamp-query") ?? false;
-      } catch {
-        timestampQuery = false;
-      }
+    let requiredFeatures: readonly GPUFeatureName[] = [];
+    try {
+      const adapter = await navigator.gpu?.requestAdapter();
+      requiredFeatures = prismOptionalFeatures(
+        adapter?.features,
+        options.performanceSampling === true
+      );
+    } catch {
+      // The regular device request remains the authoritative availability
+      // check. A failed optional probe simply preserves all fallback paths.
     }
     const nextGpu = await init(
-      timestampQuery ? { requiredFeatures: ["timestamp-query"] } : undefined
+      requiredFeatures.length > 0 ? { requiredFeatures } : undefined
     );
     if (disposed) {
       nextGpu.dispose();

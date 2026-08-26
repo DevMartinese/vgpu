@@ -224,7 +224,7 @@ function browser() {
   };
 }
 
-function gpu() {
+function gpu(features: readonly GPUFeatureName[] = []) {
   const stop = vi.fn();
   const gpuClock = {
     time: 0,
@@ -315,7 +315,7 @@ function gpu() {
       })),
     },
     device: {
-      features: new Set<string>(),
+      features: new Set<GPUFeatureName>(features),
       createBuffer: vi.fn(() => lightBuffer),
       createTexture: vi.fn((options: Record<string, unknown>) => {
         const created = {
@@ -662,6 +662,43 @@ test("renders the deterministic light once and idles until something changes", a
   ]);
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
+  renderer.dispose();
+});
+
+test("requests supported packed bloom with optional performance timestamps", async () => {
+  const env = browser();
+  const requestAdapter = vi.fn(async () => ({
+    features: new Set<GPUFeatureName>([
+      "rg11b10ufloat-renderable",
+      "timestamp-query",
+    ]),
+  }));
+  vi.stubGlobal("navigator", { gpu: { requestAdapter } });
+  const live = gpu(["rg11b10ufloat-renderable", "timestamp-query"]);
+  mocks.init.mockResolvedValueOnce(live.instance);
+
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    performanceSampling: true,
+  });
+  await renderer.ready;
+
+  expect(requestAdapter).toHaveBeenCalledOnce();
+  expect(mocks.init).toHaveBeenCalledWith({
+    requiredFeatures: [
+      "rg11b10ufloat-renderable",
+      "timestamp-query",
+    ],
+  });
+  expect(live.targets.slice(2, 8).map(({ format }) => format)).toEqual(
+    Array.from({ length: 6 }, () => "rg11b10ufloat")
+  );
+  expect(live.targets.slice(8, 10).map(({ format }) => format)).toEqual([
+    "rgba16float",
+    "rgba16float",
+  ]);
+
   renderer.dispose();
 });
 

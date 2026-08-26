@@ -25,7 +25,12 @@ test("samples warmup + deterministic frames and reports CPU, mesh, passes, and G
     orbit: [0, 0],
   } as unknown as PrismRuntime;
   const gpu = {
-    device: { features: new Set(["timestamp-query"]) },
+    device: {
+      features: new Set([
+        "timestamp-query",
+        "rg11b10ufloat-renderable",
+      ]),
+    },
   } as unknown as Gpu;
   const restoreState = vi.fn();
   const invalidate = vi.fn();
@@ -82,7 +87,12 @@ test("samples warmup + deterministic frames and reports CPU, mesh, passes, and G
     encodedFrames: 4,
     gpu: { samples: 4, p50: 0.75 },
   });
-  expect(report.capabilities.timestampQuery).toBe(true);
+  expect(report.capabilities).toEqual({
+    timestampQuery: true,
+    rg11b10ufloatRenderable: true,
+    visibleBloomFormat: "rg11b10ufloat",
+    particleLightFormat: "rgba16float",
+  });
   expect(runtime.measurementSink).toBeUndefined();
   expect(restoreState).toHaveBeenCalledWith([0.5, 0.5], [0, 0]);
   expect(invalidate).toHaveBeenCalledTimes(2);

@@ -1,6 +1,11 @@
 import type { Gpu, Timer } from "vgpu";
 import { timer as createGpuTimer } from "vgpu";
 
+import { PARTICLE_LIGHT_FIRST_LEVEL } from "../bloom";
+import {
+  bloomFormatForLevel,
+  PACKED_BLOOM_FEATURE,
+} from "../capabilities";
 import type { PrismPassProfile, PrismPipelineMode } from "../pipelines/types";
 import { setRuntimeLampAim, setRuntimeOrbit } from "../runtime/state";
 import type { PrismLightMeshMeasurement, PrismRuntime } from "../runtime/types";
@@ -302,7 +307,17 @@ export function createPrismPerformanceSampler({
       resolution: run.resolution,
       requested: { frames: run.frames, warmupFrames: run.warmupFrames },
       recordedFrames: run.cpuEncode.length,
-      capabilities: { timestampQuery: !!run.timer },
+      capabilities: {
+        timestampQuery: !!run.timer,
+        rg11b10ufloatRenderable: gpu.device.features.has(
+          PACKED_BLOOM_FEATURE
+        ),
+        visibleBloomFormat: bloomFormatForLevel(gpu.device.features, 0),
+        particleLightFormat: bloomFormatForLevel(
+          gpu.device.features,
+          PARTICLE_LIGHT_FIRST_LEVEL
+        ),
+      },
       timing: {
         frameInterval: summarizePerformance(run.frameIntervals),
         cpuEncode: summarizePerformance(run.cpuEncode),

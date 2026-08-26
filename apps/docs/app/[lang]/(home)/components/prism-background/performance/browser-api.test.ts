@@ -96,7 +96,12 @@ function sampleReport(): PrismPerformanceReport {
     resolution: [800, 450],
     requested: { frames: 120, warmupFrames: 16 },
     recordedFrames: 120,
-    capabilities: { timestampQuery: false },
+    capabilities: {
+      timestampQuery: false,
+      rg11b10ufloatRenderable: false,
+      visibleBloomFormat: "rgba16float",
+      particleLightFormat: "rgba16float",
+    },
     timing: { frameInterval: empty, cpuEncode: empty },
     lightMesh: {
       rebuilds: 0,
