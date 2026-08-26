@@ -1,6 +1,11 @@
 import type { Frame, Gpu, Surface, Target } from "vgpu";
-import { clock, frameLoop, surface } from "vgpu";
-import type { CreateDeviceOptions, VGPUAdapter } from "vgpu/core";
+import { clock, frameLoop, init, surface } from "vgpu";
+import {
+  Device,
+  validateRequiredFeatures,
+  type CreateDeviceOptions,
+  type VGPUAdapter,
+} from "vgpu/core";
 
 import type {
   BrowserRendererOptions,
@@ -69,22 +74,16 @@ const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 /** Lets vgpu request its device from the adapter already probed for features. */
-function reuseBrowserAdapter(
-  adapter: GPUAdapter,
-  core: Pick<
-    typeof import("vgpu/core"),
-    "Device" | "validateRequiredFeatures"
-  >
-): VGPUAdapter {
+function reuseBrowserAdapter(adapter: GPUAdapter): VGPUAdapter {
   return {
     async requestDevice(options: CreateDeviceOptions = {}) {
-      core.validateRequiredFeatures(adapter.features, options.requiredFeatures);
+      validateRequiredFeatures(adapter.features, options.requiredFeatures);
       const device = await adapter.requestDevice({
         label: options.label,
         requiredFeatures: options.requiredFeatures,
         requiredLimits: options.requiredLimits,
       });
-      return new core.Device(device, adapter.info ?? null);
+      return new Device(device, adapter.info ?? null);
     },
   };
 }
@@ -428,16 +427,9 @@ export function createRenderer(
   }
 
   const initialize = async () => {
-    // Module loading and adapter acquisition are independent, so start all
-    // three before waiting. The core module stays out of the static hero chunk.
-    const browserAdapterReady = Promise.resolve()
+    const browserAdapter = await Promise.resolve()
       .then(() => navigator.gpu?.requestAdapter())
       .catch(() => undefined);
-    const [{ init }, core, browserAdapter] = await Promise.all([
-      import("vgpu"),
-      import("vgpu/core"),
-      browserAdapterReady,
-    ]);
     if (disposed) return;
     let requiredFeatures: readonly GPUFeatureName[] = [];
     let adapter: VGPUAdapter | undefined;
@@ -446,7 +438,7 @@ export function createRenderer(
         browserAdapter.features,
         options.performanceSampling === true
       );
-      adapter = reuseBrowserAdapter(browserAdapter, core);
+      adapter = reuseBrowserAdapter(browserAdapter);
     }
     const baseInitOptions = adapter ? { adapter } : undefined;
     let nextGpu;
