@@ -21,6 +21,7 @@ const PrismDebugGraph = lazy(() =>
 
 const HERO_BACKGROUND_PROPERTY = "--home-hero-background";
 const CSS_HEX_COLOR = /^#[\da-f]{6}$/i;
+const PRISM_PERFORMANCE_QUERY = "prism-perf";
 
 function heroBackgroundColor(canvas: HTMLCanvasElement): string {
   const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
@@ -72,6 +73,9 @@ export function PrismBackground() {
     const debugPreviews = new URLSearchParams(window.location.search).has(
       "debug"
     );
+    const performanceSampling = new URLSearchParams(window.location.search).has(
+      PRISM_PERFORMANCE_QUERY
+    );
     setShowDebug(debugPreviews);
     const initialMode = currentPrismMode();
     setDebugMode(initialMode);
@@ -92,9 +96,20 @@ export function PrismBackground() {
       initialMode,
       initialControls,
       debugPreviews,
+      performanceSampling,
       onError: reportError,
     });
     rendererRef.current = renderer;
+    let removePerformanceApi: (() => void) | undefined;
+    if (performanceSampling) {
+      void import("./performance/browser-api").then(
+        ({ installPrismPerformanceBrowserApi }) => {
+          if (rendererRef.current !== renderer) return;
+          removePerformanceApi = installPrismPerformanceBrowserApi(renderer);
+        },
+        reportError
+      );
+    }
     const syncDebugSources = () => {
       if (debugPreviews && rendererRef.current === renderer)
         setDebugSources(renderer.debugSources());
@@ -133,6 +148,7 @@ export function PrismBackground() {
       // onError reports initialization failures without replacing the hero.
     });
     return () => {
+      removePerformanceApi?.();
       themeObserver.disconnect();
       if (controlsFrameRef.current)
         cancelAnimationFrame(controlsFrameRef.current);

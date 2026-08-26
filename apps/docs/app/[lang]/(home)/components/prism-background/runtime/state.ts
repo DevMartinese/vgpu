@@ -200,6 +200,8 @@ function refreshFraming(runtime: PrismRuntime): void {
 }
 
 function refreshLightMesh(runtime: PrismRuntime): void {
+  const measurement = runtime.measurementSink;
+  const startedAt = measurement?.now();
   const mesh = buildLightMesh({
     light: lampAt(
       runtime.lampArc,
@@ -218,7 +220,15 @@ function refreshLightMesh(runtime: PrismRuntime): void {
       runtime.framing
     ),
   });
+  const builtAt = measurement?.now();
   runtime.lightBuffer.write(mesh.vertices);
+  if (measurement && startedAt !== undefined && builtAt !== undefined) {
+    measurement.recordLightMesh({
+      buildMs: builtAt - startedAt,
+      uploadMs: measurement.now() - builtAt,
+      bytes: mesh.vertices.byteLength,
+    });
+  }
   runtime.lightStats = mesh.stats;
 }
 

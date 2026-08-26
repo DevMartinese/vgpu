@@ -1,4 +1,4 @@
-import type { Frame, Surface, Target } from "vgpu";
+import type { Frame, Surface, Target, TimerSpan } from "vgpu";
 
 import type { PrismTheme } from "../types";
 
@@ -9,6 +9,13 @@ export type PrismPipelineMode = PrismTheme;
 export interface PrismPipelineRenderOptions {
   /** Skip retained scene/postprocess passes when only an overlay animates. */
   readonly updateScene?: boolean;
+  /** Opt-in measurement hook. Omitted from every normal homepage frame. */
+  readonly profile?: PrismPassProfile;
+}
+
+export interface PrismPassProfile {
+  /** Counts the pass and returns its optional timestamp-query span. */
+  pass(name: string): TimerSpan | undefined;
 }
 
 export type PrismDebugSource = {

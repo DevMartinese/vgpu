@@ -26,6 +26,11 @@ import {
 import type { PrismRuntime } from "./runtime/types";
 import type { PrismThumbnailOptions } from "./thumbnail";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
+import type {
+  PrismPerformanceReport,
+  PrismPerformanceRunOptions,
+} from "./performance/types";
+import type { PrismPerformanceSampler } from "./performance/sampler";
 
 export type { PrismThumbnailOptions } from "./thumbnail";
 
@@ -44,6 +49,10 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
   readonly debugBridge: PrismDebugPreviewBridge;
   debugSources(): readonly PrismDebugSource[];
   setMode(mode: PrismPipelineMode): Promise<void>;
+  /** Available only when the renderer was created for `?prism-perf`. */
+  measurePerformance(
+    options?: PrismPerformanceRunOptions
+  ): Promise<PrismPerformanceReport>;
 }
 const DUST_FPS = 30;
 
@@ -55,6 +64,8 @@ export interface PrismBrowserRendererOptions
   readonly initialMode: PrismPipelineMode;
   /** Loads preview-only WebGPU code; must only be enabled for `?debug`. */
   readonly debugPreviews?: boolean;
+  /** Dynamically loads the deterministic sampler for `?prism-perf`. */
+  readonly performanceSampling?: boolean;
 }
 
 export function createRenderer(
@@ -75,6 +86,7 @@ export function createRenderer(
     | ReturnType<typeof createPrismPipelineController>
     | undefined;
   let debugHost: PrismDebugPreviewHost | undefined;
+  let performanceSampler: PrismPerformanceSampler | undefined;
   let requestedMode = options.initialMode;
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
@@ -162,9 +174,11 @@ export function createRenderer(
   const tick = (currentFrame: Frame) => {
     const pipeline = pipelineController?.pipeline;
     if (disposed || !runtime || !pipeline || !canvasSurface) return;
-    const aim = interaction.stepAim();
-    const orbit = interaction.stepOrbit();
-    const updateScene = !!aim || !!orbit || pendingPresent;
+    const performanceFrame = performanceSampler?.beginFrame(pipeline.mode);
+    const aim = performanceFrame?.aim ?? interaction.stepAim();
+    const orbit = performanceFrame?.orbit ?? interaction.stepOrbit();
+    const updateScene =
+      !!performanceFrame || !!aim || !!orbit || pendingPresent;
     const dustTime = gpuClock
       ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS
       : 0;
@@ -179,10 +193,18 @@ export function createRenderer(
         if (orbit) setRuntimeOrbit(runtime, orbit[0], orbit[1]);
         if (aim || orbit) debugHost?.invalidate();
         pipeline.bind(dustTime);
-        pipeline.render(currentFrame, canvasSurface, { updateScene });
+        pipeline.render(
+          currentFrame,
+          canvasSurface,
+          performanceFrame
+            ? { updateScene, profile: performanceFrame.profile }
+            : { updateScene }
+        );
         pendingPresent = false;
         lastDustTime = dustTime;
+        if (performanceFrame) performanceSampler?.endFrame(performanceFrame);
       } catch (error) {
+        performanceSampler?.fail(error);
         handleFailure(error);
         return;
       }
@@ -219,6 +241,8 @@ export function createRenderer(
     debugHost?.dispose();
     debugHost = undefined;
     debugRelay?.dispose();
+    performanceSampler?.dispose();
+    performanceSampler = undefined;
 
     const controller = pipelineController;
     const ownedRuntime = runtime;
@@ -246,7 +270,18 @@ export function createRenderer(
   const initialize = async () => {
     const { init } = await import("vgpu");
     if (disposed) return;
-    const nextGpu = await init();
+    let timestampQuery = false;
+    if (options.performanceSampling) {
+      try {
+        const adapter = await navigator.gpu?.requestAdapter();
+        timestampQuery = adapter?.features.has("timestamp-query") ?? false;
+      } catch {
+        timestampQuery = false;
+      }
+    }
+    const nextGpu = await init(
+      timestampQuery ? { requiredFeatures: ["timestamp-query"] } : undefined
+    );
     if (disposed) {
       nextGpu.dispose();
       return;
@@ -255,6 +290,15 @@ export function createRenderer(
     canvasSurface = surface(gpu, options.canvas, { dpr: [1, 2] });
     runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow");
     setRuntimeControls(runtime, controls);
+    if (options.performanceSampling) {
+      try {
+        const { createPrismPerformanceSampler } = await import("./performance");
+        if (disposed || !gpu || !runtime) return;
+        performanceSampler = createPrismPerformanceSampler({ gpu, runtime });
+      } catch (error) {
+        reportRecoverableFailure(error);
+      }
+    }
     pipelineController = createPrismPipelineController({
       runtime,
       output: canvasSurface,
@@ -335,6 +379,41 @@ export function createRenderer(
         // switch without tearing that valid renderer down.
         reportRecoverableFailure(error);
         throw error;
+      }
+    },
+    async measurePerformance(measureOptions = {}) {
+      if (disposed) throw new Error("Cannot sample a disposed prism renderer.");
+      await ready;
+      const sampler = performanceSampler;
+      const controller = pipelineController;
+      const output = canvasSurface;
+      if (!sampler || !controller?.pipeline || !output) {
+        throw new Error(
+          "Prism performance sampling is disabled. Reload with ?prism-perf."
+        );
+      }
+      const previousMode = controller.pipeline.mode;
+      const mode = measureOptions.mode ?? previousMode;
+      if (mode !== previousMode) {
+        requestedMode = mode;
+        await controller.setMode(mode);
+      }
+      try {
+        return await sampler.start({
+          ...measureOptions,
+          mode,
+          resolution: output.size,
+          invalidate: () => {
+            pendingPresent = true;
+          },
+        });
+      } finally {
+        if (!disposed && mode !== previousMode && pipelineController) {
+          requestedMode = previousMode;
+          await pipelineController.setMode(previousMode);
+          pendingPresent = true;
+          lastDustTime = -1;
+        }
       }
     },
     setControls(next) {

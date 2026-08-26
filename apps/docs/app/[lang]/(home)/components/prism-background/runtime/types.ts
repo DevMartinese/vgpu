@@ -6,6 +6,18 @@ import type { NormalizedViewport, ProjectionFraming } from "../framing";
 import type { LightMeshStats } from "../light-mesh";
 import type { PrismControls } from "../types";
 
+export interface PrismLightMeshMeasurement {
+  readonly buildMs: number;
+  readonly uploadMs: number;
+  readonly bytes: number;
+}
+
+/** Installed only while the opt-in performance sampler owns the frame loop. */
+export interface PrismRuntimeMeasurementSink {
+  now(): number;
+  recordLightMesh(sample: PrismLightMeshMeasurement): void;
+}
+
 /** Retained identities and mutable optical/camera state shared by both modes. */
 export interface PrismRuntime {
   readonly gpu: Gpu;
@@ -30,4 +42,5 @@ export interface PrismRuntime {
   framingViewport?: NormalizedViewport;
   framing: ProjectionFraming;
   view: CameraView;
+  measurementSink?: PrismRuntimeMeasurementSink;
 }

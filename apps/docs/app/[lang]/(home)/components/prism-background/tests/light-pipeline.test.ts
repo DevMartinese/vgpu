@@ -214,6 +214,22 @@ describe("light pipeline ownership", () => {
       );
       pipeline.bind(0);
       frame(gpu, (currentFrame) => pipeline.render(currentFrame, output));
+      const profiledPasses: string[] = [];
+      frame(gpu, (currentFrame) =>
+        pipeline.render(currentFrame, output, {
+          profile: {
+            pass(name) {
+              profiledPasses.push(name);
+              return undefined;
+            },
+          },
+        })
+      );
+      expect(profiledPasses).toEqual([
+        "light.backdrop",
+        "light.scene",
+        "light.present",
+      ]);
       expect(pipeline.targets.backdropHDR?.size).toEqual(output.size);
       expect(pipeline.targets.sceneHDR?.size).toEqual(output.size);
       expect(pipeline.debugTarget("backdrop-hdr")?.primary).toBe(

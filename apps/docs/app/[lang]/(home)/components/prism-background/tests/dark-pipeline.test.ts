@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { init, target } from "vgpu/mock";
+import { frame, init, target } from "vgpu/mock";
 
 import { PRISM_DARK_DEBUG_SOURCE_IDS } from "../debug/sources";
 import type { EnvironmentTexture } from "../environment-texture";
@@ -31,6 +31,34 @@ describe("dark pipeline debug targets", () => {
       );
       expect(pipeline.debugTarget("dark-backdrop-hdr")).toBeUndefined();
       await pipeline.prepare(output);
+      pipeline.bind(0);
+      const profiledPasses: string[] = [];
+      frame(gpu, (currentFrame) =>
+        pipeline.render(currentFrame, output, {
+          profile: {
+            pass(name) {
+              profiledPasses.push(name);
+              return undefined;
+            },
+          },
+        })
+      );
+      expect(profiledPasses).toEqual([
+        "dark.backdrop",
+        "dark.scene",
+        "dark.bloom.extract",
+        "dark.bloom.0.horizontal",
+        "dark.bloom.0.vertical",
+        "dark.bloom.1.horizontal",
+        "dark.bloom.1.vertical",
+        "dark.bloom.2.horizontal",
+        "dark.bloom.2.vertical",
+        "dark.particle-light.downsample",
+        "dark.particle-light.3.horizontal",
+        "dark.particle-light.3.vertical",
+        "dark.bloom.composite",
+        "dark.present",
+      ]);
 
       expect(pipeline.debugTarget("dark-backdrop-hdr")?.primary).toBe(
         pipeline.targets.backdropHDR
