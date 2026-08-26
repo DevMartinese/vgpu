@@ -4,7 +4,7 @@ import type { PrismPipelineMode } from "./types";
 // hero-theme.css. The presentation shaders blend after tone mapping.
 const LIGHT_PAGE_BACKGROUND = 250 / 255;
 const OPACITY_REVEAL_SECONDS = 1;
-const BEAM_REVEAL_END_SECONDS = 1.25;
+const BEAM_REVEAL_END_SECONDS = 1.75;
 const OPACITY_HALF_TIME_SECONDS =
   OPACITY_REVEAL_SECONDS * (1 - Math.cbrt(0.5));
 

@@ -31,8 +31,8 @@ describe("presentation reveal", () => {
     expect(heroRevealProgress(1).beamWidth).toBeGreaterThan(0);
     expect(heroRevealProgress(1).beamWidth).toBeLessThan(1);
     const beamStart = halfOpacityTime;
-    const beamMidpoint = beamStart + (1.25 - beamStart) * 0.5;
+    const beamMidpoint = beamStart + (1.75 - beamStart) * 0.5;
     expect(heroRevealProgress(beamMidpoint).beamWidth).toBeCloseTo(0.875);
-    expect(heroRevealProgress(1.25)).toEqual({ opacity: 1, beamWidth: 1 });
+    expect(heroRevealProgress(1.75)).toEqual({ opacity: 1, beamWidth: 1 });
   });
 });

@@ -984,7 +984,7 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
     }),
   });
 
-  live.gpuClock.time = 1.25;
+  live.gpuClock.time = 1.75;
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
   expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
@@ -1013,13 +1013,13 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
 
   // Finish the one-shot reveal before measuring the retained dust path. The
   // source scene intentionally redraws while its beam aperture is opening.
-  live.gpuClock.time = 1.25;
+  live.gpuClock.time = 1.75;
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(30);
   const effectSetCounts = live.effects.map(({ set }) => set.mock.calls.length);
   const drawSetCounts = live.draws.map(({ set }) => set.mock.calls.length);
 
-  live.gpuClock.time = 1.25 + 1 / 30;
+  live.gpuClock.time = 1.75 + 1 / 30;
   tick(live.loopFrame);
 
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(31);
@@ -1029,7 +1029,7 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
   ]);
   expect(live.draws[6]!.set).toHaveBeenLastCalledWith({
     params: {
-      time: 38 / 30,
+      time: 53 / 30,
     },
   });
   live.effects.slice(0, 13).forEach(({ set }, index) =>
