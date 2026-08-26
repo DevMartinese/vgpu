@@ -13,6 +13,10 @@ const tabContent = {
     text: "`npx skills add vercel-labs/vgpu`",
     mono: true,
   },
+  MCP: {
+    text: "`npx -y add-mcp https://vgpu.sh/api/mcp -g`",
+    mono: true,
+  },
 } as const;
 
 type Tab = keyof typeof tabContent;
