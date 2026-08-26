@@ -14,7 +14,6 @@ import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
 import type { PrismControlsUpdater } from "./debug/graph/control-context";
 import { preloadLightAssets } from "./assets/light/preload";
 import { preloadPrismPipeline } from "./pipeline-controller";
-import { HERO_CANVAS_ENABLED } from "../release-flags";
 
 const PrismDebugGraph = lazy(() =>
   import("./debug/graph").then(({ PrismDebugGraph: Component }) => ({
@@ -41,8 +40,12 @@ function currentPrismMode(): PrismPipelineMode {
     : "dark";
 }
 
-export function PrismBackground() {
-  if (!HERO_CANVAS_ENABLED) return null;
+interface PrismBackgroundProps {
+  readonly enabled: boolean;
+}
+
+export function PrismBackground({ enabled }: PrismBackgroundProps) {
+  if (!enabled) return null;
   return <PrismCanvas />;
 }
 

@@ -6,9 +6,12 @@ import { preload } from "react-dom";
 import { HeroTabs } from "./hero-tabs";
 import { WALL_GLOBAL_LIGHT_MASK_URL } from "./prism-background/assets/light/manifest";
 import { PrismBackground } from "./prism-background/prism-background";
-import { HERO_CANVAS_ENABLED } from "./release-flags";
 import "../hero-glass-button.css";
 import "../hero-theme.css";
+
+interface HeroProps {
+  readonly canvasEnabled: boolean;
+}
 
 /**
  * Landing hero.
@@ -16,8 +19,8 @@ import "../hero-theme.css";
  * The prism scene is a client-owned WebGPU background. The rest of the hero
  * stays server-rendered and layered above it.
  */
-export function Hero() {
-  if (HERO_CANVAS_ENABLED) {
+export function Hero({ canvasEnabled }: HeroProps) {
+  if (canvasEnabled) {
     preload(WALL_GLOBAL_LIGHT_MASK_URL, {
       as: "fetch",
       crossOrigin: "anonymous",
@@ -32,7 +35,7 @@ export function Hero() {
         data-hero-theme
         className="relative -mt-16 min-h-svh overflow-hidden min-[768px]:h-svh min-[768px]:max-h-[80em] min-[768px]:min-h-0"
       >
-        <PrismBackground />
+        <PrismBackground enabled={canvasEnabled} />
 
         {/* Only the lower edge dissolves into the regular page surface. The
           canvas itself spans the full hero, including the space behind the
