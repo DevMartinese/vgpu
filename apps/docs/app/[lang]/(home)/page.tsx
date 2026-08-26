@@ -6,7 +6,13 @@ import { Hero } from "./components/hero";
 import { OneShaderEverySurfaceSection } from "./components/one-shader-every-surface-section";
 import { ShaderCodeScalesSection } from "./components/shader-code-scales-section";
 import "./hero-solo.css";
-import { SITE_DESCRIPTION, SITE_IDENTITY_URLS, SITE_NAME, siteUrl } from "@/lib/site";
+import {
+  SITE_DESCRIPTION,
+  SITE_IDENTITY_URLS,
+  SITE_NAME,
+  SITE_OG_IMAGE_PATH,
+  siteUrl,
+} from "@/lib/site";
 
 // Landing metadata + body copy carried over unchanged from the old
 // `apps/docs/app/page.tsx` (this ticket rebuilds the chrome, not the text —
@@ -26,7 +32,7 @@ export const metadata: Metadata = {
     url: siteUrl("/"),
     images: [
       {
-        url: siteUrl("/opengraph-image"),
+        url: siteUrl(SITE_OG_IMAGE_PATH),
         width: 1200,
         height: 630,
         alt: "vgpu — the WebGPU library designed for agents",

@@ -15,6 +15,7 @@ import {
   PRISM_POSTPROCESS_RANGES,
   PRISM_TRIANGLE,
 } from "../../types";
+import { presentationRevealUniforms } from "../presentation";
 import type { DarkPipelineGraph } from "./types";
 import { bloomBlurUniforms } from "./bloom-uniforms";
 
@@ -22,7 +23,10 @@ export function bindDarkGraph(
   graph: DarkPipelineGraph,
   runtime: PrismRuntime,
   time: number,
-  updateScene = true
+  updateScene = true,
+  revealProgress = 1,
+  beamWidthReveal = 1,
+  revealChanged = true
 ): void {
   const backgroundTarget = graph.backgroundTarget;
   const sceneTarget = graph.sceneTarget;
@@ -45,13 +49,19 @@ export function bindDarkGraph(
   // Bindings are statically required even when the debug environment is not.
   // Reusing the studio view keeps the production path allocation-free.
   const debugEnvironment = runtime.debugEnvironment ?? studioEnvironment;
+  const reveal = presentationRevealUniforms("dark", revealProgress);
 
   if (!updateScene) {
-    graph.dust.set({ params: { time } });
+    if (revealChanged) graph.copyPresentation.set({ params: reveal });
+    graph.dust.set({
+      params: revealChanged
+        ? { time, revealProgress: reveal.revealProgress }
+        : { time },
+    });
     return;
   }
 
-  const scene = sceneUniforms(runtime);
+  const scene = sceneUniforms(runtime, beamWidthReveal);
   graph.light.set({ scene });
   graph.lightWireframe.set({ scene });
   graph.wall.set({ scene });
@@ -133,9 +143,12 @@ export function bindDarkGraph(
           : 0,
     },
   });
-  graph.copyPresentation.set({ sourceTexture: presentationTarget });
+  graph.copyPresentation.set({
+    sourceTexture: presentationTarget,
+    params: reveal,
+  });
   graph.dust.set({
-    params: dustUniforms(runtime, time),
+    params: dustUniforms(runtime, time, reveal.revealProgress),
     colorTexture: bloomTargets[1].vertical,
     lightTexture: particleTarget.vertical,
     lightSampler: runtime.sceneSampler,
@@ -144,7 +157,8 @@ export function bindDarkGraph(
 
 function dustUniforms(
   runtime: PrismRuntime,
-  time: number
+  time: number,
+  revealProgress: number
 ): Record<string, unknown> {
   return {
     viewProjection: runtime.view.viewProjection,
@@ -157,5 +171,6 @@ function dustUniforms(
     prismB: PRISM_TRIANGLE.b,
     prismC: PRISM_TRIANGLE.c,
     prismFrontZ: PRISM_FRONT_Z,
+    revealProgress,
   };
 }

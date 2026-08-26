@@ -613,6 +613,10 @@ test("renders the deterministic light once and idles until something changes", a
   );
   expect(live.effects[12]!.compile).toHaveBeenCalledWith(live.targets[10]);
   expect(live.effects[13]!.set).toHaveBeenLastCalledWith({
+    params: {
+      backgroundColor: [0, 0, 0],
+      revealProgress: 1,
+    },
     sourceTexture: live.targets[10],
   });
   expect(live.draws[0]!.set).toHaveBeenLastCalledWith({
@@ -960,7 +964,38 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
   ]);
   live.gpuClock.time = 1 / 30;
   tick(live.loopFrame);
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(3);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(4);
+  expect(live.encodedPasses.at(-1)).toEqual([live.effects[1]]);
+  expect(live.effects[1]!.set).toHaveBeenLastCalledWith({
+    sceneTexture: live.targets[1],
+    params: expect.objectContaining({
+      revealProgress: 1 - (1 - 1 / 30) ** 3,
+    }),
+  });
+
+  live.gpuClock.time = 1;
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(7);
+  expect(live.effects[1]!.set).toHaveBeenLastCalledWith({
+    sceneTexture: live.targets[1],
+    params: expect.objectContaining({
+      backgroundColor: [250 / 255, 250 / 255, 250 / 255],
+      revealProgress: 1,
+    }),
+  });
+
+  live.gpuClock.time = 2.5;
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
+  expect(live.draws[2]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      scene: expect.objectContaining({ beamWidthReveal: 1 }),
+    })
+  );
+
+  live.gpuClock.time = 3;
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(10);
 
   renderer.dispose();
 });
@@ -975,23 +1010,32 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
 
   tick(live.loopFrame);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
+
+  // Finish the one-shot reveal before measuring the retained dust path. The
+  // source scene intentionally redraws while its beam aperture is opening.
+  live.gpuClock.time = 2.5;
+  tick(live.loopFrame);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(30);
   const effectSetCounts = live.effects.map(({ set }) => set.mock.calls.length);
   const drawSetCounts = live.draws.map(({ set }) => set.mock.calls.length);
 
-  live.gpuClock.time = 1 / 30;
+  live.gpuClock.time = 2.5 + 1 / 30;
   tick(live.loopFrame);
 
-  expect(live.loopFrame.pass).toHaveBeenCalledTimes(16);
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(31);
   expect(live.encodedPasses.at(-1)).toEqual([
     live.effects[13],
     instancedDraw(live.draws[6], 2200),
   ]);
   expect(live.draws[6]!.set).toHaveBeenLastCalledWith({
-    params: { time: 1 / 30 },
+    params: {
+      time: 76 / 30,
+    },
   });
-  live.effects.forEach(({ set }, index) =>
+  live.effects.slice(0, 13).forEach(({ set }, index) =>
     expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
   );
+  expect(live.effects[13]!.set).toHaveBeenCalledTimes(effectSetCounts[13]!);
   live.draws.slice(0, 6).forEach(({ set }, index) =>
     expect(set).toHaveBeenCalledTimes(drawSetCounts[index]!)
   );

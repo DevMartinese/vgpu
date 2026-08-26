@@ -8,7 +8,7 @@ import { translations } from "@/geistdocs";
 // TGEIST-09: `examples`/`getExample` are the verbatim registry ported by
 // TGEIST-07 (`lib/examples-registry.ts`) -- unmodified by this ticket.
 import { examples, getExample } from "@/lib/examples-registry";
-import { siteUrl } from "@/lib/site";
+import { SITE_OG_IMAGE_PATH, siteUrl } from "@/lib/site";
 
 interface ExampleDetailPageProps {
   params: Promise<{ lang: string; slug: string }>;
@@ -36,7 +36,9 @@ export async function generateMetadata({
       title: example.meta.title,
       description: example.meta.description,
       url: siteUrl(`/examples/${example.meta.slug}`),
-      images: example.meta.hero ? [siteUrl(example.meta.hero)] : [siteUrl("/opengraph-image")],
+      images: example.meta.hero
+        ? [siteUrl(example.meta.hero)]
+        : [siteUrl(SITE_OG_IMAGE_PATH)],
     },
   };
 }

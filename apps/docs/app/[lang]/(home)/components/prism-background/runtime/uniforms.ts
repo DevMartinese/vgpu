@@ -34,7 +34,10 @@ export function schlickFresnelF0(ior: number): number {
 }
 
 /** Shared block used by wall and light draws in either theme. */
-export function sceneUniforms(runtime: PrismRuntime): Record<string, unknown> {
+export function sceneUniforms(
+  runtime: PrismRuntime,
+  beamWidthReveal = 1
+): Record<string, unknown> {
   const light = lampAt(
     runtime.lampArc,
     runtime.controls.beamWidth,
@@ -61,6 +64,7 @@ export function sceneUniforms(runtime: PrismRuntime): Record<string, unknown> {
     lightEdgeFalloff: runtime.controls.lightFade.edgeFalloff,
     rainbowFalloffRate: runtime.controls.lightFade.rainbowFalloffRate,
     rainbowFalloffPower: runtime.controls.lightFade.rainbowFalloffPower,
+    beamWidthReveal: Math.min(1, Math.max(0, beamWidthReveal)),
   };
 }
 

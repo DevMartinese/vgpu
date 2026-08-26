@@ -93,7 +93,9 @@ describe("light pipeline ownership", () => {
         })
       );
       expect(lightPresentUniforms(runtime)).toEqual({
+        backgroundColor: [250 / 255, 250 / 255, 250 / 255],
         exposure: 1,
+        revealProgress: 1,
         toneMapping: 0,
       });
       runtime.controls = {
@@ -138,7 +140,9 @@ describe("light pipeline ownership", () => {
         })
       );
       expect(lightPresentUniforms(runtime)).toEqual({
+        backgroundColor: [250 / 255, 250 / 255, 250 / 255],
         exposure: 0.75,
+        revealProgress: 1,
         toneMapping: 1,
       });
       await graph.caustic.compile(graph.backdropHDR!);

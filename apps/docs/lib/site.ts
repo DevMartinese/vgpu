@@ -1,6 +1,7 @@
 export const SITE_ORIGIN = "https://vgpu.sh" as const;
 export const SITE_NAME = "vgpu" as const;
 export const SITE_DESCRIPTION = "The WebGPU library, designed for agents." as const;
+export const SITE_OG_IMAGE_PATH = "/hero/og.webp" as const;
 export const SITE_IDENTITY_URLS = [
   "https://github.com/vercel-labs/vgpu",
   "https://www.npmjs.com/package/vgpu",

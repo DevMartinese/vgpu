@@ -6,6 +6,7 @@ import {
   PRISM_LIGHT_TONE_MAPPING_CODES,
   PRISM_SIDE,
 } from "../../types";
+import { presentationRevealUniforms } from "../presentation";
 
 export function lightWallUniforms(
   runtime: PrismRuntime
@@ -71,10 +72,12 @@ export function lightCausticUniforms(
 }
 
 export function lightPresentUniforms(
-  runtime: PrismRuntime
+  runtime: PrismRuntime,
+  revealProgress = 1
 ): Record<string, unknown> {
   const output = runtime.controls.lightMode.output;
   return {
+    ...presentationRevealUniforms("light", revealProgress),
     exposure: output.exposure,
     toneMapping: PRISM_LIGHT_TONE_MAPPING_CODES[output.toneMapping],
   };

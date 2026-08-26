@@ -35,6 +35,7 @@ export interface DarkPrismPipeline extends PrismPipeline {
 export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
   const graph = createDarkGraph(runtime);
   let presentationValid = false;
+  let boundRevealProgress = 1;
   return {
     mode: "dark",
     get targets() {
@@ -63,12 +64,18 @@ export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
       presentationValid = false;
     },
     bind(time, options) {
+      const revealProgress = options?.revealProgress ?? 1;
+      const revealChanged = revealProgress !== boundRevealProgress;
       bindDarkGraph(
         graph,
         runtime,
         time,
-        (options?.updateScene ?? true) || !presentationValid
+        (options?.updateScene ?? true) || !presentationValid,
+        revealProgress,
+        options?.beamWidthReveal ?? 1,
+        revealChanged
       );
+      boundRevealProgress = revealProgress;
     },
     render(currentFrame, output, options) {
       const updateScene =
