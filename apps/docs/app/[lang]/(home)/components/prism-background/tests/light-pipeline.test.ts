@@ -20,6 +20,22 @@ import {
 } from "../pipelines/light/uniforms";
 
 describe("light pipeline ownership", () => {
+  test("falls back to single-sample HDR targets in compatibility mode", async () => {
+    const gpu = await init();
+    Object.defineProperty(gpu.device, "isCompatibilityMode", { value: true });
+    const runtime = createPrismRuntime(gpu, [80, 45], "light-compat-test");
+    const graph = createLightGraph(runtime);
+    try {
+      ensureLightTargets(graph, runtime, runtime.outputSize);
+      expect(graph.backdropHDR?.sampleCount).toBe(1);
+      expect(graph.sceneHDR?.sampleCount).toBe(1);
+    } finally {
+      destroyLightTargets(graph);
+      destroyPrismRuntime(runtime);
+      gpu.dispose();
+    }
+  });
+
   test("owns exactly two full-resolution HDR MSAA targets and no dark effects", async () => {
     const gpu = await init();
     const runtime = createPrismRuntime(gpu, [80, 45], "light-pipeline-test");

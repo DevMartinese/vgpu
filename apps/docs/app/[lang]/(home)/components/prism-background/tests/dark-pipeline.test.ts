@@ -7,6 +7,33 @@ import { createDarkPipeline } from "../pipelines/dark";
 import { createPrismRuntime, destroyPrismRuntime } from "../runtime/resources";
 
 describe("dark pipeline debug targets", () => {
+  test("falls back to single-sample HDR targets in compatibility mode", async () => {
+    const gpu = await init();
+    Object.defineProperty(gpu.device, "isCompatibilityMode", { value: true });
+    const runtime = createPrismRuntime(gpu, [24, 16], "dark-compat-test");
+    const output = target(gpu, { size: [24, 16], format: "rgba8unorm" });
+    const pipeline = createDarkPipeline(runtime);
+    runtime.studioEnvironment = {
+      texture: gpu.device.createTexture({
+        size: [2, 1],
+        format: "rgba16float",
+        usage: ["texture_binding", "copy_dst"],
+      }),
+      prepared: true,
+    } as EnvironmentTexture;
+    runtime.environmentReady = Promise.resolve();
+
+    try {
+      await pipeline.prepare(output);
+      expect(pipeline.targets.backdropHDR?.sampleCount).toBe(1);
+      expect(pipeline.targets.sceneHDR?.sampleCount).toBe(1);
+    } finally {
+      pipeline.destroy();
+      destroyPrismRuntime(runtime);
+      gpu.dispose();
+    }
+  });
+
   test("resolves retained production targets without changing the render graph", async () => {
     const gpu = await init();
     const runtime = createPrismRuntime(gpu, [24, 16], "dark-debug-test");

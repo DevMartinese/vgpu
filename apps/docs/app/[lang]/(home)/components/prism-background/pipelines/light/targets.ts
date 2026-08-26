@@ -24,7 +24,7 @@ function createTarget(
   return target(runtime.gpu, {
     size,
     format: "rgba16float",
-    msaa: 4,
+    msaa: runtime.gpu.device.isCompatibilityMode ? undefined : 4,
     label: `${runtime.label}.light.${name}`,
   });
 }
