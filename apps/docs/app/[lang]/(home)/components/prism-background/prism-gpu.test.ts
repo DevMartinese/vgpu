@@ -54,7 +54,6 @@ const COVERAGE_WALL: PrismControls = {
 };
 const ISOLATED_GLASS: PrismControls = {
   ...DEFAULT_PRISM_CONTROLS,
-  wallColor: '#202020',
   lightFade: { ...DEFAULT_PRISM_CONTROLS.lightFade, beamOpacity: 0 },
   postprocess: { ...DEFAULT_PRISM_CONTROLS.postprocess, bloomStrength: 0 },
 };
