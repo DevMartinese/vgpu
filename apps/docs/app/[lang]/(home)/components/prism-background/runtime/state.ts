@@ -161,6 +161,22 @@ export function wallExtent(
   return [halfHeight * aspect * coverage[0], halfHeight * coverage[1]];
 }
 
+/**
+ * Keeps the rainbow's dark tail outside narrow portrait canvases. The light
+ * mesh is clipped by the real render target, so overscanning its wall boundary
+ * changes only where normalized outgoing travel reaches one.
+ */
+export function lightWallExtent(
+  aspect: number,
+  cameraDistance = CAMERA_DISTANCE,
+  cameraFov = DEFAULT_PRISM_CONTROLS.cameraFov,
+  framing: ProjectionFraming = IDENTITY_PROJECTION_FRAMING
+): readonly [number, number] {
+  const extent = wallExtent(aspect, cameraDistance, cameraFov, framing);
+  const overscan = Math.min(2.5, Math.max(1, 1 / Math.max(aspect, 1e-3)));
+  return [extent[0] * overscan, extent[1] * overscan];
+}
+
 function refreshCamera(runtime: PrismRuntime): void {
   const view = cameraView(
     runtime.aspect,
@@ -214,7 +230,7 @@ function refreshLightMesh(runtime: PrismRuntime): void {
         runtime.controls.spectralDispersion ??
         PRISM_DISPERSION_PRESETS[runtime.controls.dispersion],
       edgeFalloff: runtime.controls.lightFade.edgeFalloff,
-      wallHalfExtent: wallExtent(
+      wallHalfExtent: lightWallExtent(
         runtime.aspect,
         runtime.cameraDistance,
         runtime.controls.cameraFov,

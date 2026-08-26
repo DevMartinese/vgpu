@@ -71,10 +71,18 @@ html.light
 }
 
 [data-hero-tabs-rule] {
+  --hero-tabs-rule-peak: 50%;
+
   background: linear-gradient(
     to right,
     transparent,
-    var(--home-hero-foreground) 10%,
+    var(--home-hero-foreground) var(--hero-tabs-rule-peak),
     transparent
   );
+}
+
+@media (min-width: 1100px) {
+  [data-hero-tabs-rule] {
+    --hero-tabs-rule-peak: 10%;
+  }
 }

@@ -16,7 +16,10 @@ import type { PrismDebugPreviewHost } from "./debug/gpu";
 import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
 import { createPrismPipelineController } from "./pipeline-controller";
 import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
-import { createPrismInteraction } from "./runtime/interaction";
+import {
+  automaticPointerPosition,
+  createPrismInteraction,
+} from "./runtime/interaction";
 import { createPrismRuntime, destroyPrismRuntime } from "./runtime/resources";
 import {
   setRuntimeControls,
@@ -56,10 +59,11 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
   ): Promise<PrismPerformanceReport>;
 }
 const DUST_FPS = 30;
-const MAX_RENDER_FPS = 90;
-const MAX_RENDER_INTERVAL = 1 / MAX_RENDER_FPS;
+const DESKTOP_MAX_RENDER_FPS = 90;
+const MOBILE_MAX_RENDER_FPS = 30;
 const OFFSCREEN_ROOT_MARGIN_PX = 256;
 const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
+const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
 
 export interface PrismBrowserRendererOptions
   extends BrowserRendererOptions<PrismControls> {
@@ -115,9 +119,17 @@ export function createRenderer(
   let lastDustTime = -1;
   let renderTimeBudget = 0;
   let hasRenderedCappedFrame = false;
+  const mobileAutoPointer =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia(MOBILE_AUTO_POINTER_QUERY)
+      : undefined;
   const interaction = createPrismInteraction(options.canvas, () => {
     pendingPresent = true;
   });
+  const onPointerMove = (event: PointerEvent) => {
+    if (mobileAutoPointer?.matches) return;
+    interaction.onPointerMove(event);
+  };
 
   const handleFailure = (error: unknown) => {
     if (disposed) return;
@@ -193,6 +205,11 @@ export function createRenderer(
     const pipeline = pipelineController?.pipeline;
     if (disposed || !runtime || !pipeline || !canvasSurface) return;
     const performanceFrame = performanceSampler?.beginFrame(pipeline.mode);
+    if (!performanceFrame && mobileAutoPointer?.matches) {
+      interaction.setNormalizedPointer(
+        automaticPointerPosition(gpuClock?.time ?? 0)
+      );
+    }
     const aim = performanceFrame
       ? performanceFrame.aim
       : interaction.stepAim();
@@ -242,7 +259,7 @@ export function createRenderer(
     }
   };
 
-  /** Keeps the interactive renderer below 90 FPS without changing easing. */
+  /** Caps mobile at 30 FPS and larger layouts at 90 without changing easing. */
   function shouldRenderAtCappedRate(): boolean {
     if (options.performanceSampling) return true;
     if (!hasRenderedCappedFrame) {
@@ -252,12 +269,17 @@ export function createRenderer(
     const delta = gpuClock?.deltaTime ?? 0;
     // A zero delta is possible on the first frame and in deterministic mocks.
     if (!Number.isFinite(delta) || delta <= 0) return true;
+    const renderInterval =
+      1 /
+      (mobileAutoPointer?.matches
+        ? MOBILE_MAX_RENDER_FPS
+        : DESKTOP_MAX_RENDER_FPS);
     renderTimeBudget = Math.min(
       renderTimeBudget + delta,
-      MAX_RENDER_INTERVAL * 2
+      renderInterval * 2
     );
-    if (renderTimeBudget + 1e-9 < MAX_RENDER_INTERVAL) return false;
-    renderTimeBudget = Math.max(0, renderTimeBudget - MAX_RENDER_INTERVAL);
+    if (renderTimeBudget + 1e-9 < renderInterval) return false;
+    renderTimeBudget = Math.max(0, renderTimeBudget - renderInterval);
     return true;
   }
 
@@ -308,7 +330,7 @@ export function createRenderer(
     visibilityObserver = undefined;
     window.removeEventListener(
       "pointermove",
-      interaction.onPointerMove as EventListener
+      onPointerMove as EventListener
     );
     window.removeEventListener("blur", interaction.onPointerLeave);
     if (typeof window !== "undefined")
@@ -422,7 +444,7 @@ export function createRenderer(
     }
     window.addEventListener(
       "pointermove",
-      interaction.onPointerMove as EventListener,
+      onPointerMove as EventListener,
       { passive: true }
     );
     window.addEventListener("blur", interaction.onPointerLeave);

@@ -6,9 +6,14 @@ import {
 
 type Pair = readonly [number, number];
 
+const AUTO_POINTER_PERIOD_SECONDS = 18;
+const AUTO_POINTER_RADIUS = 0.34;
+
 export interface PrismInteraction {
   readonly onPointerMove: (event: PointerEvent) => void;
   readonly onPointerLeave: () => void;
+  /** Feeds the same normalized path as a real pointer without DOM events. */
+  readonly setNormalizedPointer: (position: Pair) => void;
   /** Returns the eased value only when the lamp moved this frame. */
   stepAim(): Pair | undefined;
   /** Returns the eased value only when the camera orbit moved this frame. */
@@ -25,21 +30,28 @@ export function createPrismInteraction(
   let orbitTarget: Pair = [0, 0];
   let orbitCurrent: Pair = orbitTarget;
 
+  const setNormalizedPointer = (position: Pair) => {
+    const x = clamp(position[0], 0, 1);
+    const y = clamp(position[1], 0, 1);
+    // Height swings the source; width chooses the point of impact.
+    aimTarget = [y, x];
+    // Hovering tilts only the camera, not the world-space light mesh.
+    orbitTarget = [x * 2 - 1, y * 2 - 1];
+  };
+
   const onPointerMove = (event: PointerEvent) => {
     if (event.isPrimary === false) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     const x = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const y = clamp((event.clientY - rect.top) / rect.height, 0, 1);
-    // Height swings the source; width chooses the point of impact.
-    aimTarget = [y, x];
-    // Hovering tilts only the camera, not the world-space light mesh.
-    orbitTarget = [x * 2 - 1, y * 2 - 1];
+    setNormalizedPointer([x, y]);
     invalidate();
   };
 
   return {
     onPointerMove,
+    setNormalizedPointer,
     onPointerLeave() {
       orbitTarget = [0, 0];
     },
@@ -54,6 +66,19 @@ export function createPrismInteraction(
       return next;
     },
   };
+}
+
+/** A slow centered circle used as the virtual pointer on mobile layouts. */
+export function automaticPointerPosition(timeSeconds: number): Pair {
+  const phase =
+    ((Number.isFinite(timeSeconds) ? timeSeconds : 0) /
+      AUTO_POINTER_PERIOD_SECONDS) *
+    Math.PI *
+    2;
+  return [
+    0.5 + Math.cos(phase) * AUTO_POINTER_RADIUS,
+    0.5 + Math.sin(phase) * AUTO_POINTER_RADIUS,
+  ];
 }
 
 function easedPair(current: Pair, target: Pair, amount: number): Pair | undefined {

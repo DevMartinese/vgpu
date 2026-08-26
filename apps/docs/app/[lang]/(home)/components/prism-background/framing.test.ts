@@ -10,6 +10,7 @@ import {
   viewportWithinCanvas,
 } from "./framing";
 import { prismMeshData } from "./prism-mesh";
+import { lightWallExtent, wallExtent } from "./runtime/state";
 import { PRISM_FRONT_Z } from "./types";
 
 const PRISM_FRAME_POINTS = (() => {
@@ -22,6 +23,14 @@ const PRISM_FRAME_POINTS = (() => {
 })();
 
 describe("responsive prism framing", () => {
+  test("overscans light travel only for portrait canvases", () => {
+    const portraitWall = wallExtent(0.5);
+    const portraitLight = lightWallExtent(0.5);
+    expect(portraitLight[0]).toBeCloseTo(portraitWall[0] * 2);
+    expect(portraitLight[1]).toBeCloseTo(portraitWall[1] * 2);
+    expect(lightWallExtent(2)).toEqual(wallExtent(2));
+  });
+
   test("measures the target relative to its canvas instead of the window", () => {
     expect(
       viewportWithinCanvas(

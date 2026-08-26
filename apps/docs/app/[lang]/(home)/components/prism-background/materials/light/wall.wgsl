@@ -38,4 +38,3 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   );
   return vec4f(max(wall.composed, vec3f(0.0)), 1.0);
 }
-

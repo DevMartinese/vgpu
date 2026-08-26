@@ -246,8 +246,8 @@ export const PRISM_BEAM_MOUSE_Y_RANGES = {
 export const DEFAULT_LIGHT_FADE_CONTROLS: LightFadeControls = {
   beamOpacity: 1,
   edgeFalloff: 16,
-  rainbowFalloffRate: 2.1,
-  rainbowFalloffPower: 8,
+  rainbowFalloffRate: 3.8,
+  rainbowFalloffPower: 3.7,
 };
 export const PRISM_LIGHT_FADE_RANGES = {
   beamOpacity: { min: 0, max: 1, step: 0.01 },

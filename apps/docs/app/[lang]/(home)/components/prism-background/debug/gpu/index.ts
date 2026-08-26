@@ -3,4 +3,3 @@ export type {
   PrismDebugPreviewHost,
   PrismDebugPreviewHostOptions,
 } from "./types";
-

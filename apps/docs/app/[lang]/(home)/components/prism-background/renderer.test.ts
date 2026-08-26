@@ -814,6 +814,32 @@ test("caps a 120 Hz interactive loop at 90 rendered frames", async () => {
   renderer.dispose();
 });
 
+test("caps the automatic mobile beam at 30 rendered frames", async () => {
+  const env = browser();
+  Object.assign(window, {
+    matchMedia: vi.fn(() => ({ matches: true })),
+  });
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  live.gpuClock.deltaTime = 1 / 120;
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+  });
+  await renderer.ready;
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+
+  for (let sourceFrame = 0; sourceFrame < 120; sourceFrame++) {
+    live.gpuClock.time = sourceFrame / 120;
+    tick(live.loopFrame);
+  }
+
+  // Light mode encodes three passes per rendered frame.
+  expect(live.loopFrame.pass).toHaveBeenCalledTimes(30 * 3);
+  renderer.dispose();
+});
+
 test("debug previews opt into the orientation environment", async () => {
   const env = browser();
   const live = gpu();
@@ -1474,6 +1500,40 @@ test("the camera follows the pointer without rebuilding an unchanged light", asy
   env.windowListeners.get("pointermove")?.(pointer);
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
+  renderer.dispose();
+});
+
+test("mobile ignores pointer input and advances the automatic beam", async () => {
+  const env = browser();
+  let mobile = true;
+  (window as unknown as { matchMedia: (query: string) => MediaQueryList })
+    .matchMedia = vi.fn(() =>
+      ({
+        get matches() {
+          return mobile;
+        },
+      }) as MediaQueryList
+    );
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
+  await renderer.ready;
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  const writes = live.lightBuffer.write.mock.calls.length;
+
+  env.windowListeners.get("pointermove")?.({
+    isPrimary: true,
+    clientX: 0,
+    clientY: 100,
+  } as unknown as Event);
+  mobile = false;
+  tick(live.loopFrame);
+  expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes);
+
+  mobile = true;
+  live.gpuClock.time = 0;
+  tick(live.loopFrame);
+  expect(live.lightBuffer.write).toHaveBeenCalledTimes(writes + 1);
   renderer.dispose();
 });
 
