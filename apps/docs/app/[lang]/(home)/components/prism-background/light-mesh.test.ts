@@ -4,8 +4,12 @@ import {
   buildLightMesh,
   beamIntersectsTriangle,
   INPUT_BEAM_RADIANCE,
+  LIGHT_INTERNAL_FIRST_VERTEX,
   LIGHT_INTERNAL_SEGMENTS,
+  LIGHT_OUTGOING_FIRST_VERTEX,
   LIGHT_VERTEX_FLOATS,
+  LIGHT_VERTEX_STRIDE,
+  lightVertexMetadata,
   lightVertexCount,
   traceSpectralBand,
 } from "./light-mesh";
@@ -144,11 +148,86 @@ describe("finite spectral beam", () => {
   test("uses fixed-size GPU geometry and accepts the whole default spectrum", () => {
     const mesh = buildLightMesh(defaultOptions);
     expect(mesh.vertexCount).toBe(lightVertexCount(PRISM_SPECTRAL_SAMPLES));
+    expect(mesh.vertexCount).toBe(92_160);
+    expect(LIGHT_VERTEX_STRIDE).toBe(12);
+    expect(mesh.vertices.byteLength).toBe(92_160 * LIGHT_VERTEX_STRIDE);
     expect(mesh.stats.validBands).toBe(PRISM_SPECTRAL_SAMPLES);
     expect(mesh.stats.rejectedTopology).toBe(0);
     expect(mesh.stats.minOutputWidth).toBeGreaterThan(
       PRISM_LIGHT.beamHalfWidth
     );
+  });
+
+  test("decodes the retained white, internal, and outgoing vertex ranges", () => {
+    expect(lightVertexMetadata(0)).toEqual({
+      wavelength: -1,
+      profile: -1,
+      travel: 0,
+      spectralIndex: -1,
+    });
+    expect(lightVertexMetadata(LIGHT_INTERNAL_FIRST_VERTEX)).toEqual({
+      wavelength: 400,
+      profile: -1,
+      travel: 0,
+      spectralIndex: 0,
+    });
+    expect(
+      Array.from({ length: 6 }, (_, corner) =>
+        lightVertexMetadata(LIGHT_OUTGOING_FIRST_VERTEX + corner)
+      )
+    ).toEqual([
+      { wavelength: 400, profile: 0, travel: 0, spectralIndex: 0 },
+      {
+        wavelength: Math.fround(400 + 300 / 127),
+        profile: 0,
+        travel: 0,
+        spectralIndex: 1,
+      },
+      {
+        wavelength: Math.fround(400 + 300 / 127),
+        profile: 0,
+        travel: 1,
+        spectralIndex: 1,
+      },
+      { wavelength: 400, profile: 0, travel: 0, spectralIndex: 0 },
+      {
+        wavelength: Math.fround(400 + 300 / 127),
+        profile: 0,
+        travel: 1,
+        spectralIndex: 1,
+      },
+      { wavelength: 400, profile: 0, travel: 1, spectralIndex: 0 },
+    ]);
+  });
+
+  test("reuses and completely overwrites typed and push-array destinations", () => {
+    const expected = buildLightMesh(defaultOptions);
+    const target = new Float32Array(expected.vertices.length);
+    const scratch: number[] = [Number.NaN, Number.NaN];
+    const retainedScratch = scratch;
+    target.fill(Number.NaN);
+    const reused = buildLightMesh(defaultOptions, target, scratch);
+
+    expect(reused.vertices).toBe(target);
+    expect(scratch).toBe(retainedScratch);
+    expect(scratch).toHaveLength(target.length);
+    expect(reused.vertices).toEqual(expected.vertices);
+    expect(scratch.every(Number.isFinite)).toBe(true);
+    expect(Array.from(target).every(Number.isFinite)).toBe(true);
+
+    scratch.push(Number.NaN);
+    target.fill(Number.NaN);
+    const second = buildLightMesh(defaultOptions, target, scratch);
+    expect(second.vertices).toBe(target);
+    expect(scratch).toBe(retainedScratch);
+    expect(scratch).toHaveLength(target.length);
+    expect(second.vertices).toEqual(expected.vertices);
+    expect(scratch.every(Number.isFinite)).toBe(true);
+    expect(Array.from(target).every(Number.isFinite)).toBe(true);
+
+    expect(() =>
+      buildLightMesh(defaultOptions, new Float32Array(target.length - 1))
+    ).toThrow(/expected/);
   });
 
   test("integrated flux is stable when wavelength subdivision changes", () => {
@@ -165,9 +244,10 @@ describe("finite spectral beam", () => {
       offset < mesh.vertices.length;
       offset += LIGHT_VERTEX_FLOATS
     ) {
-      const wavelength = mesh.vertices[offset + 2]!;
+      const vertex = offset / LIGHT_VERTEX_FLOATS;
+      const wavelength = lightVertexMetadata(vertex).wavelength;
       if (wavelength >= 0) {
-        const intensity = mesh.vertices[offset + 4]!;
+        const intensity = mesh.vertices[offset + 2]!;
         radiances.push(
           intensity * Math.max(...wavelengthToBeamRgb(wavelength))
         );
@@ -188,11 +268,10 @@ describe("finite spectral beam", () => {
     });
     const whiteQuads = 1;
     const internalQuads = 3 * LIGHT_INTERNAL_SEGMENTS;
-    const firstCell =
-      (whiteQuads + internalQuads) * 6 * LIGHT_VERTEX_FLOATS;
+    const firstCell = (whiteQuads + internalQuads) * 6;
     const wavelengths = Array.from(
       { length: 6 },
-      (_, vertex) => mesh.vertices[firstCell + vertex * LIGHT_VERTEX_FLOATS + 2]
+      (_, vertex) => lightVertexMetadata(firstCell + vertex, 3, 1).wavelength
     );
     expect(wavelengths).toEqual([400, 550, 550, 400, 550, 400]);
   });
@@ -228,7 +307,7 @@ describe("finite spectral beam", () => {
       mesh.vertices[vertex * LIGHT_VERTEX_FLOATS + 1],
     ];
     const intensity = (vertex: number) =>
-      mesh.vertices[vertex * LIGHT_VERTEX_FLOATS + 4]!;
+      mesh.vertices[vertex * LIGHT_VERTEX_FLOATS + 2]!;
     let connectedPair: readonly [number, number] | undefined;
     for (let slice = 0; slice < 23; slice++) {
       const current = 24 * 6 + slice * LIGHT_INTERNAL_SEGMENTS * 6;
@@ -251,13 +330,13 @@ describe("finite spectral beam", () => {
       samples: 3,
       beamSlices: 1,
     });
-    const attribute = (vertex: number, offset: number) =>
-      mesh.vertices[vertex * LIGHT_VERTEX_FLOATS + offset];
+    const intensity = (vertex: number) =>
+      mesh.vertices[vertex * LIGHT_VERTEX_FLOATS + 2];
 
     // The visible input starts dark at the canvas boundary and reaches its full
     // configured radiance exactly where it meets the glass.
     expect(
-      Array.from({ length: 6 }, (_, vertex) => attribute(vertex, 4))
+      Array.from({ length: 6 }, (_, vertex) => intensity(vertex))
     ).toEqual([
       0,
       0,
@@ -269,14 +348,17 @@ describe("finite spectral beam", () => {
 
     // The input ramp does not share the outgoing-distance attenuation channel.
     expect(
-      Array.from({ length: 6 }, (_, vertex) => attribute(vertex, 5))
+      Array.from(
+        { length: 6 },
+        (_, vertex) => lightVertexMetadata(vertex, 3, 1).travel
+      )
     ).toEqual([0, 0, 0, 0, 0, 0]);
 
     // Internal spectral cells do not use the outgoing-distance fade.
     const internalStart = 6;
     expect(
       Array.from({ length: 6 }, (_, vertex) =>
-        attribute(internalStart + vertex, 5)
+        lightVertexMetadata(internalStart + vertex, 3, 1).travel
       )
     ).toEqual([0, 0, 0, 0, 0, 0]);
 
@@ -284,7 +366,7 @@ describe("finite spectral beam", () => {
     const spectralStart = mesh.vertexCount - 6;
     expect(
       Array.from({ length: 6 }, (_, vertex) =>
-        attribute(spectralStart + vertex, 5)
+        lightVertexMetadata(spectralStart + vertex, 3, 1).travel
       )
     ).toEqual([0, 0, 1, 0, 1, 1]);
   });

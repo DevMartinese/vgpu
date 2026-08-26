@@ -36,8 +36,30 @@ import {
   type LightTextureLoader,
 } from "../assets/light/loader";
 import { reflectSource } from "@vgpu/wgsl/reflect-source";
+import { wavelengthToBeamRgb } from "../optics";
+import { PRISM_SPECTRAL_SAMPLES, PRISM_WAVELENGTHS } from "../types";
 
 describe("light pipeline baked assets", () => {
+  test("spectral LUT is the Float32 checkpoint of the CPU CIE/D65 formula", () => {
+    const entries = Array.from(
+      spectralWgsl.wgsl.matchAll(/vec4f\(([^)]+)\),/g),
+      (match) => match[1]!.split(",").map((value) => Number(value.trim()))
+    );
+    expect(entries).toHaveLength(PRISM_SPECTRAL_SAMPLES);
+
+    entries.forEach((entry, index) => {
+      const wavelength = Math.fround(
+        PRISM_WAVELENGTHS.min +
+          (PRISM_WAVELENGTHS.max - PRISM_WAVELENGTHS.min) *
+            (index / (PRISM_SPECTRAL_SAMPLES - 1))
+      );
+      expect(entry).toEqual([
+        ...wavelengthToBeamRgb(wavelength).map(Math.fround),
+        wavelength,
+      ]);
+    });
+  });
+
   test("wall grounding uses the exact prism footprint", () => {
     const [apex, left, right] = PRISM_GROUNDING_TRIANGLE;
     expect(apex[0]).toBeCloseTo(0);
@@ -152,8 +174,8 @@ describe("light pipeline baked assets", () => {
         (entry) => entry.name
       )
     ).toContain("fs_raw_caustic");
-    expect(spectralWgsl.wgsl).toContain("d65SpectralPower");
-    expect(spectralWgsl.wgsl).toContain("photopicPower");
+    expect(spectralWgsl.wgsl).toContain("SPECTRAL_LUT");
+    expect(spectralWgsl.wgsl).not.toContain("d65SpectralPower");
   });
 
   test("wall detail is world-space, isotropic, and split into two normal scales", () => {

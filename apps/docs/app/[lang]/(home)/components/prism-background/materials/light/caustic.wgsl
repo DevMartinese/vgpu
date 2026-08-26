@@ -1,5 +1,6 @@
 import { Scene } from "../../scene.wgsl";
-import { wavelengthToBeamRgb } from "../shared/spectral.wgsl";
+import { decodeLightVertex } from "../shared/light-vertex.wgsl";
+import { spectralSample } from "../shared/spectral.wgsl";
 import {
   evaluateWallNormalsLevel,
   wallNormalTextureLod,
@@ -39,22 +40,33 @@ struct VertexOut {
 
 @vertex
 fn vs_main(
+  @builtin(vertex_index) vertexIndex: u32,
   @location(0) position: vec2f,
-  @location(1) wavelength: f32,
-  @location(2) profile: f32,
-  @location(3) intensity: f32,
-  @location(4) travel: f32,
+  @location(3) rawIntensity: f32,
 ) -> VertexOut {
   var out: VertexOut;
   // One continuous physical cross-section must keep one depth. Putting the
   // exterior rays on the wall and the interior rays inside the glass makes the
   // shared entry/exit vertices project to different pixels under perspective.
   out.position = scene.viewProjection * vec4f(position, scene.lightPlaneZ, 1.0);
-  out.color = select(wavelengthToBeamRgb(wavelength), vec3f(1.0), wavelength < 0.0);
-  out.profile = profile;
-  out.intensity = intensity;
-  out.travel = travel;
-  out.wavelength = wavelength;
+  let metadata = decodeLightVertex(
+    vertexIndex,
+    scene.lightWhiteQuads,
+    scene.lightBeamSlices,
+    scene.lightInternalQuads,
+    scene.lightInternalSegments,
+  );
+  out.color = vec3f(1.0);
+  out.wavelength = -1.0;
+  // Empty quads carry a negative intensity sentinel and never fetch the LUT.
+  if metadata.white == 0u && rawIntensity >= 0.0 {
+    let spectral = spectralSample(metadata.spectralIndex);
+    out.color = spectral.rgb;
+    out.wavelength = spectral.a;
+  }
+  out.profile = metadata.profile;
+  out.intensity = max(rawIntensity, 0.0);
+  out.travel = metadata.travel;
   out.worldPosition = position;
   return out;
 }

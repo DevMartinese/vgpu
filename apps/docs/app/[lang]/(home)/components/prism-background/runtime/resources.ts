@@ -33,19 +33,24 @@ export function createPrismRuntime(
 ): PrismRuntime {
   const controls = normalizeControls(DEFAULT_PRISM_CONTROLS);
   const aspect = output[0] / Math.max(1, output[1]);
-  const initialMesh = buildLightMesh({
-    light: lampAt(
-      PRISM_DEFAULT_ARC,
-      controls.beamWidth,
-      0.5,
-      controls.beamMouseY
-    ),
-    dispersion:
-      controls.spectralDispersion ??
-      PRISM_DISPERSION_PRESETS[controls.dispersion],
-    edgeFalloff: controls.lightFade.edgeFalloff,
-    wallHalfExtent: wallExtent(aspect, CAMERA_DISTANCE, controls.cameraFov),
-  });
+  const lightVertexScratch: number[] = [];
+  const initialMesh = buildLightMesh(
+    {
+      light: lampAt(
+        PRISM_DEFAULT_ARC,
+        controls.beamWidth,
+        0.5,
+        controls.beamMouseY
+      ),
+      dispersion:
+        controls.spectralDispersion ??
+        PRISM_DISPERSION_PRESETS[controls.dispersion],
+      edgeFalloff: controls.lightFade.edgeFalloff,
+      wallHalfExtent: wallExtent(aspect, CAMERA_DISTANCE, controls.cameraFov),
+    },
+    undefined,
+    lightVertexScratch
+  );
   const lightBuffer = gpu.device.createBuffer({
     size: initialMesh.vertices.byteLength,
     usage: ["vertex", "copy_dst"],
@@ -63,6 +68,8 @@ export function createPrismRuntime(
     label,
     outputSize: output,
     lightBuffer,
+    lightVertexScratch,
+    lightVertices: initialMesh.vertices,
     lightGeometry: {
       vertexBuffers: [lightBuffer.gpu],
       vertexBufferLayouts: [
@@ -70,10 +77,7 @@ export function createPrismRuntime(
           arrayStride: LIGHT_VERTEX_STRIDE,
           attributes: [
             { shaderLocation: 0, offset: 0, format: "float32x2" },
-            { shaderLocation: 1, offset: 8, format: "float32" },
-            { shaderLocation: 2, offset: 12, format: "float32" },
-            { shaderLocation: 3, offset: 16, format: "float32" },
-            { shaderLocation: 4, offset: 20, format: "float32" },
+            { shaderLocation: 3, offset: 8, format: "float32" },
           ],
         },
       ],

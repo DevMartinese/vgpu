@@ -29,8 +29,8 @@ import {
   type Vec2,
 } from "./types";
 
-/** position.xy, wavelength, transverse profile, intensity, distance from glass. */
-export const LIGHT_VERTEX_FLOATS = 6;
+/** Dynamic position.xy and intensity. Static attributes decode from vertex_index. */
+export const LIGHT_VERTEX_FLOATS = 3;
 export const LIGHT_VERTEX_STRIDE =
   LIGHT_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const VERTICES_PER_QUAD = 6;
@@ -94,6 +94,14 @@ export interface LightMeshData {
   readonly stats: LightMeshStats;
 }
 
+export interface LightVertexMetadata {
+  readonly wavelength: number;
+  readonly profile: number;
+  readonly travel: number;
+  /** `-1` marks the white input beam. */
+  readonly spectralIndex: number;
+}
+
 export interface LightMeshOptions {
   readonly light: CollimatedLight;
   readonly dispersion: DispersionPreset;
@@ -112,6 +120,9 @@ interface SpectralNode {
   /** Paths along every slice boundary, used to give internal light width. */
   readonly boundaryPaths: readonly (DetailedPrismPath | undefined)[];
 }
+
+const UPPER_QUAD_VERTEX = [false, true, true, false, true, false] as const;
+const END_QUAD_VERTEX = [false, false, true, false, true, true] as const;
 
 const add = (a: Vec2, b: Vec2): Vec2 => [a[0] + b[0], a[1] + b[1]];
 const sub = (a: Vec2, b: Vec2): Vec2 => [a[0] - b[0], a[1] - b[1]];
@@ -289,12 +300,9 @@ function traceProfilePath(
 function pushVertex(
   output: number[],
   point: Vec2,
-  wavelength: number,
-  profile: number,
-  intensity: number,
-  travel: number
+  intensity: number
 ): void {
-  output.push(point[0], point[1], wavelength, profile, intensity, travel);
+  output.push(point[0], point[1], intensity);
 }
 
 function pushQuad(
@@ -303,62 +311,15 @@ function pushQuad(
   upperStart: Vec2,
   lowerEnd: Vec2,
   upperEnd: Vec2,
-  wavelength: number,
   startIntensity: number,
-  startTravel = 0,
-  endTravel = 0,
-  lowerProfile = -1,
-  upperProfile = 1,
   endIntensity = startIntensity
 ): void {
-  pushVertex(
-    output,
-    lowerStart,
-    wavelength,
-    lowerProfile,
-    startIntensity,
-    startTravel
-  );
-  pushVertex(
-    output,
-    upperStart,
-    wavelength,
-    upperProfile,
-    startIntensity,
-    startTravel
-  );
-  pushVertex(
-    output,
-    upperEnd,
-    wavelength,
-    upperProfile,
-    endIntensity,
-    endTravel
-  );
-  pushVertex(
-    output,
-    lowerStart,
-    wavelength,
-    lowerProfile,
-    startIntensity,
-    startTravel
-  );
-  pushVertex(
-    output,
-    upperEnd,
-    wavelength,
-    upperProfile,
-    endIntensity,
-    endTravel
-  );
-  pushVertex(
-    output,
-    lowerEnd,
-    wavelength,
-    lowerProfile,
-    endIntensity,
-    endTravel
-  );
+  pushVertex(output, lowerStart, startIntensity);
+  pushVertex(output, upperStart, startIntensity);
+  pushVertex(output, upperEnd, endIntensity);
+  pushVertex(output, lowerStart, startIntensity);
+  pushVertex(output, upperEnd, endIntensity);
+  pushVertex(output, lowerEnd, endIntensity);
 }
 
 /** A cell whose two rails carry neighbouring wavelengths and intensities. */
@@ -368,23 +329,90 @@ function pushSpectralCell(
   highStart: Vec2,
   lowEnd: Vec2,
   highEnd: Vec2,
-  lowWavelength: number,
-  highWavelength: number,
   lowIntensity: number,
-  highIntensity: number,
-  startTravel = 0,
-  endTravel = 1
+  highIntensity: number
 ): void {
-  pushVertex(output, lowStart, lowWavelength, 0, lowIntensity, startTravel);
-  pushVertex(output, highStart, highWavelength, 0, highIntensity, startTravel);
-  pushVertex(output, highEnd, highWavelength, 0, highIntensity, endTravel);
-  pushVertex(output, lowStart, lowWavelength, 0, lowIntensity, startTravel);
-  pushVertex(output, highEnd, highWavelength, 0, highIntensity, endTravel);
-  pushVertex(output, lowEnd, lowWavelength, 0, lowIntensity, endTravel);
+  pushVertex(output, lowStart, lowIntensity);
+  pushVertex(output, highStart, highIntensity);
+  pushVertex(output, highEnd, highIntensity);
+  pushVertex(output, lowStart, lowIntensity);
+  pushVertex(output, highEnd, highIntensity);
+  pushVertex(output, lowEnd, lowIntensity);
 }
 
 function pushEmptyQuad(output: number[]): void {
-  pushQuad(output, [0, 0], [0, 0], [0, 0], [0, 0], -1, 0);
+  pushQuad(output, [0, 0], [0, 0], [0, 0], [0, 0], -1);
+}
+
+/**
+ * Reconstruct attributes whose values depend only on the fixed mesh topology.
+ * WGSL mirrors this decoder from `@builtin(vertex_index)`, keeping them out of
+ * every dynamic CPU upload without changing any draw range.
+ */
+export function lightVertexMetadata(
+  vertexIndex: number,
+  samples = PRISM_SPECTRAL_SAMPLES,
+  beamSlices = PRISM_BEAM_SLICES
+): LightVertexMetadata {
+  const vertexCount = lightVertexCount(samples, beamSlices);
+  if (
+    !Number.isInteger(vertexIndex) ||
+    vertexIndex < 0 ||
+    vertexIndex >= vertexCount
+  ) {
+    throw new RangeError(
+      `Light vertex index ${vertexIndex} is outside [0, ${vertexCount}).`
+    );
+  }
+
+  const quad = Math.floor(vertexIndex / VERTICES_PER_QUAD);
+  const corner = vertexIndex % VERTICES_PER_QUAD;
+  const upper = UPPER_QUAD_VERTEX[corner]!;
+  const whiteQuads = whiteQuadCount(beamSlices);
+  if (quad < whiteQuads) {
+    const boundary = quad + (upper ? 1 : 0);
+    return {
+      wavelength: -1,
+      profile: Math.fround(-1 + (2 * boundary) / beamSlices),
+      travel: 0,
+      spectralIndex: -1,
+    };
+  }
+
+  const internalQuads = internalQuadCount(samples, beamSlices);
+  const spectralQuad = quad - whiteQuads;
+  if (spectralQuad < internalQuads) {
+    const quadsPerWavelength = beamSlices * LIGHT_INTERNAL_SEGMENTS;
+    const spectralIndex = Math.floor(spectralQuad / quadsPerWavelength);
+    const slice = Math.floor(
+      (spectralQuad % quadsPerWavelength) / LIGHT_INTERNAL_SEGMENTS
+    );
+    const boundary = slice + (upper ? 1 : 0);
+    return {
+      wavelength: wavelengthAt(spectralIndex, samples),
+      profile: Math.fround(-1 + (2 * boundary) / beamSlices),
+      travel: 0,
+      spectralIndex,
+    };
+  }
+
+  const outgoingQuad = spectralQuad - internalQuads;
+  const interval = Math.floor(outgoingQuad / beamSlices);
+  const spectralIndex = interval + (upper ? 1 : 0);
+  return {
+    wavelength: wavelengthAt(spectralIndex, samples),
+    profile: 0,
+    travel: END_QUAD_VERTEX[corner] ? 1 : 0,
+    spectralIndex,
+  };
+}
+
+function wavelengthAt(index: number, samples: number): number {
+  return Math.fround(
+    PRISM_WAVELENGTHS.min +
+      (PRISM_WAVELENGTHS.max - PRISM_WAVELENGTHS.min) *
+        (index / (samples - 1))
+  );
 }
 
 function profileCoordinates(slices: number): readonly number[] {
@@ -471,7 +499,11 @@ function spectralDensity(
 }
 
 /** Build the white input and wavelength-connected spectral sheets. */
-export function buildLightMesh(options: LightMeshOptions): LightMeshData {
+export function buildLightMesh(
+  options: LightMeshOptions,
+  target?: Float32Array<ArrayBuffer>,
+  scratch?: number[]
+): LightMeshData {
   const triangle = options.triangle ?? PRISM_TRIANGLE;
   const samples = Math.max(
     2,
@@ -486,7 +518,15 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
     0,
     options.edgeFalloff ?? DEFAULT_LIGHT_FADE_CONTROLS.edgeFalloff
   );
-  const vertices: number[] = [];
+  const expectedVertexCount = lightVertexCount(samples, beamSlices);
+  const expectedFloats = expectedVertexCount * LIGHT_VERTEX_FLOATS;
+  if (target && target.length !== expectedFloats) {
+    throw new RangeError(
+      `Light mesh target has ${target.length} floats; expected ${expectedFloats}.`
+    );
+  }
+  const output = scratch ?? [];
+  output.length = 0;
   const inputWidth = options.light.beamHalfWidth * 2;
   const profiles = profileCoordinates(beamSlices);
   const profileWeights = normalizedProfileWeights(profiles, edgeFalloff);
@@ -530,17 +570,12 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
     const upper = whiteBoundaries[slice + 1]!;
     if (lower.entry && upper.entry) {
       pushQuad(
-        vertices,
+        output,
         rayToWallBoundary(lower.entry, backwards, options.wallHalfExtent),
         rayToWallBoundary(upper.entry, backwards, options.wallHalfExtent),
         lower.entry,
         upper.entry,
-        -1,
         0,
-        0,
-        0,
-        lower.profile,
-        upper.profile,
         INPUT_BEAM_RADIANCE
       );
     } else {
@@ -557,20 +592,15 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
         upper.wall
       ) {
         pushQuad(
-          vertices,
+          output,
           lower.wall[0],
           upper.wall[0],
           lower.wall[1],
           upper.wall[1],
-          -1,
-          INPUT_BEAM_RADIANCE,
-          0,
-          0,
-          lower.profile,
-          upper.profile
+          INPUT_BEAM_RADIANCE
         );
       } else {
-        pushEmptyQuad(vertices);
+        pushEmptyQuad(output);
       }
     }
   }
@@ -657,7 +687,7 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
         quad < beamSlices * LIGHT_INTERNAL_SEGMENTS;
         quad++
       ) {
-        pushEmptyQuad(vertices);
+        pushEmptyQuad(output);
       }
       continue;
     }
@@ -687,20 +717,15 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
           upperEnd
         ) {
           pushQuad(
-            vertices,
+            output,
             lowerStart,
             upperStart,
             lowerEnd,
             upperEnd,
-            node.wavelength,
-            intensity,
-            0,
-            0,
-            boundaryProfiles[slice],
-            boundaryProfiles[slice + 1]
+            intensity
           );
         } else {
-          pushEmptyQuad(vertices);
+          pushEmptyQuad(output);
         }
       }
     }
@@ -714,7 +739,7 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
     for (let profileIndex = 0; profileIndex < beamSlices; profileIndex++) {
       const connected = canConnect(low, high, profileIndex);
       if (!connected) {
-        pushEmptyQuad(vertices);
+        pushEmptyQuad(output);
         continue;
       }
       const lowPath = low!.paths[profileIndex]!;
@@ -730,7 +755,7 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
         (samples - 1);
 
       pushSpectralCell(
-        vertices,
+        output,
         lowPath.origin,
         highPath.origin,
         rayToWallBoundary(
@@ -743,27 +768,27 @@ export function buildLightMesh(options: LightMeshOptions): LightMeshData {
           highPath.direction,
           options.wallHalfExtent
         ),
-        low!.wavelength,
-        high!.wavelength,
         lowIntensity,
         highIntensity
       );
     }
   }
 
-  const data = new Float32Array(vertices);
-  const vertexCount = data.length / LIGHT_VERTEX_FLOATS;
-  if (vertexCount !== lightVertexCount(samples, beamSlices)) {
+  const vertexCount = output.length / LIGHT_VERTEX_FLOATS;
+  if (output.length !== expectedFloats || vertexCount !== expectedVertexCount) {
     throw new Error(
-      `Light mesh wrote ${vertexCount} vertices; expected ${lightVertexCount(
-        samples,
-        beamSlices
-      )}.`
+      `Light mesh wrote ${vertexCount} vertices; expected ${expectedVertexCount}.`
     );
   }
+  // Keep the fast packed-number `push` path and bulk-convert once. Runtime
+  // supplies both destinations, avoiding per-frame upload-view allocation;
+  // controlled reverse-order microbenchmarks favor this over fresh typed views
+  // and element-wise Float32 writers.
+  const vertices = target ?? new Float32Array(expectedFloats);
+  vertices.set(output);
   const validBands = nodes.filter(Boolean).length;
   return {
-    vertices: data,
+    vertices,
     vertexCount,
     stats: {
       samples,

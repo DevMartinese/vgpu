@@ -23,6 +23,8 @@ export interface PrismRuntime {
   readonly gpu: Gpu;
   readonly label: string;
   readonly lightBuffer: Buffer;
+  readonly lightVertexScratch: number[];
+  readonly lightVertices: Float32Array<ArrayBuffer>;
   readonly lightGeometry: GeometryLike;
   readonly prism: Geometry;
   readonly prismWireframe: Geometry;

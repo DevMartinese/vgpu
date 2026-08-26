@@ -202,26 +202,30 @@ function refreshFraming(runtime: PrismRuntime): void {
 function refreshLightMesh(runtime: PrismRuntime): void {
   const measurement = runtime.measurementSink;
   const startedAt = measurement?.now();
-  const mesh = buildLightMesh({
-    light: lampAt(
-      runtime.lampArc,
-      runtime.controls.beamWidth,
-      runtime.lampTarget,
-      runtime.controls.beamMouseY
-    ),
-    dispersion:
-      runtime.controls.spectralDispersion ??
-      PRISM_DISPERSION_PRESETS[runtime.controls.dispersion],
-    edgeFalloff: runtime.controls.lightFade.edgeFalloff,
-    wallHalfExtent: wallExtent(
-      runtime.aspect,
-      runtime.cameraDistance,
-      runtime.controls.cameraFov,
-      runtime.framing
-    ),
-  });
+  const mesh = buildLightMesh(
+    {
+      light: lampAt(
+        runtime.lampArc,
+        runtime.controls.beamWidth,
+        runtime.lampTarget,
+        runtime.controls.beamMouseY
+      ),
+      dispersion:
+        runtime.controls.spectralDispersion ??
+        PRISM_DISPERSION_PRESETS[runtime.controls.dispersion],
+      edgeFalloff: runtime.controls.lightFade.edgeFalloff,
+      wallHalfExtent: wallExtent(
+        runtime.aspect,
+        runtime.cameraDistance,
+        runtime.controls.cameraFov,
+        runtime.framing
+      ),
+    },
+    runtime.lightVertices,
+    runtime.lightVertexScratch
+  );
   const builtAt = measurement?.now();
-  runtime.lightBuffer.write(mesh.vertices);
+  runtime.lightBuffer.write(runtime.lightVertices);
   if (measurement && startedAt !== undefined && builtAt !== undefined) {
     measurement.recordLightMesh({
       buildMs: builtAt - startedAt,

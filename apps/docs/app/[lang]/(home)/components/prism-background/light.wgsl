@@ -7,7 +7,8 @@
 // wavelengths. The fragment stage only applies intensity and beam falloff.
 
 import { Scene } from "./scene.wgsl";
-import { wavelengthToBeamRgb } from "./materials/shared/spectral.wgsl";
+import { decodeLightVertex } from "./materials/shared/light-vertex.wgsl";
+import { spectralSample } from "./materials/shared/spectral.wgsl";
 
 @group(0) @binding(0) var<uniform> scene: Scene;
 
@@ -21,19 +22,27 @@ struct VertexOut {
 
 @vertex
 fn vs_main(
+  @builtin(vertex_index) vertexIndex: u32,
   @location(0) position: vec2f,
-  @location(1) wavelength: f32,
-  @location(2) profile: f32,
-  @location(3) intensity: f32,
-  @location(4) travel: f32,
+  @location(3) rawIntensity: f32,
 ) -> VertexOut {
   var out: VertexOut;
   out.position = scene.viewProjection * vec4f(position, scene.lightPlaneZ, 1.0);
-  let spectral = wavelengthToBeamRgb(max(wavelength, 400.0));
-  out.color = select(spectral, vec3f(1.0), wavelength < 0.0);
-  out.profile = profile;
-  out.intensity = intensity;
-  out.travel = travel;
+  let metadata = decodeLightVertex(
+    vertexIndex,
+    scene.lightWhiteQuads,
+    scene.lightBeamSlices,
+    scene.lightInternalQuads,
+    scene.lightInternalSegments,
+  );
+  out.color = vec3f(1.0);
+  // Empty quads carry a negative intensity sentinel and never fetch the LUT.
+  if metadata.white == 0u && rawIntensity >= 0.0 {
+    out.color = spectralSample(metadata.spectralIndex).rgb;
+  }
+  out.profile = metadata.profile;
+  out.intensity = max(rawIntensity, 0.0);
+  out.travel = metadata.travel;
   return out;
 }
 

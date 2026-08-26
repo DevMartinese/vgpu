@@ -50,7 +50,9 @@ import {
   LIGHT_INTERNAL_VERTICES,
   LIGHT_OUTGOING_FIRST_VERTEX,
   LIGHT_OUTGOING_VERTICES,
+  LIGHT_VERTEX_STRIDE,
   LIGHT_WHITE_VERTICES,
+  lightVertexCount,
 } from "./light-mesh";
 import { wallExtent } from "./scene";
 import {
@@ -331,9 +333,30 @@ test("renders the deterministic light once and idles until something changes", a
   // Runtime construction already knows the output aspect, so pipeline prepare
   // does not retrace the same light mesh. No history textures are allocated.
   expect(live.instance.device.createBuffer).toHaveBeenCalledOnce();
+  expect(live.instance.device.createBuffer).toHaveBeenCalledWith(
+    expect.objectContaining({
+      size: lightVertexCount() * LIGHT_VERTEX_STRIDE,
+    })
+  );
   expect(live.lightBuffer.write).toHaveBeenCalledOnce();
   expect(live.effects).toHaveLength(17);
   expect(live.draws).toHaveLength(7);
+  expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({
+      geometry: expect.objectContaining({
+        vertexBufferLayouts: [
+          {
+            arrayStride: 12,
+            attributes: [
+              { shaderLocation: 0, offset: 0, format: "float32x2" },
+              { shaderLocation: 3, offset: 8, format: "float32" },
+            ],
+          },
+        ],
+      }),
+    })
+  );
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
     3,
     expect.objectContaining({ blend: "premultiplied" })
@@ -766,6 +789,7 @@ test("pointer position smoothly moves the lamp and its target without dragging",
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   const writesBeforeMove = live.lightBuffer.write.mock.calls.length;
+  const retainedVertices = live.lightBuffer.write.mock.calls[0]![0];
 
   env.windowListeners.get("pointermove")?.({
     pointerId: 4,
@@ -786,6 +810,11 @@ test("pointer position smoothly moves the lamp and its target without dragging",
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writesBeforeMove + 2);
   tick(live.loopFrame);
   expect(live.lightBuffer.write).toHaveBeenCalledTimes(writesBeforeMove + 3);
+  expect(
+    live.lightBuffer.write.mock.calls.every(
+      ([vertices]) => vertices === retainedVertices
+    )
+  ).toBe(true);
   expect(env.canvas.setPointerCapture).not.toHaveBeenCalled();
   renderer.dispose();
 });
