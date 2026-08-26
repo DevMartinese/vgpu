@@ -1,7 +1,6 @@
 import type { Target } from "vgpu";
 
 import {
-  createLightTextureLoader,
   destroyLightAssetTextures,
   loadLightAssetTextures,
   type LightTextureLoader,
@@ -48,7 +47,7 @@ export function createLightPipeline(
   options: LightPipelineOptions = {}
 ): LightPrismPipeline {
   const graph = createLightGraph(runtime);
-  const loader = options.assetLoader ?? createLightTextureLoader();
+  const loader = options.assetLoader;
   let destroyed = false;
   let debugDraws: LightDebugDraws | undefined;
   let debugDrawsPromise: Promise<LightDebugDraws> | undefined;

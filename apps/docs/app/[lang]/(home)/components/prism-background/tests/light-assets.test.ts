@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createHash } from "node:crypto";
 
 import { PNG } from "pngjs";
 import { describe, expect, test, vi } from "vitest";
@@ -17,6 +16,8 @@ import wallCommonWgsl from "../materials/light/wall-common.wgsl";
 import wallDebugWgsl from "../materials/light/wall-debug.wgsl";
 import wallNormalWgsl from "../materials/light/wall-normal.wgsl";
 import wallWgsl from "../materials/light/wall.wgsl";
+import bakeWgsl from "../assets/light/bake.wgsl";
+import downsampleWgsl from "../assets/light/downsample.wgsl";
 import { generateCausticProfile } from "../assets/light/generate-caustic";
 import {
   applyGlobalLightMask,
@@ -29,7 +30,6 @@ import {
   PRISM_GROUNDING_AO,
   PRISM_GROUNDING_TRIANGLE,
 } from "../assets/light/generate-wall";
-import { parseKtx2 } from "../assets/light/ktx2";
 import {
   createLightTextureLoader,
   loadLightAssetTextures,
@@ -103,50 +103,56 @@ describe("light pipeline baked assets", () => {
     expect(channelAt(0.5, 0.72, 1)).toBe(255);
   });
 
-  test.each([
-    ["wall-material", 512, 512, 10],
-    ["wall-lighting", 512, 512, 10],
-    ["caustic-profile", 1024, 256, 11],
-  ] as const)(
-    "%s is a linear RGBA8 KTX2 mip chain",
-    async (name, width, height, levels) => {
-      const file = await readFile(
-        resolve(process.cwd(), `apps/docs/public/hero/prism-light/${name}.ktx2`)
-      );
-      const source = file.buffer.slice(
-        file.byteOffset,
-        file.byteOffset + file.byteLength
-      ) as ArrayBuffer;
-      const parsed = parseKtx2(source);
-      expect(parsed.format).toBe("rgba8unorm");
-      expect(parsed.levels).toHaveLength(levels);
-      expect(parsed.levels[0]).toMatchObject({ width, height });
-      expect(parsed.levels.at(-1)).toMatchObject({ width: 1, height: 1 });
-      const baked = parsed.levels[0]!.data;
-      const generated = generateLightAsset(name).pixels;
-      if (name === "wall-lighting") {
-        const mask = PNG.sync.read(
-          await readFile(
-            resolve(
-              process.cwd(),
-              "apps/docs/assets/prism-light/wall-global-light-mask.png"
-            )
-          )
-        );
-        expect(mask.width / mask.height).toBeCloseTo(1.5);
-        applyGlobalLightMask(
-          { width, height, pixels: generated },
-          mask.data,
-          mask.width,
-          mask.height
-        );
-        expect(
-          globalLightMaskEdgeMax(generated, width, height, 1)
-        ).toBeLessThanOrEqual(2);
-      }
-      expect(hash(baked)).toBe(hash(generated));
-    }
-  );
+  test("ships only a small authored wall mask and bakes the textures on the GPU", async () => {
+    const mask = PNG.sync.read(
+      await readFile(
+        resolve(
+          process.cwd(),
+          "apps/docs/assets/prism-light/wall-global-light-mask.png"
+        )
+      )
+    );
+    const generated = generateLightAsset("wall-lighting");
+    applyGlobalLightMask(
+      generated,
+      mask.data,
+      mask.width,
+      mask.height
+    );
+    expect(mask.width / mask.height).toBeCloseTo(1.5);
+    expect(
+      globalLightMaskEdgeMax(
+        generated.pixels,
+        generated.width,
+        generated.height,
+        1
+      )
+    ).toBeLessThanOrEqual(2);
+
+    const webp = await readFile(
+      resolve(
+        process.cwd(),
+        "apps/docs/public/hero/prism-light/wall-global-light-mask.webp"
+      )
+    );
+    expect(webp.subarray(0, 4).toString()).toBe("RIFF");
+    expect(webp.subarray(8, 12).toString()).toBe("WEBP");
+    expect(webp.byteLength).toBeLessThan(20_000);
+
+    expect(
+      reflectSource(bakeWgsl.wgsl).entryPoints.map((entry) => entry.name)
+    ).toEqual(
+      expect.arrayContaining([
+        "wall_material",
+        "wall_lighting",
+        "wall_lighting_fallback",
+        "caustic_profile",
+      ])
+    );
+    expect(
+      reflectSource(downsampleWgsl.wgsl).entryPoints.map((entry) => entry.name)
+    ).toEqual(["main"]);
+  });
 
   test("debug shaders publish every material inspection entry", () => {
     const wallEntries = reflectSource(wallDebugWgsl.wgsl).entryPoints.map(
@@ -287,9 +293,6 @@ describe("light pipeline baked assets", () => {
         throw new Error("device upload failed");
       });
     const loader = createLightTextureLoader({
-      fetch: vi.fn(async () => {
-        throw new Error("offline");
-      }),
       fallback: () => ({
         width: 2,
         height: 2,
@@ -304,16 +307,10 @@ describe("light pipeline baked assets", () => {
     await expect(
       loader.load(gpu, {
         id: "wall-material",
-        url: "/wall.ktx2",
         size: [2, 2],
-        colorSpace: "linear",
       })
     ).rejects.toThrow("device upload failed");
     expect(createTexture).toHaveBeenCalledOnce();
     expect(destroy).toHaveBeenCalledOnce();
   });
 });
-
-function hash(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}

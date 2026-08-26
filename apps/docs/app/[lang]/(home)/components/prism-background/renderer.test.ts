@@ -1758,7 +1758,7 @@ test("a stale async theme switch cannot replace the latest active mode", async (
   const debugBridge = renderer.debugBridge;
 
   const switchToLight = renderer.setMode("light");
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
   const keepDark = renderer.setMode("dark");
   assetFetch.resolve({
     ok: false,
@@ -1829,7 +1829,7 @@ test("dispose defers shared GPU teardown until a pending mode prepare settles", 
   await renderer.ready;
 
   const switchToLight = renderer.setMode("light");
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
   renderer.dispose();
   expect(live.stop).toHaveBeenCalledOnce();
   expect(live.surface.dispose).not.toHaveBeenCalled();

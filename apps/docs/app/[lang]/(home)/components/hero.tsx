@@ -2,7 +2,9 @@ import { HeroTabProvider } from "@/components/hero/hero-tab-state";
 import { Button } from "@/components/ui/button";
 import { VgpuWordmarkGlyphs } from "@/components/vgpu-wordmark";
 import DynamicLink from "fumadocs-core/dynamic-link";
+import { preload } from "react-dom";
 import { HeroTabs } from "./hero-tabs";
+import { WALL_GLOBAL_LIGHT_MASK_URL } from "./prism-background/assets/light/manifest";
 import { PrismBackground } from "./prism-background/prism-background";
 import "../hero-glass-button.css";
 import "../hero-theme.css";
@@ -14,6 +16,13 @@ import "../hero-theme.css";
  * stays server-rendered and layered above it.
  */
 export function Hero() {
+  preload(WALL_GLOBAL_LIGHT_MASK_URL, {
+    as: "fetch",
+    crossOrigin: "anonymous",
+    fetchPriority: "high",
+    type: "image/webp",
+  });
+
   return (
     <HeroTabProvider>
       <section
@@ -62,9 +71,7 @@ export function Hero() {
                   <VgpuWordmarkGlyphs />
                 </svg>
               </h1>
-              <p
-                className="max-w-[10em] text-3xl text-balance text-center font-light leading-tight min-[768px]:text-left min-[768px]:text-4xl"
-              >
+              <p className="max-w-[10em] text-3xl text-balance text-center font-light leading-tight min-[768px]:text-left min-[768px]:text-4xl">
                 The WebGPU library, designed for agents.
               </p>
               <div className="mt-auto w-full max-w-[21em] min-[768px]:mt-7">
@@ -79,7 +86,7 @@ export function Hero() {
                   size="lg"
                   className="bg-white text-black hover:bg-white/90"
                 >
-                  <DynamicLink href="/[lang]/docs/get-started">
+                  <DynamicLink href="/[lang]/docs/get-started" prefetch={false}>
                     Get started
                   </DynamicLink>
                 </Button>
@@ -89,16 +96,14 @@ export function Hero() {
                   variant="outline"
                   className="hero-glass-button text-white shadow-none hover:text-white"
                 >
-                  <DynamicLink href="/[lang]/examples">
+                  <DynamicLink href="/[lang]/examples" prefetch={false}>
                     Explore examples
                   </DynamicLink>
                 </Button>
               </div>
             </div>
 
-            <div
-              className="pointer-events-none relative col-start-1 row-start-1 aspect-square w-[min(70vw,18rem)] justify-self-center min-[768px]:absolute min-[768px]:inset-0 min-[768px]:aspect-auto min-[768px]:w-auto min-[768px]:p-20 min-[1100px]:static min-[1100px]:col-start-2 min-[1100px]:row-start-1 min-[1100px]:size-full min-[1100px]:min-h-0"
-            >
+            <div className="pointer-events-none relative col-start-1 row-start-1 aspect-square w-[min(70vw,18rem)] justify-self-center min-[768px]:absolute min-[768px]:inset-0 min-[768px]:aspect-auto min-[768px]:w-auto min-[768px]:p-20 min-[1100px]:static min-[1100px]:col-start-2 min-[1100px]:row-start-1 min-[1100px]:size-full min-[1100px]:min-h-0">
               <div
                 data-triangle-container
                 aria-hidden="true"

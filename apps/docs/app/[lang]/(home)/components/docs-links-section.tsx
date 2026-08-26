@@ -34,6 +34,7 @@ export function DocsLinksSection() {
             key={href}
             href={`/[lang]${href}`}
             className={cn("interactive-card p-6")}
+            prefetch={false}
           >
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-pretty text-gray-1000">{title} →</h3>
@@ -46,7 +47,11 @@ export function DocsLinksSection() {
       </div>
       <p className="mt-6 text-pretty text-sm text-gray-900">
         Building agent tooling? Read the{" "}
-        <DynamicLink className="underline" href="/[lang]/docs/examples-api">
+        <DynamicLink
+          className="underline"
+          href="/[lang]/docs/examples-api"
+          prefetch={false}
+        >
           vgpu Examples API reference
         </DynamicLink>{" "}
         or inspect its{" "}
