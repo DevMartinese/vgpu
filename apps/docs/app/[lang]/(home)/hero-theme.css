@@ -55,15 +55,19 @@ body:has([data-hero-theme])
 }
 
 /* The Search / Ask AI buttons use the outline variant, whose light-mode fill
-   (`bg-background-100`) reads as an out-of-place white chip over the textured
-   hero. Drop the fill on the home route in light mode; hover still restores a
-   surface, and dark mode's translucent outline is left untouched. */
+   (`bg-background-100`) reads as an out-of-place solid white chip over the
+   textured hero. Soften it to 50% on the home route in light mode; hover still
+   restores a surface, and dark mode's translucent outline is left untouched. */
 html.light
   body:has([data-hero-theme])
   [data-geistdocs-container]
   > header
   [data-slot="button"] {
-  background-color: transparent;
+  background-color: color-mix(
+    in srgb,
+    var(--ds-background-100) 50%,
+    transparent
+  );
 }
 
 [data-hero-tabs-rule] {
