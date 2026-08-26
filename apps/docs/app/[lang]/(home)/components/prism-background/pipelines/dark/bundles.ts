@@ -23,7 +23,6 @@ export function recordDarkBackdropBundle(
       label: `${runtime.label}.dark-backdrop`,
     },
     (recorded) => {
-      recorded.draw(graph.wall);
       recorded.draw(graph.light, {
         firstVertex: 0,
         vertices: LIGHT_WHITE_VERTICES,

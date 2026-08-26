@@ -55,6 +55,7 @@ import {
   lightVertexCount,
 } from "./light-mesh";
 import { prismPlanes } from "./prism-mesh";
+import { darkWallClear } from "./pipelines/dark/wall-clear";
 import { schlickFresnelF0 } from "./runtime/uniforms";
 import { wallExtent } from "./scene";
 import {
@@ -423,6 +424,18 @@ test("renders the deterministic light once and idles until something changes", a
   expect(live.lightBuffer.write).toHaveBeenCalledOnce();
   expect(live.effects).toHaveLength(16);
   expect(live.draws).toHaveLength(7);
+  const darkDrawOptions = live.instance.fns.draw.mock.calls as unknown as [
+    Record<string, unknown>,
+  ][];
+  expect(darkDrawOptions.map(([options]) => options.label)).toEqual([
+    "prism-rainbow.light",
+    "prism-rainbow.wall",
+    "prism-rainbow.glass-back",
+    "prism-rainbow.glass-front",
+    "prism-rainbow.wireframe",
+    "prism-rainbow.light-wireframe",
+    "prism-rainbow.dust",
+  ]);
   expect(live.instance.fns.draw).toHaveBeenNthCalledWith(
     1,
     expect.objectContaining({
@@ -619,6 +632,26 @@ test("renders the deterministic light once and idles until something changes", a
     lightTexture: live.targets[9],
     lightSampler: expect.anything(),
   });
+  expect(
+    (
+      live.instance.fns.bundle.mock.results[0]?.value as {
+        commands: unknown[];
+      }
+    ).commands
+  ).toEqual([
+    partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
+    partialDraw(
+      live.draws[0],
+      LIGHT_OUTGOING_FIRST_VERTEX,
+      LIGHT_OUTGOING_VERTICES
+    ),
+    live.draws[2],
+    partialDraw(
+      live.draws[0],
+      LIGHT_INTERNAL_FIRST_VERTEX,
+      LIGHT_INTERNAL_VERTICES
+    ),
+  ]);
 
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
   tick(live.loopFrame);
@@ -629,9 +662,12 @@ test("renders the deterministic light once and idles until something changes", a
   // and the final copy-plus-dust output.
   expect(live.instance.fns.frame).toHaveBeenCalledTimes(15);
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(15);
+  expect(live.passOptions[0]).toEqual({
+    target: live.targets[0],
+    clear: darkWallClear(DEFAULT_PRISM_CONTROLS.wallColor, "glass"),
+  });
   expect(live.encodedPasses).toEqual([
     [
-      live.draws[1],
       partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
       partialDraw(
         live.draws[0],
@@ -935,12 +971,20 @@ test("the Pass A view keeps the sorted light around the environment-only back fa
   await renderer.ready;
   const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
 
-  renderer.setControls?.({ ...DEFAULT_PRISM_CONTROLS, view: "back" });
+  const controls = {
+    ...DEFAULT_PRISM_CONTROLS,
+    view: "back" as const,
+    wallColor: "#102080",
+  };
+  renderer.setControls?.(controls);
   tick(live.loopFrame);
 
+  expect(live.passOptions[0]).toEqual({
+    target: live.targets[0],
+    clear: darkWallClear(controls.wallColor, controls.view),
+  });
   expect(live.encodedPasses).toEqual([
     [
-      live.draws[1],
       partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
       partialDraw(
         live.draws[0],
@@ -972,6 +1016,44 @@ test("the Pass A view keeps the sorted light around the environment-only back fa
   renderer.dispose();
 });
 
+test("dark debug paths clear the wall without restoring its draw", async () => {
+  const env = browser();
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });
+  await renderer.ready;
+  const controls = {
+    ...DEFAULT_PRISM_CONTROLS,
+    view: "wall" as const,
+    wallColor: "#102080",
+  };
+  renderer.setControls?.(controls);
+
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  tick(live.loopFrame);
+
+  expect(live.passOptions[0]).toEqual({
+    target: live.targets[0],
+    clear: darkWallClear(controls.wallColor, controls.view),
+  });
+  expect(live.encodedPasses[0]).toEqual([]);
+
+  const wireframeControls = {
+    ...controls,
+    view: "glass" as const,
+    lightWireframe: true,
+  };
+  renderer.setControls?.(wireframeControls);
+  const nextPass = live.passOptions.length;
+  tick(live.loopFrame);
+  expect(live.passOptions[nextPass]).toEqual({
+    target: live.targets[0],
+    clear: darkWallClear(wireframeControls.wallColor, wireframeControls.view),
+  });
+  expect(live.encodedPasses[nextPass]).not.toContain(live.draws[1]);
+  renderer.dispose();
+});
+
 test("the light wireframe reveals every generated triangle in the light-only view", async () => {
   const env = browser();
   const live = gpu();
@@ -983,12 +1065,16 @@ test("the light wireframe reveals every generated triangle in the light-only vie
   renderer.setControls?.({
     ...DEFAULT_PRISM_CONTROLS,
     view: "caustic",
+    wallColor: "#ffffff",
     lightWireframe: true,
   });
   tick(live.loopFrame);
 
+  expect(live.passOptions[0]).toEqual({
+    target: live.targets[0],
+    clear: [0, 0, 0, 1],
+  });
   expect(live.encodedPasses[0]).toEqual([
-    live.draws[1],
     partialDraw(live.draws[0], 0, LIGHT_WHITE_VERTICES),
     partialDraw(
       live.draws[0],

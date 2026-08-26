@@ -16,6 +16,7 @@ import type {
 } from "../types";
 import { DUST_PARTICLE_COUNT } from "./create-graph";
 import type { DarkPipelineGraph } from "./types";
+import { darkWallClear } from "./wall-clear";
 
 export function renderDarkGraph(
   current: Frame,
@@ -150,7 +151,17 @@ function renderBackdrop(
     runtime.controls.view === "glass" || runtime.controls.view === "back";
   const showLight = runtime.controls.view !== "wall";
   current.pass(
-    profilePass({ target, clear: [0, 0, 0, 1] }, profile, "dark.backdrop"),
+    profilePass(
+      {
+        target,
+        clear: darkWallClear(
+          runtime.controls.wallColor,
+          runtime.controls.view
+        ),
+      },
+      profile,
+      "dark.backdrop"
+    ),
     (pass) => {
       if (
         runtime.controls.view === "glass" &&
@@ -160,7 +171,6 @@ function renderBackdrop(
         pass.bundles(graph.backdropBundle);
         return;
       }
-      pass.draw(graph.wall);
       if (showLight) {
         pass.draw(graph.light, {
           firstVertex: 0,
