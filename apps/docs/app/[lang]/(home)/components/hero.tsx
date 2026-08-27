@@ -60,7 +60,7 @@ export function Hero({ canvasEnabled }: HeroProps) {
             rest of the hero, but the content opts back IN. */}
           <div
             data-hero-overlay
-            className="pointer-events-none relative z-10 grid min-h-svh grid-cols-1 grid-rows-[auto_1fr] gap-8 px-6 pb-6 pt-24 min-[768px]:absolute min-[768px]:inset-0 min-[768px]:min-h-0 min-[768px]:grid-rows-1 min-[768px]:gap-0 min-[768px]:py-[clamp(3rem,8svh,6rem)] min-[768px]:justify-items-start min-[1100px]:grid-cols-[minmax(0,21em)_minmax(0,1fr)] min-[1100px]:gap-[clamp(2rem,5vw,5rem)]"
+            className="pointer-events-none relative z-10 grid min-h-svh grid-cols-1 grid-rows-[auto_1fr] gap-8 px-6 pb-6 pt-24 min-[768px]:absolute min-[768px]:inset-0 min-[768px]:min-h-0 min-[768px]:grid-rows-1 min-[768px]:gap-0 min-[768px]:py-[clamp(3rem,8svh,6rem)] min-[768px]:justify-items-start min-[1100px]:grid-cols-[minmax(0,26em)_minmax(0,1fr)] min-[1100px]:gap-[clamp(2rem,5vw,5rem)]"
           >
             <div className="pointer-events-auto relative z-10 col-start-1 row-start-2 flex h-full flex-col items-center self-start justify-self-center min-[768px]:row-start-1 min-[768px]:h-auto min-[768px]:items-start min-[768px]:self-center min-[768px]:justify-self-start min-[1100px]:col-start-1 min-[1100px]:row-start-1">
               <h1
@@ -80,7 +80,7 @@ export function Hero({ canvasEnabled }: HeroProps) {
               <p className="max-w-[10em] text-3xl text-balance text-center font-light leading-tight min-[768px]:text-left min-[768px]:text-4xl">
                 The WebGPU library, designed for agents.
               </p>
-              <div className="mt-auto w-full max-w-[21em] min-[768px]:mt-7">
+              <div className="mt-auto w-full max-w-[28em] min-[768px]:mt-7">
                 <HeroTabs />
               </div>
               <div
