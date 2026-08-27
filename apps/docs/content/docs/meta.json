@@ -1,7 +1,7 @@
 {
   "root": true,
   "title": "Documentation",
-  "description": "Documentation for vgpu, the WebGPU library designed for agents.",
+  "description": "Build WebGPU applications for browsers, Node.js, and automated workflows.",
   "pages": [
     "get-started",
     "concepts",
