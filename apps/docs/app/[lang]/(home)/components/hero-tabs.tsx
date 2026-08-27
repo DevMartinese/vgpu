@@ -7,15 +7,21 @@ import { InlineCode, stripBackticks } from "./inline-code";
 
 /** `mono` distinguishes terminal commands from the natural-language prompt. */
 const tabContent = {
-  Prompt: { text: "Setup vgpu on my project, run `npx vgpu`", mono: false },
-  CLI: { text: "`pnpm add vgpu`", mono: true },
+  Prompt: {
+    text: "Setup vgpu on my project, run `npx vgpu`",
+    mono: false,
+    wrap: false,
+  },
+  CLI: { text: "`pnpm add vgpu`", mono: true, wrap: false },
   Skill: {
     text: "`npx skills add vercel-labs/vgpu`",
     mono: true,
+    wrap: false,
   },
   MCP: {
     text: "`npx -y add-mcp https://vgpu.sh/api/mcp -g`",
     mono: true,
+    wrap: true,
   },
 } as const;
 
@@ -193,6 +199,7 @@ export function HeroTabs() {
                 <InlineCode
                   text={tabContent[tab].text}
                   mono={tabContent[tab].mono}
+                  wrap={tabContent[tab].wrap}
                 />
               </span>
             );
