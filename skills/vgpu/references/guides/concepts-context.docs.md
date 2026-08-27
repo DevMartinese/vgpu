@@ -12,8 +12,8 @@ prevNext:
     title: Node.js
     href: /get-started/node
   next:
-    title: Draws
-    href: /concepts/draws
+    title: WGSL modules
+    href: /concepts/wgsl-modules
 order: 10
 ---
 

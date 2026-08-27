@@ -124,6 +124,7 @@
           "title": "",
           "items": [
             { "title": "Context", "href": "/concepts/context" },
+            { "title": "WGSL modules", "href": "/concepts/wgsl-modules" },
             { "title": "Draws", "href": "/concepts/draws" },
             { "title": "Compilation", "href": "/concepts/compilation" },
             { "title": "Effects", "href": "/concepts/effects" },

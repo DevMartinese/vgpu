@@ -7,6 +7,8 @@ description: "Wire the WGSL loader into Next.js (Turbopack or webpack) or Vite, 
 
 This guide is the bundler half of [Getting started](getting-started.docs.md): install, loader config, TypeScript types for `.wgsl` imports, and the client component that owns the canvas.
 
+New to shader imports? Read [WGSL modules](/concepts/wgsl-modules) first for the `import`/`export` syntax, pure-module rule, and what vgpu emits. This page focuses on wiring that model into a bundler.
+
 ## Install
 
 ```sh
