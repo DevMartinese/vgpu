@@ -20,13 +20,11 @@ order: 15
 
 # WGSL modules
 
-WGSL itself has no standard module system. vgpu adds `import` and `export` while you author a shader, resolves the complete module graph during build or setup, and emits ordinary WGSL before WebGPU sees it.
-
-Use modules to keep shared functions, structs, aliases, and constants in focused files instead of copying them between entry shaders.
+A reusable WGSL module exports declarations. The entry shader imports them, and TypeScript imports only the entry.
 
 ## Split a shader into modules
 
-Start with a reusable function in `color.wgsl`:
+Create a reusable WGSL module:
 
 ```wgsl
 // color.wgsl
@@ -35,7 +33,7 @@ export fn gradient(uv: vec2f) -> vec3f {
 }
 ```
 
-Import it by name from the entry shader:
+Import it by name from the WGSL entry:
 
 ```wgsl
 // shader.wgsl
@@ -47,7 +45,7 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
 }
 ```
 
-With the webpack, Turbopack, or Vite integration configured, import only the entry file from TypeScript. The loader follows its WGSL imports and returns one `ShaderSource` object for vgpu:
+Import the entry shader from TypeScript:
 
 ```ts
 import { effect, init, surface } from "vgpu";
@@ -178,7 +176,11 @@ This means two modules can export a helper with the same name without colliding,
 
 Module resolution happens during build or setup, never inside the render loop. Bundler integrations return a `ShaderSource`; direct `resolveShader()` calls return a `ResolvedShader` whose `.wgsl` field is the finished string.
 
-## Choose how to resolve modules
+## Configure module resolution
+
+WGSL itself has no standard module system. vgpu adds `import` and `export` while you author a shader, resolves the complete module graph during build or setup, and emits ordinary WGSL before WebGPU sees it.
+
+With the webpack, Turbopack, or Vite integration configured, import only the entry file from TypeScript. The loader follows its WGSL imports and returns one `ShaderSource` object for vgpu.
 
 | Environment | Use | Read next |
 | --- | --- | --- |
