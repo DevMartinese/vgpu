@@ -76,6 +76,14 @@
       "perf",
       "edit",
       "..."
+    ],
+    "@vgpu/adapter-node": [
+      "create-node-adapter",
+      "..."
+    ],
+    "vgpu/mock": [
+      "create-mock-adapter",
+      "..."
     ]
   },
   "guideGroups": [
