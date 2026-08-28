@@ -11,6 +11,10 @@
       "..."
     ],
     "topicOrder": {
+      "@vgpu/adapter-node": [
+        "create-node-adapter",
+        "..."
+      ],
       "@vgpu/render": [
         "wireframe-material",
         "normal-debug-material",
@@ -64,6 +68,10 @@
         "uniform",
         "structured-uniform",
         "uniform-pool",
+        "..."
+      ],
+      "vgpu/mock": [
+        "create-mock-adapter",
         "..."
       ],
       "vgpu/scene": [
