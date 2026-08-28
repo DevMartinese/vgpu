@@ -1,9 +1,7 @@
 ---
 title: "WGSL modules"
-description: "Split shaders into reusable WGSL files with import and export; vgpu resolves the graph, preserves entry-point and binding names, and removes unused declarations."
+description: "Split shaders into reusable WGSL files with import and export; vgpu resolves the graph, preserves entry-point and binding names, removes unused declarations, and can minify the emitted WGSL."
 ---
-
-A reusable WGSL module exports declarations. The entry shader imports them, and TypeScript imports only the entry.
 
 ## Split a shader into modules
 
