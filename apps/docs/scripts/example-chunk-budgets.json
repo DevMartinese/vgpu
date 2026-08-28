@@ -27,7 +27,8 @@
     "nextjs-flare": 74593,
     "depth-estimation": 65647,
     "mnist-classifier": 63571,
-    "air-painting": 71822
+    "air-painting": 71822,
+    "boot-void": 160967
   },
   "exampleGrowth": {
     "percent": 2,
