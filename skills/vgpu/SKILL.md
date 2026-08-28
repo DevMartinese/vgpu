@@ -6,8 +6,8 @@ description: >-
   and /perf only as slim tooling subpaths. Bundles performance guides and the API
   reference; load one doc at a time.
 vgpuVersion: 0.3.1
-gitSha: db7f79df3f95dea9bc7d3f206b9c7359baaa8313
-generatedAt: 2026-08-28T17:12:19.994Z
+gitSha: b667512ade13b3dd946be11cf68e93b381d3b4cf
+generatedAt: 2026-08-28T17:34:48.547Z
 ---
 
 # vgpu
@@ -28,7 +28,7 @@ npx -y vgpu docs cat <symbol>    # print one doc, e.g. `cat Frame`, `cat perform
 ## Core concepts
 
 - **Context** — Everything in vgpu starts from one call.  `references/guides/concepts-context.docs.md`
-- **WGSL modules** — Create a reusable WGSL module:  `references/guides/concepts-wgsl-modules.docs.md`
+- **WGSL modules** — With the wgsl loader, you can create reusable shader modules:  `references/guides/concepts-wgsl-modules.docs.md`
 - **Draws** — A Draw renders geometry with custom vertex buffers: you write both the vertex and the fragment stage, and a geometry supplies the buffers.  `references/guides/concepts-draws.docs.md`
 - **Compilation** — Pipelines compile lazily: the first draw() against a new target pays the pipeline creation cost, and that cost lands inside your frame.  `references/guides/concepts-compilation.docs.md`
 - **Effects** — An Effect is a full-screen fragment shader created with effect(gpu, source).  `references/guides/concepts-effects.docs.md`

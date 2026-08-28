@@ -22,7 +22,7 @@ order: 15
 
 ## Split a shader into modules
 
-Create a reusable WGSL module:
+With the wgsl loader, you can create reusable shader modules:
 
 ```wgsl
 // color.wgsl
@@ -31,7 +31,7 @@ export fn gradient(uv: vec2f) -> vec3f {
 }
 ```
 
-Import it by name from the WGSL entry:
+Then, import it by name from other wgsl files:
 
 ```wgsl
 // shader.wgsl
@@ -64,11 +64,12 @@ Imported modules are pure: they cannot declare `@group` or `@binding` resources.
 This module is invalid:
 
 ```wgsl
-// noise.wgsl — invalid imported module
+// noise.wgsl
 struct NoiseConfig {
   seed: f32,
 }
 
+// Error: VGPU-RESOLVE-MODULE-BINDING
 @group(0) @binding(0) var<uniform> noise_config: NoiseConfig;
 ```
 
