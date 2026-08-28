@@ -6,6 +6,12 @@ export type PrismOutput = Surface | Target;
 
 export type PrismPipelineMode = PrismTheme;
 
+/** User-facing theme choice; auto resolves against the site's active theme. */
+export type PrismThemePreference = "auto" | PrismPipelineMode;
+
+/** Render-budget tier. Both tiers intentionally share an implementation today. */
+export type PrismPipelineQuality = "high" | "low";
+
 export interface PrismPipelineRenderOptions {
   /** Skip retained scene/postprocess passes when only an overlay animates. */
   readonly updateScene?: boolean;

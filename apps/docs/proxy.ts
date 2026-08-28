@@ -24,7 +24,7 @@ const rewriteHomepageVariant: GeistdocsProxyHook = async ({
         );
 
   // Open-source checkouts do not have the signing secret. In that case the
-  // regular homepage remains the safe, canvas-disabled fallback.
+  // regular homepage renders the globally released canvas directly.
   if (!language || !process.env.FLAGS_SECRET) return null;
 
   // The signed value becomes part of the internal URL, so each variant keeps

@@ -24,7 +24,11 @@ import "@xyflow/react/dist/style.css";
 import "./debug-graph.css";
 
 import type { PrismDebugSource } from "../../pipelines/types";
-import type { PrismPipelineMode } from "../../pipelines/types";
+import type {
+  PrismPipelineMode,
+  PrismPipelineQuality,
+  PrismThemePreference,
+} from "../../pipelines/types";
 import type { PrismControls } from "../../types";
 import {
   NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
@@ -52,7 +56,11 @@ export interface PrismDebugGraphProps {
   readonly controls: PrismControls;
   readonly mode: PrismPipelineMode;
   onControlsChange(updater: PrismControlsUpdater): void;
+  onQualityChange(quality: PrismPipelineQuality): void;
+  onThemeChange(theme: PrismThemePreference): void;
+  readonly quality: PrismPipelineQuality;
   readonly sources?: readonly PrismDebugSource[];
+  readonly theme: PrismThemePreference;
 }
 
 /** Interactive observer UI. Import this module only from the `?debug` branch. */
@@ -62,7 +70,11 @@ export function PrismDebugGraph({
   controls,
   mode,
   onControlsChange,
+  onQualityChange,
+  onThemeChange,
+  quality,
   sources = debugSourcesForMode(mode),
+  theme,
 }: PrismDebugGraphProps) {
   const baseModel = useMemo(
     () => createDebugGraphModel(sources, bridge, mode),
@@ -105,7 +117,11 @@ export function PrismDebugGraph({
             dock={popout.dock}
             mode={mode}
             model={model}
+            onQualityChange={onQualityChange}
+            onThemeChange={onThemeChange}
+            quality={quality}
             rememberViewport={rememberViewport}
+            theme={theme}
             viewportRef={viewportRef}
           />
         </DebugPopoutPortal>
@@ -116,7 +132,11 @@ export function PrismDebugGraph({
           mode={mode}
           model={model}
           open={popout.open}
+          onQualityChange={onQualityChange}
+          onThemeChange={onThemeChange}
+          quality={quality}
           rememberViewport={rememberViewport}
+          theme={theme}
           viewportRef={viewportRef}
         />
       )}
@@ -132,7 +152,11 @@ interface GraphSurfaceProps {
   readonly mode: PrismPipelineMode;
   readonly model: ReturnType<typeof createDebugGraphModel>;
   open?(): void;
+  onQualityChange(quality: PrismPipelineQuality): void;
+  onThemeChange(theme: PrismThemePreference): void;
+  readonly quality: PrismPipelineQuality;
   readonly rememberViewport: OnMove;
+  readonly theme: PrismThemePreference;
   readonly viewportRef: RefObject<Viewport>;
 }
 
@@ -144,7 +168,11 @@ function GraphSurface({
   mode,
   model,
   open,
+  onQualityChange,
+  onThemeChange,
+  quality,
   rememberViewport,
+  theme,
   viewportRef,
 }: GraphSurfaceProps) {
   return (
@@ -162,6 +190,12 @@ function GraphSurface({
         <span>live controls + GPU observer</span>
       </div>
       <div className="prism-debug-graph__actions">
+        <PipelineSelectors
+          onQualityChange={onQualityChange}
+          onThemeChange={onThemeChange}
+          quality={quality}
+          theme={theme}
+        />
         <CopyChangesButton baseline={baselineControls} mode={mode} />
         {detached ? (
           <button onClick={dock} type="button">
@@ -220,6 +254,50 @@ function GraphSurface({
         <FlowControls position="bottom-left" showInteractive={false} />
       </ReactFlow>
     </section>
+  );
+}
+
+function PipelineSelectors({
+  onQualityChange,
+  onThemeChange,
+  quality,
+  theme,
+}: {
+  onQualityChange(quality: PrismPipelineQuality): void;
+  onThemeChange(theme: PrismThemePreference): void;
+  readonly quality: PrismPipelineQuality;
+  readonly theme: PrismThemePreference;
+}) {
+  return (
+    <div className="prism-debug-graph__selectors">
+      <label>
+        <span>Theme</span>
+        <select
+          aria-label="Prism pipeline theme"
+          onChange={(event) =>
+            onThemeChange(event.currentTarget.value as PrismThemePreference)
+          }
+          value={theme}
+        >
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label>
+        <span>Quality</span>
+        <select
+          aria-label="Prism pipeline quality"
+          onChange={(event) =>
+            onQualityChange(event.currentTarget.value as PrismPipelineQuality)
+          }
+          value={quality}
+        >
+          <option value="high">High</option>
+          <option value="low">Low</option>
+        </select>
+      </label>
+    </div>
   );
 }
 

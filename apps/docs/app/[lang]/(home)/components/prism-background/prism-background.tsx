@@ -9,7 +9,12 @@ import {
   useState,
 } from "react";
 import { createRenderer, type PrismRenderer } from "./renderer";
-import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
+import type {
+  PrismDebugSource,
+  PrismPipelineMode,
+  PrismPipelineQuality,
+  PrismThemePreference,
+} from "./pipelines/types";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
 import type { PrismControlsUpdater } from "./debug/graph/control-context";
 import { preloadLightAssets } from "./assets/light/preload";
@@ -33,6 +38,13 @@ function currentPrismMode(): PrismPipelineMode {
     : "dark";
 }
 
+export function resolvePrismMode(
+  preference: PrismThemePreference,
+  siteMode: PrismPipelineMode
+): PrismPipelineMode {
+  return preference === "auto" ? siteMode : preference;
+}
+
 interface PrismBackgroundProps {
   readonly enabled: boolean;
 }
@@ -47,6 +59,9 @@ function PrismCanvas() {
   const rendererRef = useRef<PrismRenderer | null>(null);
   const controlsRef = useRef<PrismControls>(DEFAULT_PRISM_CONTROLS);
   const controlsFrameRef = useRef(0);
+  const themePreferenceRef = useRef<PrismThemePreference>("auto");
+  const qualityRef = useRef<PrismPipelineQuality>("high");
+  const requestedModeRef = useRef<PrismPipelineMode>("dark");
   const [showDebug, setShowDebug] = useState(false);
   const [debugSources, setDebugSources] = useState<
     readonly PrismDebugSource[] | undefined
@@ -57,6 +72,9 @@ function PrismCanvas() {
   const [debugBaselineControls, setDebugBaselineControls] =
     useState<PrismControls>(DEFAULT_PRISM_CONTROLS);
   const [debugMode, setDebugMode] = useState<PrismPipelineMode>("dark");
+  const [debugTheme, setDebugTheme] = useState<PrismThemePreference>("auto");
+  const [debugQuality, setDebugQuality] =
+    useState<PrismPipelineQuality>("high");
   const reportError = useCallback((error: unknown) => {
     console.error("Prism background failed to render.", error);
   }, []);
@@ -71,6 +89,65 @@ function PrismCanvas() {
       rendererRef.current?.setControls?.(controlsRef.current);
     });
   }, []);
+  const activateMode = useCallback((mode: PrismPipelineMode) => {
+    requestedModeRef.current = mode;
+    if (mode === "light") preloadLightAssets();
+    preloadPrismPipeline(mode);
+    const wallColor = PRISM_WALL_COLOR[mode];
+    setDebugBaselineControls((current) =>
+      current.wallColor === wallColor
+        ? current
+        : { ...DEFAULT_PRISM_CONTROLS, wallColor }
+    );
+    if (wallColor !== controlsRef.current.wallColor) {
+      const nextControls = { ...controlsRef.current, wallColor };
+      controlsRef.current = nextControls;
+      setDebugControls(nextControls);
+      rendererRef.current?.setControls?.(nextControls);
+    }
+    const renderer = rendererRef.current;
+    if (!renderer) {
+      setDebugMode(mode);
+      return;
+    }
+    void renderer.setMode(mode).then(
+      () => {
+        if (
+          rendererRef.current !== renderer ||
+          requestedModeRef.current !== mode
+        )
+          return;
+        setDebugMode(mode);
+        setDebugSources(renderer.debugSources());
+      },
+      () => {
+        // The renderer reports mode preparation failures through onError.
+      }
+    );
+  }, []);
+  const selectDebugTheme = useCallback(
+    (preference: PrismThemePreference) => {
+      themePreferenceRef.current = preference;
+      setDebugTheme(preference);
+      activateMode(resolvePrismMode(preference, currentPrismMode()));
+    },
+    [activateMode]
+  );
+  const selectDebugQuality = useCallback((quality: PrismPipelineQuality) => {
+    qualityRef.current = quality;
+    setDebugQuality(quality);
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    void renderer.setQuality(quality).then(
+      () => {
+        if (rendererRef.current === renderer && qualityRef.current === quality)
+          setDebugSources(renderer.debugSources());
+      },
+      () => {
+        // The renderer reports quality preparation failures through onError.
+      }
+    );
+  }, []);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -84,6 +161,7 @@ function PrismCanvas() {
     const initialMode = currentPrismMode();
     if (initialMode === "light") preloadLightAssets();
     preloadPrismPipeline(initialMode);
+    requestedModeRef.current = initialMode;
     setDebugMode(initialMode);
     const hero = canvas.closest<HTMLElement>("[data-hero-theme]");
     const framingElement = hero?.querySelector<HTMLElement>(
@@ -100,6 +178,7 @@ function PrismCanvas() {
       canvas,
       framingElement: framingElement ?? undefined,
       initialMode,
+      initialQuality: qualityRef.current,
       initialControls,
       debugPreviews,
       performanceSampling,
@@ -121,31 +200,8 @@ function PrismCanvas() {
         setDebugSources(renderer.debugSources());
     };
     const syncTheme = () => {
-      const mode = currentPrismMode();
-      if (mode === "light") preloadLightAssets();
-      preloadPrismPipeline(mode);
-      const wallColor = PRISM_WALL_COLOR[mode];
-      setDebugBaselineControls((current) =>
-        current.wallColor === wallColor
-          ? current
-          : { ...DEFAULT_PRISM_CONTROLS, wallColor }
-      );
-      if (wallColor !== controlsRef.current.wallColor) {
-        const nextControls = { ...controlsRef.current, wallColor };
-        controlsRef.current = nextControls;
-        setDebugControls(nextControls);
-        renderer.setControls?.(nextControls);
-      }
-      void renderer.setMode(mode).then(
-        () => {
-          if (rendererRef.current !== renderer) return;
-          setDebugMode(mode);
-          syncDebugSources();
-        },
-        () => {
-          // The renderer reports mode preparation failures through onError.
-        }
-      );
+      if (themePreferenceRef.current !== "auto") return;
+      activateMode(currentPrismMode());
     };
     const themeObserver = new MutationObserver(syncTheme);
     themeObserver.observe(document.documentElement, {
@@ -164,7 +220,7 @@ function PrismCanvas() {
       rendererRef.current = null;
       renderer.dispose();
     };
-  }, [reportError]);
+  }, [activateMode, reportError]);
 
   return (
     <div data-prism-background className="absolute inset-0 overflow-hidden">
@@ -181,7 +237,11 @@ function PrismCanvas() {
             controls={debugControls}
             mode={debugMode}
             onControlsChange={updateControls}
+            onQualityChange={selectDebugQuality}
+            onThemeChange={selectDebugTheme}
+            quality={debugQuality}
             sources={debugSources}
+            theme={debugTheme}
           />
         </Suspense>
       ) : null}

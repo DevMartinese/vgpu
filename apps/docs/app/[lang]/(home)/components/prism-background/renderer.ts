@@ -22,7 +22,11 @@ import type { PrismDebugPreviewHost } from "./debug/gpu";
 import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
 import { createPrismPipelineController } from "./pipeline-controller";
 import { heroRevealProgress } from "./pipelines/presentation";
-import type { PrismDebugSource, PrismPipelineMode } from "./pipelines/types";
+import type {
+  PrismDebugSource,
+  PrismPipelineMode,
+  PrismPipelineQuality,
+} from "./pipelines/types";
 import {
   automaticPointerPosition,
   createPrismInteraction,
@@ -60,6 +64,7 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
   readonly debugBridge: PrismDebugPreviewBridge;
   debugSources(): readonly PrismDebugSource[];
   setMode(mode: PrismPipelineMode): Promise<void>;
+  setQuality(quality: PrismPipelineQuality): Promise<void>;
   /** Available only when the renderer was created for `?prism-perf`. */
   measurePerformance(
     options?: PrismPerformanceRunOptions
@@ -94,6 +99,8 @@ export interface PrismBrowserRendererOptions
   readonly framingElement?: HTMLElement;
   /** Explicit theme selected by the React integration layer. */
   readonly initialMode: PrismPipelineMode;
+  /** Explicit render-budget tier; defaults to the full-quality pipeline. */
+  readonly initialQuality?: PrismPipelineQuality;
   /** Loads preview-only WebGPU code; must only be enabled for `?debug`. */
   readonly debugPreviews?: boolean;
   /** Dynamically loads the deterministic sampler for `?prism-perf`. */
@@ -123,6 +130,7 @@ export function createRenderer(
   let debugHost: PrismDebugPreviewHost | undefined;
   let performanceSampler: PrismPerformanceSampler | undefined;
   let requestedMode = options.initialMode;
+  let requestedQuality = options.initialQuality ?? "high";
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
   let visibilityObserver: IntersectionObserver | undefined;
@@ -479,6 +487,7 @@ export function createRenderer(
       runtime,
       output: canvasSurface,
       initialMode: requestedMode,
+      initialQuality: requestedQuality,
       onActivate: () => {
         pendingPresent = true;
         lastDustTime = -1;
@@ -576,6 +585,25 @@ export function createRenderer(
         // The controller deliberately retains the previous active pipeline
         // when a candidate module or prepare fails. Report and reject the
         // switch without tearing that valid renderer down.
+        reportRecoverableFailure(error);
+        throw error;
+      }
+    },
+    async setQuality(quality) {
+      if (disposed) return;
+      requestedQuality = quality;
+      if (!pipelineController) {
+        await ready;
+        return;
+      }
+      try {
+        await pipelineController.setQuality(quality);
+        if (disposed) return;
+        pendingPresent = true;
+        lastDustTime = -1;
+        debugHost?.invalidate();
+      } catch (error) {
+        if (disposed) return;
         reportRecoverableFailure(error);
         throw error;
       }

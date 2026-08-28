@@ -1,7 +1,12 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { createPrismPipelineController } from "../pipeline-controller";
-import type { PrismOutput, PrismPipeline, PrismPipelineMode } from "../pipelines/types";
+import type {
+  PrismOutput,
+  PrismPipeline,
+  PrismPipelineMode,
+  PrismPipelineQuality,
+} from "../pipelines/types";
 import type { PrismRuntime } from "../runtime/types";
 
 const output = { size: [320, 180] } as unknown as PrismOutput;
@@ -24,17 +29,45 @@ describe("async prism pipeline controller", () => {
       });
 
       expect(factory).toHaveBeenCalledOnce();
-      expect(factory).toHaveBeenCalledWith(mode, runtime);
+      expect(factory).toHaveBeenCalledWith(mode, "high", runtime);
       expect(controller.pipeline).toBeUndefined();
       module.resolve(candidate.value);
       await controller.ready;
 
       expect(candidate.prepare).toHaveBeenCalledWith(output);
       expect(controller.pipeline).toBe(candidate.value);
-      expect(onActivate).toHaveBeenCalledWith(mode);
+      expect(onActivate).toHaveBeenCalledWith(mode, "high");
       controller.destroy();
     }
   );
+
+  test("replaces the active pipeline when the requested quality changes", async () => {
+    const high = pipeline("dark");
+    const low = pipeline("dark");
+    const factory = vi.fn(
+      (_mode: PrismPipelineMode, quality: PrismPipelineQuality) =>
+        quality === "high" ? high.value : low.value
+    );
+    const onActivate = vi.fn();
+    const controller = createPrismPipelineController({
+      runtime,
+      output,
+      initialMode: "dark",
+      createPipeline: factory,
+      onActivate,
+    });
+    await controller.ready;
+
+    expect(controller.quality).toBe("high");
+    await controller.setQuality("low");
+
+    expect(factory).toHaveBeenLastCalledWith("dark", "low", runtime);
+    expect(controller.pipeline).toBe(low.value);
+    expect(controller.quality).toBe("low");
+    expect(high.destroy).toHaveBeenCalledOnce();
+    expect(onActivate).toHaveBeenLastCalledWith("dark", "low");
+    controller.destroy();
+  });
 
   test("keeps the active pipeline through module load and candidate prepare", async () => {
     const lightModule = deferred<PrismPipeline>();
