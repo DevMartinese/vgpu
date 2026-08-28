@@ -59,46 +59,6 @@ const output = surface(gpu, canvas);
 effect(gpu, shader).draw(output);
 ```
 
-The default export is `{ version: 1, wgsl: string }`, not a bare string. Pass it directly to `effect()` or `draw({ shader })`; do not reach into `.wgsl` yourself.
-
-## Export declarations and import names
-
-Imported modules commonly export:
-
-- functions;
-- structs;
-- type aliases;
-- constants.
-
-Attach `export` directly to each declaration. Import only the names the entry needs:
-
-```wgsl
-// lighting.wgsl
-export const MIN_LIGHT: f32 = 0.15;
-
-export struct LightSample {
-  color: vec3f,
-  intensity: f32,
-}
-
-export fn apply_light(base: vec3f, light: LightSample) -> vec3f {
-  return base * light.color * max(light.intensity, MIN_LIGHT);
-}
-```
-
-```wgsl
-import { LightSample, apply_light } from "./lighting.wgsl";
-```
-
-Use `as` when two modules expose the same name:
-
-```wgsl
-import { sample as sample_noise } from "./noise.wgsl";
-import { sample as sample_texture } from "./texture.wgsl";
-```
-
-Imports must come before every WGSL declaration. vgpu rejects default imports, side-effect-only imports, re-export lists, and cyclic module graphs so the dependency graph stays explicit.
-
 ## Keep resources in the entry module
 
 Imported modules are pure: they cannot declare `@group` or `@binding` resources. A shared module does not own the bind-group layout of every shader that consumes it.
