@@ -36,15 +36,18 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
       let ray = spectralQuad / scene.lightInternalSegments;
       let wavelength = ray / scene.lightBeamSlices;
       let profile = ray % scene.lightBeamSlices;
-      // The full 128 x 24 internal grid is denser than a pixel.
-      if wavelength % 8u != 0u || profile % 6u != 0u {
+      let wavelengthStride = max(1u, scene.lightSpectralSamples / 16u);
+      let profileStride = max(1u, scene.lightBeamSlices / 4u);
+      if wavelength % wavelengthStride != 0u || profile % profileStride != 0u {
         discard;
       }
     } else {
       let outgoingCell = spectralQuad - scene.lightInternalQuads;
       let interval = outgoingCell / scene.lightBeamSlices;
       let profile = outgoingCell % scene.lightBeamSlices;
-      if interval % 8u != 0u || profile % 6u != 0u {
+      let wavelengthStride = max(1u, scene.lightSpectralSamples / 16u);
+      let profileStride = max(1u, scene.lightBeamSlices / 4u);
+      if interval % wavelengthStride != 0u || profile % profileStride != 0u {
         discard;
       }
     }

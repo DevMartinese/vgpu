@@ -14,6 +14,7 @@ export struct Scene {
   /** Fixed layout metadata used to decimate the debug wireframe. */
   lightWhiteQuads: u32,
   lightBeamSlices: u32,
+  lightSpectralSamples: u32,
   lightInternalQuads: u32,
   lightInternalSegments: u32,
   /** User-controlled lateral and outgoing-distance falloff strengths. */

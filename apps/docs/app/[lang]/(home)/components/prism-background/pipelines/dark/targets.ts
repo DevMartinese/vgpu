@@ -1,16 +1,19 @@
 import type { Target } from "vgpu";
 import { target } from "vgpu";
 
-import { BLOOM_LEVEL_DIVISORS, BLOOM_LEVELS } from "../../bloom";
+import { BLOOM_LEVEL_DIVISORS } from "../../bloom";
 import { bloomFormatForLevel } from "../../capabilities";
 import type { PrismRuntime } from "../../runtime/types";
+import { darkBloomLevelCountForQuality } from "../quality";
+import type { PrismPipelineQuality } from "../types";
 import type { BloomTargets, DarkPipelineGraph } from "./types";
 
 export function ensureDarkTargets(
   graph: DarkPipelineGraph,
   runtime: PrismRuntime,
   size: readonly [number, number],
-  outputFormat: GPUTextureFormat
+  outputFormat: GPUTextureFormat,
+  quality: PrismPipelineQuality = "high"
 ): void {
   graph.backgroundTarget ??= target(runtime.gpu, {
     size,
@@ -20,12 +23,16 @@ export function ensureDarkTargets(
   graph.sceneTarget ??= target(runtime.gpu, {
     size,
     format: "rgba16float",
-    msaa: runtime.gpu.device.isCompatibilityMode ? undefined : true,
+    msaa:
+      quality === "high" && !runtime.gpu.device.isCompatibilityMode
+        ? true
+        : undefined,
     label: `${runtime.label}.pass-b-front-glass`,
   });
-  graph.bloomTargets ??= Array.from({ length: BLOOM_LEVELS }, (_, level) =>
-    bloomLevelTargets(runtime, size, level)
-  ) as unknown as BloomTargets;
+  graph.bloomTargets ??= Array.from(
+    { length: darkBloomLevelCountForQuality(quality) },
+    (_, level) => bloomLevelTargets(runtime, size, level)
+  ) as BloomTargets;
   graph.presentationTarget ??= target(runtime.gpu, {
     size,
     format: outputFormat,

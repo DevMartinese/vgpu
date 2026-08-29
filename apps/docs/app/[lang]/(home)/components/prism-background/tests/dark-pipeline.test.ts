@@ -5,6 +5,7 @@ import { PRISM_DARK_DEBUG_SOURCE_IDS } from "../debug/sources";
 import type { EnvironmentTexture } from "../environment-texture";
 import { createDarkPipeline } from "../pipelines/dark";
 import { createPrismRuntime, destroyPrismRuntime } from "../runtime/resources";
+import { LOW_LIGHT_MESH_LAYOUT } from "../pipelines/quality";
 
 describe("dark pipeline debug targets", () => {
   test("falls back to single-sample HDR targets in compatibility mode", async () => {
@@ -27,6 +28,61 @@ describe("dark pipeline debug targets", () => {
       await pipeline.prepare(output);
       expect(pipeline.targets.backdropHDR?.sampleCount).toBe(1);
       expect(pipeline.targets.sceneHDR?.sampleCount).toBe(1);
+    } finally {
+      pipeline.destroy();
+      destroyPrismRuntime(runtime);
+      gpu.dispose();
+    }
+  });
+
+  test("removes far bloom and dedicated particle lighting in low quality", async () => {
+    const gpu = await init();
+    const runtime = createPrismRuntime(gpu, [24, 16], "dark-low-test");
+    const output = target(gpu, { size: [24, 16], format: "rgba8unorm" });
+    const pipeline = createDarkPipeline(runtime, { quality: "low" });
+    runtime.studioEnvironment = {
+      texture: gpu.device.createTexture({
+        size: [2, 1],
+        format: "rgba16float",
+        usage: ["texture_binding", "copy_dst"],
+      }),
+      prepared: true,
+    } as EnvironmentTexture;
+    runtime.environmentReady = Promise.resolve();
+
+    try {
+      await pipeline.prepare(output);
+      expect(pipeline.lightMeshLayout).toBe(LOW_LIGHT_MESH_LAYOUT);
+      expect(pipeline.targets.backdropHDR?.sampleCount).toBe(1);
+      expect(pipeline.targets.sceneHDR?.sampleCount).toBe(1);
+      expect(pipeline.debugTarget("dark-bloom-0")).toBeDefined();
+      expect(pipeline.debugTarget("dark-bloom-1")).toBeDefined();
+      expect(pipeline.debugTarget("dark-bloom-2")).toBeUndefined();
+      expect(pipeline.debugTarget("dark-particle-light")).toBeUndefined();
+      const profiledPasses: string[] = [];
+      pipeline.bind(0);
+      frame(gpu, (currentFrame) =>
+        pipeline.render(currentFrame, output, {
+          profile: {
+            pass(name) {
+              profiledPasses.push(name);
+              return undefined;
+            },
+          },
+        })
+      );
+      expect(profiledPasses).toEqual([
+        "dark.backdrop",
+        "dark.scene",
+        "dark.bloom.extract",
+        "dark.bloom.0.horizontal",
+        "dark.bloom.0.vertical",
+        "dark.bloom.1.horizontal",
+        "dark.bloom.1.vertical",
+        "dark.bloom.composite",
+        "dark.present-cache",
+        "dark.output",
+      ]);
     } finally {
       pipeline.destroy();
       destroyPrismRuntime(runtime);

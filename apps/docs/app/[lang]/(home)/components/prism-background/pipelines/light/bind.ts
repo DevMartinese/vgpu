@@ -41,17 +41,25 @@ export function bindLightGraph(
   const debug = runtime.debugEnvironment ?? studio;
   ensureLightWireframeDraws(graph, runtime);
   const glassParams = glassUniforms(runtime, "light");
-  graph.wall.set({
-    params: lightWallUniforms(runtime),
-    wallMaterial: assets.wallMaterial,
-    wallLighting: assets.wallLighting,
-    materialSampler: graph.materialSampler,
-  });
+  graph.wall.set(
+    graph.simplifiedWall
+      ? {
+          params: lightWallUniforms(runtime),
+          wallLighting: assets.wallLighting,
+          materialSampler: graph.materialSampler,
+        }
+      : {
+          params: lightWallUniforms(runtime),
+          wallMaterial: assets.wallMaterial,
+          wallLighting: assets.wallLighting,
+          materialSampler: graph.materialSampler,
+        }
+  );
   graph.prismShadow.set({
     shadow: prismShadowUniforms(runtime.view.viewProjection),
   });
   graph.caustic.set({
-    scene: sceneUniforms(runtime, beamWidthReveal),
+    scene: sceneUniforms(runtime, beamWidthReveal, graph.lightMeshLayout),
     caustic: lightCausticUniforms(runtime),
     causticProfile: assets.causticProfile,
     causticSampler: graph.materialSampler,
@@ -83,7 +91,7 @@ export function bindLightGraph(
     params: { viewProjection: runtime.view.viewProjection },
   });
   graph.lightWireframe?.set({
-    scene: sceneUniforms(runtime, beamWidthReveal),
+    scene: sceneUniforms(runtime, beamWidthReveal, graph.lightMeshLayout),
   });
   graph.present.set({
     sceneTexture: scene,

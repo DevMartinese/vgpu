@@ -1,5 +1,6 @@
 import type { Frame, Surface, Target, TimerSpan } from "vgpu";
 
+import type { LightMeshLayout } from "../light-mesh";
 import type { PrismTheme } from "../types";
 
 export type PrismOutput = Surface | Target;
@@ -9,7 +10,7 @@ export type PrismPipelineMode = PrismTheme;
 /** User-facing theme choice; auto resolves against the site's active theme. */
 export type PrismThemePreference = "auto" | PrismPipelineMode;
 
-/** Render-budget tier. Both tiers intentionally share an implementation today. */
+/** Render-budget tier selected independently from the visual theme. */
 export type PrismPipelineQuality = "high" | "low";
 
 export interface PrismPipelineRenderOptions {
@@ -78,6 +79,8 @@ export interface PrismDebugTargetPreview {
 /** Retained theme renderer. It observes, but never owns, shared runtime state. */
 export interface PrismPipeline {
   readonly mode: PrismPipelineMode;
+  /** Fixed spectral geometry layout owned by this quality tier. */
+  readonly lightMeshLayout?: LightMeshLayout;
   prepare(output: PrismOutput): Promise<void>;
   resize(size: readonly [number, number]): void;
   bind(time: number, options?: PrismPipelineBindOptions): void;

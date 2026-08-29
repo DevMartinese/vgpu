@@ -17,6 +17,7 @@ import type {
   PrismDebugTargetPreview,
   PrismOutput,
   PrismPipeline,
+  PrismPipelineQuality,
 } from "../types";
 import { bindLightGraph } from "./bind";
 import { recordLightBackdropBundle } from "./bundles";
@@ -32,6 +33,7 @@ import type { LightDebugDraws } from "./debug-draws";
 
 export interface LightPipelineOptions {
   readonly assetLoader?: LightTextureLoader;
+  readonly quality?: PrismPipelineQuality;
 }
 
 export interface LightPrismPipeline extends PrismPipeline {
@@ -49,7 +51,8 @@ export function createLightPipeline(
   runtime: PrismRuntime,
   options: LightPipelineOptions = {}
 ): LightPrismPipeline {
-  const graph = createLightGraph(runtime);
+  const quality = options.quality ?? "high";
+  const graph = createLightGraph(runtime, quality);
   const loader = options.assetLoader;
   let destroyed = false;
   let debugDraws: LightDebugDraws | undefined;
@@ -57,6 +60,7 @@ export function createLightPipeline(
   let debugSources = PRISM_DEBUG_SOURCES;
   return {
     mode: "light",
+    lightMeshLayout: graph.lightMeshLayout,
     get targets() {
       return { backdropHDR: graph.backdropHDR, sceneHDR: graph.sceneHDR };
     },
@@ -64,8 +68,10 @@ export function createLightPipeline(
       if (destroyed)
         throw new Error("Cannot prepare a destroyed light pipeline.");
       resizeRuntime(runtime, output.size);
-      ensureLightTargets(graph, runtime, output.size);
+      ensureLightTargets(graph, runtime, output.size, quality);
       debugSources = createLightDebugSources({
+        quality,
+        lightMeshLayout: graph.lightMeshLayout,
         backdrop: graph.backdropHDR,
         scene: graph.sceneHDR,
         outputFormat: output.format,

@@ -1,4 +1,9 @@
-import type { PrismDebugSource, PrismPipelineMode } from "../pipelines/types";
+import { HIGH_LIGHT_MESH_LAYOUT, type LightMeshLayout } from "../light-mesh";
+import type {
+  PrismDebugSource,
+  PrismPipelineMode,
+  PrismPipelineQuality,
+} from "../pipelines/types";
 
 export const PRISM_DEBUG_SOURCE_IDS = [
   "wall-material",
@@ -65,12 +70,16 @@ export interface PrismDebugTargetFacts {
 }
 
 export interface LightDebugPipelineFacts {
+  readonly quality?: PrismPipelineQuality;
+  readonly lightMeshLayout?: LightMeshLayout;
   readonly backdrop?: PrismDebugTargetFacts;
   readonly scene?: PrismDebugTargetFacts;
   readonly outputFormat?: string;
 }
 
 export interface DarkDebugPipelineFacts {
+  readonly quality?: PrismPipelineQuality;
+  readonly lightMeshLayout?: LightMeshLayout;
   readonly backdrop?: PrismDebugTargetFacts;
   readonly scene?: PrismDebugTargetFacts;
   readonly bloom?: readonly PrismDebugTargetFacts[];
@@ -90,8 +99,14 @@ const DEFAULT_LIGHT_SCENE_TARGET = {
 export function createLightDebugSources(
   facts: LightDebugPipelineFacts = {}
 ): readonly PrismDebugSource[] {
+  const quality = facts.quality ?? "high";
+  const mesh = facts.lightMeshLayout ?? HIGH_LIGHT_MESH_LAYOUT;
   const backdrop = facts.backdrop ?? DEFAULT_LIGHT_BACKDROP_TARGET;
-  const scene = facts.scene ?? DEFAULT_LIGHT_SCENE_TARGET;
+  const scene =
+    facts.scene ??
+    (quality === "low"
+      ? { format: "rgba16float", sampleCount: 1 }
+      : DEFAULT_LIGHT_SCENE_TARGET);
   return [
     source(
       "wall-material",
@@ -144,8 +159,14 @@ export function createLightDebugSources(
       "none",
       [],
       [
-        detail("Geometry", "92,160 vertices"),
-        detail("Sampling", "128 wavelengths × 24 beam slices"),
+        detail(
+          "Geometry",
+          `${mesh.vertexCount.toLocaleString("en-US")} vertices`
+        ),
+        detail(
+          "Sampling",
+          `${mesh.samples} wavelengths × ${mesh.beamSlices} beam slices`
+        ),
       ]
     ),
     source(
@@ -169,12 +190,25 @@ export function createLightDebugSources(
       "Wall draw",
       "draw",
       "hdr",
+      quality === "low"
+        ? [input("wall-lighting", "sample lighting + contact AO")]
+        : [
+            input("wall-material", "sample material"),
+            input("wall-lighting", "sample lighting mask"),
+          ],
       [
-        input("wall-material", "sample material"),
-        input("wall-lighting", "sample lighting mask"),
-      ],
-      [
-        detail("Shader", "materials/light/wall.wgsl"),
+        detail(
+          "Shader",
+          quality === "low"
+            ? "materials/light/wall-low.wgsl"
+            : "materials/light/wall.wgsl"
+        ),
+        detail(
+          "Material",
+          quality === "low"
+            ? "flat albedo · no normal / roughness / specular"
+            : "albedo + dual-scale normals + roughness + specular"
+        ),
         detail("Coverage", "full screen"),
       ]
     ),
@@ -360,9 +394,18 @@ const DEFAULT_BLOOM_TARGETS = [
 export function createDarkDebugSources(
   facts: DarkDebugPipelineFacts = {}
 ): readonly PrismDebugSource[] {
+  const quality = facts.quality ?? "high";
+  const lowQuality = quality === "low";
+  const mesh = facts.lightMeshLayout ?? HIGH_LIGHT_MESH_LAYOUT;
   const backdrop = facts.backdrop ?? DEFAULT_DARK_BACKDROP_TARGET;
-  const scene = facts.scene ?? DEFAULT_DARK_SCENE_TARGET;
-  const bloom = facts.bloom ?? DEFAULT_BLOOM_TARGETS;
+  const scene =
+    facts.scene ??
+    (lowQuality
+      ? { format: "rgba16float", sampleCount: 1 }
+      : DEFAULT_DARK_SCENE_TARGET);
+  const bloom =
+    facts.bloom ??
+    (lowQuality ? DEFAULT_BLOOM_TARGETS.slice(0, 2) : DEFAULT_BLOOM_TARGETS);
   const presentation = facts.presentation ?? {
     format: facts.outputFormat ?? "canvas format",
     sampleCount: 1,
@@ -391,8 +434,14 @@ export function createDarkDebugSources(
       "none",
       [],
       [
-        detail("Geometry", "92,160 vertices"),
-        detail("Sampling", "128 wavelengths × 24 beam slices"),
+        detail(
+          "Geometry",
+          `${mesh.vertexCount.toLocaleString("en-US")} vertices`
+        ),
+        detail(
+          "Sampling",
+          `${mesh.samples} wavelengths × ${mesh.beamSlices} beam slices`
+        ),
       ]
     ),
     source(
@@ -521,39 +570,48 @@ export function createDarkDebugSources(
       bloom[1] ?? DEFAULT_BLOOM_TARGETS[1],
       "1/4 render resolution"
     ),
-    bloomStage(
-      "dark-bloom-2",
-      "Bloom 1/8",
-      "dark-bloom-1",
-      "horizontal downsample/blur + vertical blur",
-      bloom[2] ?? DEFAULT_BLOOM_TARGETS[2],
-      "1/8 render resolution"
-    ),
-    source(
-      "dark-particle-light",
-      "Particle light 1/16",
-      "target",
-      "hdr",
-      [input("dark-scene-hdr", "8×8 downsample + H/V blur")],
-      [
-        ...targetDetails(
-          bloom[3] ?? DEFAULT_BLOOM_TARGETS[3],
-          "1/16 render resolution"
-        ),
-        detail("Storage", "2 ping-pong targets"),
-        detail("GPU passes", "3 · downsample + H blur + V blur"),
-      ]
-    ),
+    ...(lowQuality
+      ? []
+      : [
+          bloomStage(
+            "dark-bloom-2",
+            "Bloom 1/8",
+            "dark-bloom-1",
+            "horizontal downsample/blur + vertical blur",
+            bloom[2] ?? DEFAULT_BLOOM_TARGETS[2],
+            "1/8 render resolution"
+          ),
+          source(
+            "dark-particle-light",
+            "Particle light 1/16",
+            "target",
+            "hdr",
+            [input("dark-scene-hdr", "8×8 downsample + H/V blur")],
+            [
+              ...targetDetails(
+                bloom[3] ?? DEFAULT_BLOOM_TARGETS[3],
+                "1/16 render resolution"
+              ),
+              detail("Storage", "2 ping-pong targets"),
+              detail("GPU passes", "3 · downsample + H blur + V blur"),
+            ]
+          ),
+        ]),
     source(
       "dark-bloom-composite",
       "Bloom composite",
       "target",
       "hdr",
-      [
-        input("dark-bloom-0", "near halo"),
-        input("dark-bloom-1", "medium halo"),
-        input("dark-bloom-2", "far halo"),
-      ],
+      lowQuality
+        ? [
+            input("dark-bloom-0", "near halo"),
+            input("dark-bloom-1", "far halo"),
+          ]
+        : [
+            input("dark-bloom-0", "near halo"),
+            input("dark-bloom-1", "medium halo"),
+            input("dark-bloom-2", "far halo"),
+          ],
       [
         ...targetDetails(
           bloom[0] ?? DEFAULT_BLOOM_TARGETS[0],
@@ -602,8 +660,12 @@ export function createDarkDebugSources(
       "draw",
       "none",
       [
-        input("dark-bloom-1", "particle color"),
-        input("dark-particle-light", "particle illumination"),
+        ...(lowQuality
+          ? [input("dark-bloom-1", "particle color + illumination")]
+          : [
+              input("dark-bloom-1", "particle color"),
+              input("dark-particle-light", "particle illumination"),
+            ]),
       ],
       [
         detail("Shader", "dust.wgsl"),

@@ -8,22 +8,32 @@ import causticWgsl from "../../materials/light/caustic.wgsl";
 import glassAccentWgsl from "../../materials/light/glass-accent.wgsl";
 import presentWgsl from "../../materials/light/present.wgsl";
 import shadowWgsl from "../../materials/light/shadow.wgsl";
+import wallLowWgsl from "../../materials/light/wall-low.wgsl";
 import wallWgsl from "../../materials/light/wall.wgsl";
 import { ensurePrismWireframeGeometry } from "../../runtime/resources";
 import type { PrismRuntime } from "../../runtime/types";
+import { lightMeshLayoutForQuality } from "../quality";
+import type { PrismPipelineQuality } from "../types";
 import wireframeWgsl from "../../wireframe.wgsl";
 import { createPrismShadowGeometry } from "./shadow/tuning";
 import type { LightPipelineGraph } from "./types";
 
-export function createLightGraph(runtime: PrismRuntime): LightPipelineGraph {
+export function createLightGraph(
+  runtime: PrismRuntime,
+  quality: PrismPipelineQuality = "high"
+): LightPipelineGraph {
   const { gpu, label } = runtime;
+  const lightMeshLayout = lightMeshLayoutForQuality(quality);
   const prismShadowGeometry = createPrismShadowGeometry(
     gpu,
     `${label}.light.prism-shadow-geometry`
   );
   return {
+    quality,
+    lightMeshLayout,
+    simplifiedWall: quality === "low",
     wall: draw(gpu, {
-      shader: wallWgsl,
+      shader: quality === "low" ? wallLowWgsl : wallWgsl,
       vertices: 6,
       cull: "back",
       depth: false,

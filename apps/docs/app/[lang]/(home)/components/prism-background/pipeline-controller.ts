@@ -6,7 +6,7 @@ import type {
   PrismPipelineMode,
   PrismPipelineQuality,
 } from "./pipelines/types";
-import { resizeRuntime } from "./runtime/state";
+import { resizeRuntime, setRuntimeLightMeshLayout } from "./runtime/state";
 import type { PrismRuntime } from "./runtime/types";
 
 type PrismOutput = Surface | Target;
@@ -75,15 +75,13 @@ export function preloadPrismPipeline(mode: PrismPipelineMode): void {
   });
 }
 
-// High and low intentionally select the same constructors for now. Keeping
-// quality in the factory boundary makes each tier independently replaceable.
-const defaultFactory: PrismPipelineFactory = (mode, _quality, runtime) =>
+const defaultFactory: PrismPipelineFactory = (mode, quality, runtime) =>
   mode === "light"
     ? loadLightPipelineModule().then(({ createLightPipeline }) =>
-        createLightPipeline(runtime)
+        createLightPipeline(runtime, { quality })
       )
     : loadDarkPipelineModule().then(({ createDarkPipeline }) =>
-        createDarkPipeline(runtime)
+        createDarkPipeline(runtime, { quality })
       );
 
 /**
@@ -163,6 +161,8 @@ export function createPrismPipelineController({
         continue;
       }
 
+      if (candidate.lightMeshLayout)
+        setRuntimeLightMeshLayout(runtime, candidate.lightMeshLayout);
       candidate.resize(runtime.outputSize);
       const previous = active;
       active = candidate;

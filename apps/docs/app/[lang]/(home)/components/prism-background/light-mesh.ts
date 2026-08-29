@@ -39,19 +39,56 @@ export const LIGHT_INTERNAL_SEGMENTS = PRISM_MAX_INTERNAL_BOUNCES + 1;
 const whiteQuadCount = (beamSlices: number) => beamSlices;
 const internalQuadCount = (samples: number, beamSlices: number) =>
   samples * beamSlices * LIGHT_INTERNAL_SEGMENTS;
-export const LIGHT_WHITE_QUADS = whiteQuadCount(PRISM_BEAM_SLICES);
-export const LIGHT_INTERNAL_QUADS = internalQuadCount(
-  PRISM_SPECTRAL_SAMPLES,
-  PRISM_BEAM_SLICES
-);
-export const LIGHT_WHITE_VERTICES = LIGHT_WHITE_QUADS * VERTICES_PER_QUAD;
-export const LIGHT_INTERNAL_VERTICES =
-  LIGHT_INTERNAL_QUADS * VERTICES_PER_QUAD;
-export const LIGHT_INTERNAL_FIRST_VERTEX = LIGHT_WHITE_VERTICES;
+
+export interface LightMeshLayout {
+  readonly samples: number;
+  readonly beamSlices: number;
+  readonly whiteQuads: number;
+  readonly internalQuads: number;
+  readonly whiteVertices: number;
+  readonly internalFirstVertex: number;
+  readonly internalVertices: number;
+  readonly outgoingFirstVertex: number;
+  readonly outgoingVertices: number;
+  readonly vertexCount: number;
+}
+
+export function lightMeshLayout(
+  samples = PRISM_SPECTRAL_SAMPLES,
+  beamSlices = PRISM_BEAM_SLICES
+): LightMeshLayout {
+  const safeSamples = Math.max(2, Math.floor(samples));
+  const safeBeamSlices = Math.max(1, Math.floor(beamSlices));
+  const whiteQuads = whiteQuadCount(safeBeamSlices);
+  const internalQuads = internalQuadCount(safeSamples, safeBeamSlices);
+  const whiteVertices = whiteQuads * VERTICES_PER_QUAD;
+  const internalVertices = internalQuads * VERTICES_PER_QUAD;
+  const outgoingVertices =
+    (safeSamples - 1) * safeBeamSlices * VERTICES_PER_QUAD;
+  return Object.freeze({
+    samples: safeSamples,
+    beamSlices: safeBeamSlices,
+    whiteQuads,
+    internalQuads,
+    whiteVertices,
+    internalFirstVertex: whiteVertices,
+    internalVertices,
+    outgoingFirstVertex: whiteVertices + internalVertices,
+    outgoingVertices,
+    vertexCount: whiteVertices + internalVertices + outgoingVertices,
+  });
+}
+
+export const HIGH_LIGHT_MESH_LAYOUT = lightMeshLayout();
+export const LIGHT_WHITE_QUADS = HIGH_LIGHT_MESH_LAYOUT.whiteQuads;
+export const LIGHT_INTERNAL_QUADS = HIGH_LIGHT_MESH_LAYOUT.internalQuads;
+export const LIGHT_WHITE_VERTICES = HIGH_LIGHT_MESH_LAYOUT.whiteVertices;
+export const LIGHT_INTERNAL_VERTICES = HIGH_LIGHT_MESH_LAYOUT.internalVertices;
+export const LIGHT_INTERNAL_FIRST_VERTEX =
+  HIGH_LIGHT_MESH_LAYOUT.internalFirstVertex;
 export const LIGHT_OUTGOING_FIRST_VERTEX =
-  LIGHT_WHITE_VERTICES + LIGHT_INTERNAL_VERTICES;
-export const LIGHT_OUTGOING_VERTICES =
-  (PRISM_SPECTRAL_SAMPLES - 1) * PRISM_BEAM_SLICES * VERTICES_PER_QUAD;
+  HIGH_LIGHT_MESH_LAYOUT.outgoingFirstVertex;
+export const LIGHT_OUTGOING_VERTICES = HIGH_LIGHT_MESH_LAYOUT.outgoingVertices;
 const DENSITY_MEASURE_DISTANCE = 1;
 /** The collimated source is deliberately emissive HDR, not painted white. */
 export const INPUT_BEAM_RADIANCE = 6;

@@ -135,3 +135,15 @@ const SPECTRAL_LUT = array<vec4f, 128>(
 export fn spectralSample(index: u32) -> vec4f {
   return SPECTRAL_LUT[min(index, 127u)];
 }
+
+/** Samples the fixed LUT at an arbitrary evenly-spaced mesh density. */
+export fn spectralSampleAt(index: u32, sampleCount: u32) -> vec4f {
+  let coordinate = f32(min(index, sampleCount - 1u))
+    * 127.0 / f32(max(sampleCount - 1u, 1u));
+  let lower = min(u32(floor(coordinate)), 126u);
+  return mix(
+    SPECTRAL_LUT[lower],
+    SPECTRAL_LUT[lower + 1u],
+    fract(coordinate),
+  );
+}

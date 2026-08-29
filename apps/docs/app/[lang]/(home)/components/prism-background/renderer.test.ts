@@ -54,6 +54,7 @@ import {
   LIGHT_WHITE_VERTICES,
   lightVertexCount,
 } from "./light-mesh";
+import { LOW_LIGHT_MESH_LAYOUT } from "./pipelines/quality";
 import { prismPlanes } from "./prism-mesh";
 import { darkWallClear } from "./pipelines/dark/wall-clear";
 import { schlickFresnelF0 } from "./runtime/uniforms";
@@ -856,10 +857,16 @@ test("remeasures the canvas when quality changes at runtime", async () => {
   await renderer.setQuality("low");
   env.flushAnimationFrames();
   expect(live.surface.resize).toHaveBeenLastCalledWith([200, 100]);
+  expect(
+    (live.lightBuffer.write.mock.calls.at(-1)![0] as Float32Array).byteLength
+  ).toBe(LOW_LIGHT_MESH_LAYOUT.vertexCount * LIGHT_VERTEX_STRIDE);
 
   await renderer.setQuality("high");
   env.flushAnimationFrames();
   expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
+  expect(
+    (live.lightBuffer.write.mock.calls.at(-1)![0] as Float32Array).byteLength
+  ).toBe(lightVertexCount() * LIGHT_VERTEX_STRIDE);
   renderer.dispose();
 });
 
@@ -891,7 +898,7 @@ test("caps a 120 Hz interactive loop at 90 rendered frames", async () => {
 });
 
 test.each([
-  ["dark", 15],
+  ["dark", 10],
   ["light", 3],
 ] as const)(
   "caps the low-quality %s pipeline at 60 rendered frames",
@@ -922,6 +929,121 @@ test.each([
     renderer.dispose();
   }
 );
+
+test("uses the reduced shared GPU layout for low-quality light", async () => {
+  const env = browser();
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+    initialQuality: "low",
+  });
+  await renderer.ready;
+
+  expect(
+    live.targets.slice(0, 2).map(({ sampleCount }) => sampleCount)
+  ).toEqual([1, 1]);
+  expect(
+    (live.lightBuffer.write.mock.calls[0]![0] as Float32Array).byteLength
+  ).toBe(LOW_LIGHT_MESH_LAYOUT.vertexCount * LIGHT_VERTEX_STRIDE);
+  expect(
+    drawNamed(live, "prism-rainbow.light.wall").set
+  ).toHaveBeenLastCalledWith(
+    expect.not.objectContaining({ wallMaterial: expect.anything() })
+  );
+  expect(
+    (
+      live.instance.fns.bundle.mock.results[0]?.value as {
+        commands: unknown[];
+      }
+    ).commands
+  ).toEqual([
+    live.draws[0],
+    live.draws[1],
+    partialDraw(live.draws[2], 0, LOW_LIGHT_MESH_LAYOUT.whiteVertices),
+    partialDraw(
+      live.draws[2],
+      LOW_LIGHT_MESH_LAYOUT.outgoingFirstVertex,
+      LOW_LIGHT_MESH_LAYOUT.outgoingVertices
+    ),
+    live.draws[3],
+    partialDraw(
+      live.draws[2],
+      LOW_LIGHT_MESH_LAYOUT.internalFirstVertex,
+      LOW_LIGHT_MESH_LAYOUT.internalVertices
+    ),
+  ]);
+  const mesh = renderer
+    .debugSources()
+    .find(({ id }) => id === "spectral-light-mesh");
+  expect(mesh?.details).toEqual(
+    expect.arrayContaining([
+      { label: "Sampling", value: "64 wavelengths × 12 beam slices" },
+    ])
+  );
+  const wall = renderer.debugSources().find(({ id }) => id === "composed-wall");
+  expect(wall?.details).toEqual(
+    expect.arrayContaining([
+      {
+        label: "Material",
+        value: "flat albedo · no normal / roughness / specular",
+      },
+    ])
+  );
+  renderer.dispose();
+});
+
+test("removes the far bloom and particle-light targets in low-quality dark", async () => {
+  const env = browser();
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    initialQuality: "low",
+  });
+  await renderer.ready;
+
+  expect(live.targets).toHaveLength(22);
+  expect(live.effects).toHaveLength(11);
+  expect(
+    live.targets.slice(0, 2).map(({ sampleCount }) => sampleCount)
+  ).toEqual([1, 1]);
+  const sourceIds = renderer.debugSources().map(({ id }) => id);
+  expect(sourceIds).not.toContain("dark-bloom-2");
+  expect(sourceIds).not.toContain("dark-particle-light");
+  const dust = drawNamed(live, "prism-rainbow.dust");
+  expect(dust.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      colorTexture: live.targets[5],
+      lightTexture: live.targets[5],
+    })
+  );
+  expect(
+    (
+      live.instance.fns.bundle.mock.results[0]?.value as {
+        commands: unknown[];
+      }
+    ).commands
+  ).toEqual([
+    partialDraw(live.draws[0], 0, LOW_LIGHT_MESH_LAYOUT.whiteVertices),
+    partialDraw(
+      live.draws[0],
+      LOW_LIGHT_MESH_LAYOUT.outgoingFirstVertex,
+      LOW_LIGHT_MESH_LAYOUT.outgoingVertices
+    ),
+    live.draws[1],
+    partialDraw(
+      live.draws[0],
+      LOW_LIGHT_MESH_LAYOUT.internalFirstVertex,
+      LOW_LIGHT_MESH_LAYOUT.internalVertices
+    ),
+  ]);
+  renderer.dispose();
+});
 
 test("caps the automatic mobile beam at 30 rendered frames", async () => {
   const env = browser();

@@ -9,7 +9,7 @@
 import { Scene } from "./scene.wgsl";
 import { beamWidthReveal } from "./materials/shared/beam-reveal.wgsl";
 import { decodeLightVertex } from "./materials/shared/light-vertex.wgsl";
-import { spectralSample } from "./materials/shared/spectral.wgsl";
+import { spectralSampleAt } from "./materials/shared/spectral.wgsl";
 
 @group(0) @binding(0) var<uniform> scene: Scene;
 
@@ -40,7 +40,10 @@ fn vs_main(
   out.color = vec3f(1.0);
   // Empty quads carry a negative intensity sentinel and never fetch the LUT.
   if metadata.white == 0u && rawIntensity >= 0.0 {
-    out.color = spectralSample(metadata.spectralIndex).rgb;
+    out.color = spectralSampleAt(
+      metadata.spectralIndex,
+      scene.lightSpectralSamples,
+    ).rgb;
   }
   out.profile = metadata.profile;
   out.intensity = max(rawIntensity, 0.0);

@@ -16,6 +16,7 @@ import {
 import { createDebugGraphModel, estimatedNodeHeight } from "./graph/model";
 import { layoutDebugGraphModel } from "./graph/elk-layout";
 import { DEFAULT_PRISM_CONTROLS } from "../types";
+import { LOW_LIGHT_MESH_LAYOUT } from "../pipelines/quality";
 
 describe("prism debug graph descriptors", () => {
   it("keeps separate light and dark graphs internally resolvable", () => {
@@ -92,6 +93,41 @@ describe("prism debug graph descriptors", () => {
     });
     expect(detailValue(dark, "dark-backdrop-hdr", "Samples")).toBe("1×");
     expect(detailValue(dark, "dark-bloom-0", "Format")).toBe("rg11b10ufloat");
+  });
+
+  it("describes the reduced low-quality graphs without phantom resources", () => {
+    const light = createLightDebugSources({
+      quality: "low",
+      lightMeshLayout: LOW_LIGHT_MESH_LAYOUT,
+    });
+    expect(detailValue(light, "scene-hdr", "Samples")).toBe("1×");
+    expect(detailValue(light, "spectral-light-mesh", "Sampling")).toBe(
+      "64 wavelengths × 12 beam slices"
+    );
+    expect(
+      light
+        .find(({ id }) => id === "composed-wall")
+        ?.inputs.map(({ source }) => source)
+    ).toEqual(["wall-lighting"]);
+
+    const dark = createDarkDebugSources({
+      quality: "low",
+      lightMeshLayout: LOW_LIGHT_MESH_LAYOUT,
+      bloom: [
+        { format: "rgba16float", sampleCount: 1 },
+        { format: "rgba16float", sampleCount: 1 },
+      ],
+    });
+    const ids = dark.map(({ id }) => id);
+    expect(ids).not.toContain("dark-bloom-2");
+    expect(ids).not.toContain("dark-particle-light");
+    expect(dark.find(({ id }) => id === "dark-dust")?.inputs).toEqual([
+      {
+        source: "dark-bloom-1",
+        operation: "particle color + illumination",
+      },
+    ]);
+    expectGraph(dark, ids);
   });
 
   it.each([

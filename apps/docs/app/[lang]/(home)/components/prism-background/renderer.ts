@@ -21,6 +21,7 @@ import type { PrismDebugPreviewBridge } from "./debug/preview-bridge";
 import type { PrismDebugPreviewHost } from "./debug/gpu";
 import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
 import { createPrismPipelineController } from "./pipeline-controller";
+import { lightMeshLayoutForQuality } from "./pipelines/quality";
 import { heroRevealProgress } from "./pipelines/presentation";
 import type {
   PrismDebugSource,
@@ -486,6 +487,7 @@ export function createRenderer(
     });
     runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow", {
       debugEnvironment: options.debugPreviews,
+      lightMeshLayout: lightMeshLayoutForQuality(requestedQuality),
     });
     setRuntimeControls(runtime, controls);
     if (options.performanceSampling) {

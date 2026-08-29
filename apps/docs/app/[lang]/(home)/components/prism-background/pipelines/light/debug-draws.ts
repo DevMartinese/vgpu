@@ -22,6 +22,14 @@ export interface LightDebugDraws {
   readonly sources: Readonly<
     Partial<Record<PrismDebugSourceId, LightDebugDrawable>>
   >;
+  readonly ranges: Readonly<
+    Partial<
+      Record<
+        PrismDebugSourceId,
+        { readonly firstVertex: number; readonly vertices: number }
+      >
+    >
+  >;
   /** Refreshes preview-only uniform buffers from the shared runtime. */
   bind(): void;
 }
@@ -78,6 +86,12 @@ export function createLightDebugDraws(
   sources["prism-shadow"] = prismShadow;
   const result: LightDebugDraws = {
     sources,
+    ranges: {
+      "projected-caustic": {
+        firstVertex: graph.lightMeshLayout.outgoingFirstVertex,
+        vertices: graph.lightMeshLayout.outgoingVertices,
+      },
+    },
     bind() {
       const assets = graph.assets;
       if (!assets) return;
@@ -89,7 +103,7 @@ export function createLightDebugDraws(
       };
       for (const preview of wallPreviews) preview.set(wallBindings);
       projected.set({
-        scene: sceneUniforms(runtime),
+        scene: sceneUniforms(runtime, 1, graph.lightMeshLayout),
         caustic: lightCausticUniforms(runtime),
         causticProfile: assets.causticProfile,
         causticSampler: graph.materialSampler,

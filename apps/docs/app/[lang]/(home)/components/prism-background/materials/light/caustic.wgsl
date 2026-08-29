@@ -1,7 +1,7 @@
 import { Scene } from "../../scene.wgsl";
 import { beamWidthReveal } from "../shared/beam-reveal.wgsl";
 import { decodeLightVertex } from "../shared/light-vertex.wgsl";
-import { spectralSample } from "../shared/spectral.wgsl";
+import { spectralSampleAt } from "../shared/spectral.wgsl";
 import {
   evaluateWallNormalsLevel,
   wallNormalTextureLod,
@@ -62,7 +62,10 @@ fn vs_main(
   out.wavelength = -1.0;
   // Empty quads carry a negative intensity sentinel and never fetch the LUT.
   if metadata.white == 0u && rawIntensity >= 0.0 {
-    let spectral = spectralSample(metadata.spectralIndex);
+    let spectral = spectralSampleAt(
+      metadata.spectralIndex,
+      scene.lightSpectralSamples,
+    );
     out.color = spectral.rgb;
     out.wavelength = spectral.a;
   }
