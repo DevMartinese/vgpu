@@ -14,11 +14,7 @@ export type PrismDebugNodeData = {
 };
 
 export type PrismDebugFlowNode = Node<PrismDebugNodeData, "prismDebug">;
-export type PrismDebugEdgeData = {
-  readonly labelX?: number;
-  readonly labelY?: number;
-  readonly path?: string;
-};
+export type PrismDebugEdgeData = Record<string, never>;
 export type PrismDebugFlowEdge = Edge<PrismDebugEdgeData, "prismDebug">;
 
 export type PrismDebugGraphModel = {
@@ -33,6 +29,8 @@ const NON_PREVIEW_NODE_HEIGHT = 70;
 const CONTROL_ROW_HEIGHT = 48;
 const CONTROL_GROUP_HEIGHT = 34;
 const CONTROL_PREVIEW_HEIGHT = 112;
+const DETAIL_ROW_HEIGHT = 25;
+const DETAIL_BLOCK_PADDING = 14;
 
 /** Builds a deterministic left-to-right layout without React-owned graph state. */
 export function createDebugGraphModel(
@@ -103,7 +101,10 @@ export function estimatedNodeHeight(
       : PREVIEW_NODE_HEIGHT) +
     groups.length * CONTROL_GROUP_HEIGHT +
     previewCount * CONTROL_PREVIEW_HEIGHT +
-    controlCount * CONTROL_ROW_HEIGHT
+    controlCount * CONTROL_ROW_HEIGHT +
+    (source.details?.length
+      ? DETAIL_BLOCK_PADDING + source.details.length * DETAIL_ROW_HEIGHT
+      : 0)
   );
 }
 

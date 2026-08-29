@@ -57,6 +57,8 @@ describe("dark pipeline debug targets", () => {
       );
       expect(pipeline.debugTarget("dark-backdrop-hdr")).toBeUndefined();
       await pipeline.prepare(output);
+      expect(pipeline.targets.backdropHDR?.sampleCount).toBe(1);
+      expect(pipeline.targets.sceneHDR?.sampleCount).toBe(4);
       pipeline.bind(0);
       const profiledPasses: string[] = [];
       frame(gpu, (currentFrame) =>
@@ -96,6 +98,9 @@ describe("dark pipeline debug targets", () => {
       );
       expect(pipeline.debugTarget("dark-scene-hdr")?.primary).toBe(
         pipeline.targets.sceneHDR
+      );
+      expect(pipeline.debugTarget("dark-presentation-ldr")?.primary).toBe(
+        pipeline.targets.presentationLDR
       );
       expect(pipeline.debugTarget("dark-front-glass")).toEqual({
         primary: pipeline.targets.sceneHDR,

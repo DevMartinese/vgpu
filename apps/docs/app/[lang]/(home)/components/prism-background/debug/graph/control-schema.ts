@@ -326,19 +326,14 @@ const OUTPUT_CONTROLS: readonly DebugControlGroup[] = [
         })),
         read: (controls) => controls.lightMode.output.toneMapping,
         write: (controls, _mode, value) =>
-          withLightOutput(
-            controls,
-            "toneMapping",
-            value as LightToneMapping
-          ),
+          withLightOutput(controls, "toneMapping", value as LightToneMapping),
       },
       range(
         "scene-exposure",
         "Scene exposure",
         PRISM_LIGHT_MODE_RANGES.output.exposure,
         (controls) => controls.lightMode.output.exposure,
-        (controls, _mode, value) =>
-          withLightOutput(controls, "exposure", value)
+        (controls, _mode, value) => withLightOutput(controls, "exposure", value)
       ),
     ],
   },
@@ -441,11 +436,10 @@ export function controlGroupsForSource(
       return [
         ...BEAM_CONTROLS,
         ...SPECTRAL_CONTROLS,
+        ...LIGHT_APPEARANCE_CONTROLS,
         ...CAUSTIC_CONTROLS,
       ];
-    case "backdrop-hdr":
-      return LIGHT_APPEARANCE_CONTROLS;
-    case "dark-backdrop-hdr":
+    case "dark-external-light":
       return [
         ...BEAM_CONTROLS,
         ...SPECTRAL_CONTROLS,

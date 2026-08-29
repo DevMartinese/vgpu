@@ -72,7 +72,9 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
 }
 const DUST_FPS = 30;
 const DESKTOP_MAX_RENDER_FPS = 90;
+const LOW_QUALITY_MAX_RENDER_FPS = 60;
 const MOBILE_MAX_RENDER_FPS = 30;
+const LOW_QUALITY_DPR = 1;
 const OFFSCREEN_ROOT_MARGIN_PX = 256;
 const PERFORMANCE_DPR_QUERY = "prism-perf-dpr";
 const MOBILE_AUTO_POINTER_QUERY = "(max-width: 767px)";
@@ -150,6 +152,7 @@ export function createRenderer(
   let lastDustTime = -1;
   let renderTimeBudget = 0;
   let hasRenderedCappedFrame = false;
+  let presentedQuality: PrismPipelineQuality | undefined;
   let revealStartTime: number | undefined;
   let lastRevealProgress = -1;
   let lastBeamWidthReveal = -1;
@@ -220,6 +223,9 @@ export function createRenderer(
     if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize);
   };
 
+  const currentQuality = (): PrismPipelineQuality =>
+    pipelineController?.quality ?? requestedQuality;
+
   const measure = () => {
     const rect = options.canvas.getBoundingClientRect();
     if (options.framingElement) {
@@ -233,8 +239,10 @@ export function createRenderer(
       width: rect.width,
       height: rect.height,
       dpr:
-        performanceDpr ??
-        Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
+        currentQuality() === "low"
+          ? LOW_QUALITY_DPR
+          : performanceDpr ??
+            Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
     });
   };
 
@@ -325,7 +333,7 @@ export function createRenderer(
     return heroRevealProgress(time - revealStartTime);
   }
 
-  /** Caps mobile at 30 FPS and larger layouts at 90 without changing easing. */
+  /** Caps mobile at 30 FPS and larger layouts at their quality budget. */
   function shouldRenderAtCappedRate(): boolean {
     if (options.performanceSampling) return true;
     if (!hasRenderedCappedFrame) {
@@ -335,11 +343,13 @@ export function createRenderer(
     const delta = gpuClock?.deltaTime ?? 0;
     // A zero delta is possible on the first frame and in deterministic mocks.
     if (!Number.isFinite(delta) || delta <= 0) return true;
+    const desktopMaxFps =
+      currentQuality() === "low"
+        ? LOW_QUALITY_MAX_RENDER_FPS
+        : DESKTOP_MAX_RENDER_FPS;
     const renderInterval =
       1 /
-      (mobileAutoPointer?.matches
-        ? MOBILE_MAX_RENDER_FPS
-        : DESKTOP_MAX_RENDER_FPS);
+      (mobileAutoPointer?.matches ? MOBILE_MAX_RENDER_FPS : desktopMaxFps);
     renderTimeBudget = Math.min(
       renderTimeBudget + delta,
       renderInterval * 2
@@ -468,7 +478,11 @@ export function createRenderer(
     }
     gpu = nextGpu;
     canvasSurface = surface(gpu, options.canvas, {
-      dpr: performanceDpr ?? [1, 2],
+      autoResize: false,
+      dpr:
+        requestedQuality === "low"
+          ? LOW_QUALITY_DPR
+          : performanceDpr ?? [1, 2],
     });
     runtime = createPrismRuntime(gpu, canvasSurface.size, "prism-rainbow", {
       debugEnvironment: options.debugPreviews,
@@ -488,9 +502,15 @@ export function createRenderer(
       output: canvasSurface,
       initialMode: requestedMode,
       initialQuality: requestedQuality,
-      onActivate: () => {
+      onActivate: (_mode, quality) => {
+        const qualityChanged =
+          presentedQuality !== undefined && presentedQuality !== quality;
+        presentedQuality = quality;
         pendingPresent = true;
         lastDustTime = -1;
+        renderTimeBudget = 0;
+        hasRenderedCappedFrame = false;
+        if (qualityChanged) measure();
         debugHost?.invalidate();
       },
     });

@@ -12,17 +12,15 @@ export function ensureDarkTargets(
   size: readonly [number, number],
   outputFormat: GPUTextureFormat
 ): void {
-  const hdrMsaa = runtime.gpu.device.isCompatibilityMode ? undefined : true;
   graph.backgroundTarget ??= target(runtime.gpu, {
     size,
     format: "rgba16float",
-    msaa: hdrMsaa,
     label: `${runtime.label}.pass-a-back-and-light`,
   });
   graph.sceneTarget ??= target(runtime.gpu, {
     size,
     format: "rgba16float",
-    msaa: hdrMsaa,
+    msaa: runtime.gpu.device.isCompatibilityMode ? undefined : true,
     label: `${runtime.label}.pass-b-front-glass`,
   });
   graph.bloomTargets ??= Array.from({ length: BLOOM_LEVELS }, (_, level) =>

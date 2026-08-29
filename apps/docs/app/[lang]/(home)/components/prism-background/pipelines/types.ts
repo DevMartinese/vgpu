@@ -36,7 +36,21 @@ export interface PrismPassProfile {
 export type PrismDebugSource = {
   readonly id: string;
   readonly label: string;
-  readonly kind: "asset" | "view" | "target" | "pass" | "control";
+  readonly kind:
+    | "asset"
+    | "geometry"
+    | "view"
+    | "draw"
+    | "pass"
+    | "target"
+    | "output"
+    | "state"
+    | "control";
+  /** Static pipeline facts shown even when this node has no GPU preview. */
+  readonly details?: readonly {
+    readonly label: string;
+    readonly value: string;
+  }[];
   readonly inputs: readonly {
     readonly source: string;
     readonly operation: string;

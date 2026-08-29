@@ -1,7 +1,10 @@
 import type { Target } from "vgpu";
 
 import { BLOOM_VISIBLE_LEVELS, PARTICLE_LIGHT_FIRST_LEVEL } from "../../bloom";
-import { PRISM_DARK_DEBUG_SOURCES } from "../../debug/sources";
+import {
+  createDarkDebugSources,
+  PRISM_DARK_DEBUG_SOURCES,
+} from "../../debug/sources";
 import { prepareRuntimeEnvironment } from "../../runtime/resources";
 import { settleAllOrThrow } from "../../runtime/settle";
 import { resizeRuntime } from "../../runtime/state";
@@ -36,6 +39,7 @@ export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
   const graph = createDarkGraph(runtime);
   let presentationValid = false;
   let boundRevealProgress = 1;
+  let debugSources = PRISM_DARK_DEBUG_SOURCES;
   return {
     mode: "dark",
     get targets() {
@@ -48,6 +52,13 @@ export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
     async prepare(output) {
       resizeRuntime(runtime, output.size);
       ensureDarkTargets(graph, runtime, output.size, output.format);
+      debugSources = createDarkDebugSources({
+        backdrop: graph.backgroundTarget,
+        scene: graph.sceneTarget,
+        bloom: graph.bloomTargets?.map(({ vertical }) => vertical),
+        presentation: graph.presentationTarget,
+        outputFormat: output.format,
+      });
       presentationValid = false;
       const environmentReady = prepareRuntimeEnvironment(runtime);
       bindDarkGraph(graph, runtime, 0, true);
@@ -78,15 +89,14 @@ export function createDarkPipeline(runtime: PrismRuntime): DarkPrismPipeline {
       boundRevealProgress = revealProgress;
     },
     render(currentFrame, output, options) {
-      const updateScene =
-        (options?.updateScene ?? true) || !presentationValid;
+      const updateScene = (options?.updateScene ?? true) || !presentationValid;
       renderDarkGraph(currentFrame, graph, runtime, output, {
         ...options,
         updateScene,
       });
       presentationValid = true;
     },
-    debugSources: () => PRISM_DARK_DEBUG_SOURCES,
+    debugSources: () => debugSources,
     debugTarget(sourceId) {
       return resolveDarkDebugTarget(graph, sourceId);
     },
@@ -107,6 +117,8 @@ function resolveDarkDebugTarget(
   if (sourceId === "dark-backdrop-hdr" && backdrop)
     return { primary: backdrop };
   if (sourceId === "dark-scene-hdr" && scene) return { primary: scene };
+  if (sourceId === "dark-presentation-ldr" && graph.presentationTarget)
+    return { primary: graph.presentationTarget };
   if (sourceId === "dark-front-glass" && scene && backdrop) {
     return {
       primary: scene,

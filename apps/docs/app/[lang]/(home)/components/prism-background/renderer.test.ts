@@ -275,6 +275,7 @@ function gpu(features: readonly GPUFeatureName[] = []) {
   const targets: {
     size: number[];
     format: string;
+    sampleCount: 1 | 4;
     color: { gpu: object };
     msaa?: boolean | 4;
     resize: ReturnType<typeof vi.fn>;
@@ -348,6 +349,9 @@ function gpu(features: readonly GPUFeatureName[] = []) {
           const created = {
             size: [...options.size],
             format: options.format ?? "bgra8unorm",
+            sampleCount: (options.msaa === true || options.msaa === 4
+              ? 4
+              : 1) as 1 | 4,
             color: { gpu: {} },
             msaa: options.msaa,
             resize: vi.fn((size: number[]) => {
@@ -447,7 +451,7 @@ test("renders the deterministic light once and idles until something changes", a
   expect(live.effects).toHaveLength(16);
   expect(live.draws).toHaveLength(4);
   const darkDrawOptions = live.instance.fns.draw.mock.calls as unknown as [
-    Record<string, unknown>,
+    Record<string, unknown>
   ][];
   expect(darkDrawOptions.map(([options]) => options.label)).toEqual([
     "prism-rainbow.light",
@@ -498,8 +502,8 @@ test("renders the deterministic light once and idles until something changes", a
   expect(live.effects[13]!.compile).toHaveBeenCalledWith({
     colors: ["bgra8unorm"],
   });
-  // One full-resolution MSAA target composites back-side glass and light; a
-  // second lets the front interface sample that resolved result. Four pairs of
+  // A single-sample HDR backdrop holds back-side glass and light, while the
+  // front-side target alone uses MSAA. Four pairs of
   // smaller HDR targets hold three bloom scales and one particle-light scale; the
   // display-encoded target retains the dark base underneath animated dust. The
   // remainder are transient studio-environment mip-bake surfaces. The debug
@@ -507,7 +511,7 @@ test("renders the deterministic light once and idles until something changes", a
   expect(live.targets).toHaveLength(26);
   expect(live.targets[0]!.format).toBe("rgba16float");
   expect(live.targets[1]!.format).toBe("rgba16float");
-  expect(live.targets[0]!.msaa).toBe(true);
+  expect(live.targets[0]!.msaa).toBeUndefined();
   expect(live.targets[1]!.msaa).toBe(true);
   expect(live.targets.slice(2, 10).map((entry) => entry.size)).toEqual([
     [100, 50],
@@ -741,13 +745,12 @@ test("requests supported packed bloom with optional performance timestamps", asy
   await renderer.ready;
 
   expect(requestAdapter).toHaveBeenCalledOnce();
-  expect(mocks.init).toHaveBeenCalledWith(expect.objectContaining({
-    adapter: expect.objectContaining({ requestDevice: expect.any(Function) }),
-    requiredFeatures: [
-      "rg11b10ufloat-renderable",
-      "timestamp-query",
-    ],
-  }));
+  expect(mocks.init).toHaveBeenCalledWith(
+    expect.objectContaining({
+      adapter: expect.objectContaining({ requestDevice: expect.any(Function) }),
+      requiredFeatures: ["rg11b10ufloat-renderable", "timestamp-query"],
+    })
+  );
   expect(live.targets.slice(2, 8).map(({ format }) => format)).toEqual(
     Array.from({ length: 6 }, () => "rg11b10ufloat")
   );
@@ -806,8 +809,57 @@ test("uses an explicit DPR only for performance sampling", async () => {
   await renderer.ready;
 
   expect(live.instance.fns.surface).toHaveBeenCalledWith(env.canvas, {
+    autoResize: false,
     dpr: 2,
   });
+  renderer.dispose();
+});
+
+test.each(["dark", "light"] as const)(
+  "uses DPR 1 for the low-quality %s pipeline",
+  async (mode) => {
+    const env = browser();
+    vi.stubGlobal("navigator", {});
+    const live = gpu();
+    mocks.init.mockResolvedValueOnce(live.instance);
+    const renderer = createRenderer({
+      canvas: env.canvas,
+      initialMode: mode,
+      initialQuality: "low",
+    });
+    await renderer.ready;
+
+    expect(live.instance.fns.surface).toHaveBeenCalledWith(env.canvas, {
+      autoResize: false,
+      dpr: 1,
+    });
+    env.flushAnimationFrames();
+    expect(live.surface.resize).toHaveBeenLastCalledWith([200, 100]);
+    renderer.dispose();
+  }
+);
+
+test("remeasures the canvas when quality changes at runtime", async () => {
+  const env = browser();
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+  });
+  await renderer.ready;
+
+  env.flushAnimationFrames();
+  expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
+
+  await renderer.setQuality("low");
+  env.flushAnimationFrames();
+  expect(live.surface.resize).toHaveBeenLastCalledWith([200, 100]);
+
+  await renderer.setQuality("high");
+  env.flushAnimationFrames();
+  expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
   renderer.dispose();
 });
 
@@ -837,6 +889,39 @@ test("caps a 120 Hz interactive loop at 90 rendered frames", async () => {
   expect(live.loopFrame.pass).toHaveBeenCalledTimes(90 * 3);
   renderer.dispose();
 });
+
+test.each([
+  ["dark", 15],
+  ["light", 3],
+] as const)(
+  "caps the low-quality %s pipeline at 60 rendered frames",
+  async (mode, passesPerFrame) => {
+    const env = browser();
+    vi.stubGlobal("navigator", {});
+    const live = gpu();
+    live.gpuClock.deltaTime = 1 / 120;
+    mocks.init.mockResolvedValueOnce(live.instance);
+    const renderer = createRenderer({
+      canvas: env.canvas,
+      initialMode: mode,
+      initialQuality: "low",
+    });
+    await renderer.ready;
+    const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+
+    for (let sourceFrame = 0; sourceFrame < 120; sourceFrame++) {
+      env.windowListeners.get("pointermove")?.({
+        pointerId: 1,
+        clientX: sourceFrame % 2 === 0 ? 0 : 200,
+        clientY: sourceFrame % 3 === 0 ? 0 : 100,
+      } as unknown as Event);
+      tick(live.loopFrame);
+    }
+
+    expect(live.loopFrame.pass).toHaveBeenCalledTimes(60 * passesPerFrame);
+    renderer.dispose();
+  }
+);
 
 test("caps the automatic mobile beam at 30 rendered frames", async () => {
   const env = browser();
@@ -930,7 +1015,10 @@ test("an explicit light mode uses the lean pipeline and never schedules dust-onl
     [200, 100],
     [200, 100],
   ]);
-  expect(live.targets.slice(0, 2).every(({ msaa }) => msaa === 4)).toBe(true);
+  expect(live.targets.slice(0, 2).map(({ msaa }) => msaa)).toEqual([
+    undefined,
+    4,
+  ]);
   const lightDrawOptions = live.instance.fns.draw.mock.calls as unknown as [
     Record<string, unknown>
   ][];
@@ -1055,9 +1143,11 @@ test("dust-only animation frames reuse the resolved scene and bloom", async () =
       time: 76 / 30,
     },
   });
-  live.effects.slice(0, 13).forEach(({ set }, index) =>
-    expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
-  );
+  live.effects
+    .slice(0, 13)
+    .forEach(({ set }, index) =>
+      expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
+    );
   expect(live.effects[13]!.set).toHaveBeenCalledTimes(effectSetCounts[13]!);
   live.draws.forEach((draw) =>
     expect(draw.set).toHaveBeenCalledTimes(
@@ -1115,9 +1205,11 @@ test("dark-dust performance samples never rebuild the retained scene", async () 
   live.effects.forEach(({ set }, index) =>
     expect(set).toHaveBeenCalledTimes(effectSetCounts[index]!)
   );
-  live.draws.filter((draw) => draw !== dust).forEach((draw) =>
-    expect(draw.set).toHaveBeenCalledTimes(drawSetCounts.get(draw)!)
-  );
+  live.draws
+    .filter((draw) => draw !== dust)
+    .forEach((draw) =>
+      expect(draw.set).toHaveBeenCalledTimes(drawSetCounts.get(draw)!)
+    );
   expect(dust.set.mock.calls.slice(-2)).toEqual([
     [{ params: { time: 1 / 30 } }],
     [{ params: { time: 2 / 30 } }],
@@ -1603,14 +1695,16 @@ test("the camera follows the pointer without rebuilding an unchanged light", asy
 test("mobile ignores pointer input and advances the automatic beam", async () => {
   const env = browser();
   let mobile = true;
-  (window as unknown as { matchMedia: (query: string) => MediaQueryList })
-    .matchMedia = vi.fn(() =>
+  (
+    window as unknown as { matchMedia: (query: string) => MediaQueryList }
+  ).matchMedia = vi.fn(
+    () =>
       ({
         get matches() {
           return mobile;
         },
-      }) as MediaQueryList
-    );
+      } as MediaQueryList)
+  );
   const live = gpu();
   mocks.init.mockResolvedValueOnce(live.instance);
   const renderer = createRenderer({ canvas: env.canvas, initialMode: "dark" });

@@ -138,16 +138,32 @@
   --prism-debug-kind: #a3a3a3;
 }
 
+.prism-debug-node[data-kind="geometry"] {
+  --prism-debug-kind: #93c5fd;
+}
+
 .prism-debug-node[data-kind="view"] {
   --prism-debug-kind: #d4d4d4;
 }
 
+.prism-debug-node[data-kind="draw"] {
+  --prism-debug-kind: #f0abfc;
+}
+
 .prism-debug-node[data-kind="pass"] {
-  --prism-debug-kind: #b8b8b8;
+  --prism-debug-kind: #fbbf24;
 }
 
 .prism-debug-node[data-kind="target"] {
-  --prism-debug-kind: #e5e5e5;
+  --prism-debug-kind: #67e8f9;
+}
+
+.prism-debug-node[data-kind="output"] {
+  --prism-debug-kind: #86efac;
+}
+
+.prism-debug-node[data-kind="state"] {
+  --prism-debug-kind: #c4b5fd;
 }
 
 .prism-debug-node[data-kind="control"] {
@@ -166,6 +182,32 @@
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   color-scheme: dark;
   padding: 0.45rem 0.55rem 0.55rem;
+}
+
+.prism-debug-node__details {
+  display: grid;
+  gap: 0.28rem;
+  margin: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.58rem;
+}
+
+.prism-debug-node__details div {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr);
+  gap: 0.4rem;
+}
+
+.prism-debug-node__details dt {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.prism-debug-node__details dd {
+  min-width: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.76);
+  overflow-wrap: anywhere;
 }
 
 .prism-debug-node__controls fieldset {

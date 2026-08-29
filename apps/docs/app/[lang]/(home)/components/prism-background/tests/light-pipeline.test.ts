@@ -36,7 +36,7 @@ describe("light pipeline ownership", () => {
     }
   });
 
-  test("owns exactly two full-resolution HDR MSAA targets and no dark effects", async () => {
+  test("keeps only the front-side HDR target multisampled", async () => {
     const gpu = await init();
     const runtime = createPrismRuntime(gpu, [80, 45], "light-pipeline-test");
     const graph = createLightGraph(runtime);
@@ -47,9 +47,10 @@ describe("light pipeline ownership", () => {
       expect(targets).toHaveLength(2);
       for (const target of targets) {
         expect(target?.format).toBe("rgba16float");
-        expect(target?.sampleCount).toBe(4);
         expect(target?.size).toEqual([80, 45]);
       }
+      expect(graph.backdropHDR?.sampleCount).toBe(1);
+      expect(graph.sceneHDR?.sampleCount).toBe(4);
       expect(Object.keys(graph)).not.toEqual(
         expect.arrayContaining([
           "bloom",

@@ -66,8 +66,8 @@ describe("analytic prism cast shadow", () => {
     ).toEqual(expect.arrayContaining(["vs_main", "fs_main", "fs_debug"]));
     expect(PRISM_DEBUG_SOURCES.find(({ id }) => id === "prism-shadow")).toEqual(
       expect.objectContaining({
-        label: "Prism cast shadow (analytic)",
-        kind: "view",
+        label: "Prism shadow draw",
+        kind: "draw",
         visualization: "scalar",
       })
     );

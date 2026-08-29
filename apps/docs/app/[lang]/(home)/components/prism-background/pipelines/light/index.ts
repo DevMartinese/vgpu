@@ -5,7 +5,10 @@ import {
   loadLightAssetTextures,
   type LightTextureLoader,
 } from "../../assets/light/loader";
-import { PRISM_DEBUG_SOURCES } from "../../debug/sources";
+import {
+  createLightDebugSources,
+  PRISM_DEBUG_SOURCES,
+} from "../../debug/sources";
 import { prepareRuntimeEnvironment } from "../../runtime/resources";
 import { resizeRuntime } from "../../runtime/state";
 import type { PrismRuntime } from "../../runtime/types";
@@ -51,6 +54,7 @@ export function createLightPipeline(
   let destroyed = false;
   let debugDraws: LightDebugDraws | undefined;
   let debugDrawsPromise: Promise<LightDebugDraws> | undefined;
+  let debugSources = PRISM_DEBUG_SOURCES;
   return {
     mode: "light",
     get targets() {
@@ -61,6 +65,11 @@ export function createLightPipeline(
         throw new Error("Cannot prepare a destroyed light pipeline.");
       resizeRuntime(runtime, output.size);
       ensureLightTargets(graph, runtime, output.size);
+      debugSources = createLightDebugSources({
+        backdrop: graph.backdropHDR,
+        scene: graph.sceneHDR,
+        outputFormat: output.format,
+      });
       ensureLightWireframeDraws(graph, runtime);
       const environmentReady = prepareRuntimeEnvironment(runtime);
       const ownedAssets = graph.assets;
@@ -117,7 +126,7 @@ export function createLightPipeline(
     render(currentFrame, output, renderOptions) {
       renderLightGraph(currentFrame, graph, runtime, output, renderOptions);
     },
-    debugSources: () => PRISM_DEBUG_SOURCES,
+    debugSources: () => debugSources,
     debugTarget(sourceId) {
       return resolveLightDebugTarget(graph, runtime, sourceId);
     },

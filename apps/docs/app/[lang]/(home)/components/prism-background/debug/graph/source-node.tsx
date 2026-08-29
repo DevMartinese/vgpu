@@ -24,6 +24,16 @@ export const SourceNode = memo(function SourceNode({
       {source.visualization === "none" ? null : (
         <PreviewCanvas bridge={bridge} source={source} />
       )}
+      {source.details?.length ? (
+        <dl className="prism-debug-node__details">
+          {source.details.map((item) => (
+            <div key={`${item.label}:${item.value}`}>
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       <NodeControls mode={mode} sourceId={source.id} />
       {source.visualization === "none" ? null : (
         <footer>{source.visualization}</footer>
