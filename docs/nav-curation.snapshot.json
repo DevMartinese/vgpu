@@ -120,6 +120,7 @@
       "Concepts @ /concepts",
       "  ",
       "    Context @ /concepts/context",
+      "    WGSL modules @ /concepts/wgsl-modules",
       "    Draws @ /concepts/draws",
       "    Compilation @ /concepts/compilation",
       "    Effects @ /concepts/effects",
