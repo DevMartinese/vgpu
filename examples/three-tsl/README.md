@@ -1,13 +1,18 @@
 # three-tsl
 
-Imports a WGSL module through the `@vgpu/wgsl` Vite loader and connects its
-functions to a three.js `MeshPhysicalNodeMaterial` as TSL nodes.
+Imports WGSL modules through the `@vgpu/wgsl` Vite loader and connects their
+functions to three.js `MeshPhysicalNodeMaterial`s as TSL nodes.
 
 ```
-src/marble.wgsl        WGSL module; imports hash3 from @vgpu/wgsl-std/hash
+src/noise.wgsl         shared value noise / fbm / ridged noise module
+src/lava.wgsl          heat, crust, sink, and blackbody fields; uses
+                       @vgpu/wgsl-std voronoi3d + noise.wgsl
+src/marble.wgsl        marble veins; imports fbm3 from noise.wgsl
 src/wgsl-tsl.ts        tslExports(): loader output -> callable wgslFn TSL nodes
+src/lava-material.ts   physical material: emissive cracks, bump normals, and
+                       vertex relief all driven by lava.wgsl
 src/marble-material.ts physical material with colorNode/roughnessNode from WGSL
-src/main.ts            torus knot scene, WebGPURenderer
+src/main.ts            torus knot scene, WebGPURenderer (?material=marble)
 src/harness.ts         offscreen render smoke check (also runs headless)
 ```
 
@@ -18,7 +23,25 @@ pnpm install
 pnpm --filter @vgpu/example-three-tsl dev
 ```
 
-Open the printed URL in a WebGPU-capable browser.
+Open the printed URL in a WebGPU-capable browser. The default scene is the
+lava material; append `?material=marble` for the marble demo.
+
+## The lava material
+
+Everything procedural lives in `lava.wgsl` and flows into the material as
+TSL nodes:
+
+- `lavaHeat` — voronoi plate boundaries (`f2 - f1` from
+  `@vgpu/wgsl-std/noise`) warped by fbm become variable-width incandescent
+  cracks, with an ember halo, hairline secondary cracks gated by an
+  "activity" field, and occasional streaked melt windows.
+- `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
+  feeding `emissiveNode` with HDR intensity under ACES tone mapping.
+- `crustHeight` — plate relief; sampled once for shading and three more times
+  by finite differences in TSL to build `normalNode` bump detail.
+- `lavaSink` — a wide low-frequency channel mask for `positionNode` vertex
+  displacement, kept separate from the thin cracks so coarse meshes don't
+  stipple.
 
 ## How the bridge works
 

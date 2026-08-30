@@ -57,6 +57,20 @@ describe("forwardingWrapper", () => {
 });
 
 describe("tslExports over a vgpu-resolved module", () => {
+  it("wraps every lava.wgsl export, including functions from imported modules", async () => {
+    const entry = fileURLToPath(new URL("../src/lava.wgsl", import.meta.url));
+    const resolved = await resolveShader({ entry });
+
+    const names = ["lavaHeat", "blackbody", "crustHeight", "crustTone", "lavaSink"] as const;
+    const nodes = tslExports(resolved.wgsl, names);
+    for (const name of names) expect(typeof nodes[name]).toBe("function");
+
+    // lavaHeat's signature survives the flatten+mangle round trip.
+    const header = parseFunctionHeader(resolved.wgsl, "lavaHeat");
+    expect(header.paramNames).toEqual(["position", "t"]);
+    expect(header.returnType).toBe("f32");
+  });
+
   it("wraps the entry module's exports from the flattened WGSL", async () => {
     const entry = fileURLToPath(new URL("../src/marble.wgsl", import.meta.url));
     const resolved = await resolveShader({ entry });
