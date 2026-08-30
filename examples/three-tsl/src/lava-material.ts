@@ -4,11 +4,12 @@ import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
 
-const { lavaHeat, blackbody, crustHeight, crustSurface, lavaSink, microDetail } = tslExports(lavaModule, [
+const { lavaHeat, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, microDetail } = tslExports(lavaModule, [
   "lavaHeat",
   "blackbody",
   "crustHeight",
   "crustSurface",
+  "crustPbr",
   "lavaSink",
   "microDetail",
 ]);
@@ -32,7 +33,7 @@ export interface LavaMaterial {
  * loader; three only sees TSL nodes.
  */
 export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMaterial {
-  const glowIntensity = uniform(3.0);
+  const glowIntensity = uniform(2.4);
   const scale = uniform(1.0);
   const t = options.timeNode ?? time;
 
@@ -53,8 +54,8 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   // Basalt skin: graphite grey with a cold blue cast, ridges catching more
   // light than the fissured low ground, rust staining on older patches, and
   // vesicle pits going almost black.
-  const graphite = mix(vec3(0.045, 0.045, 0.052), vec3(0.28, 0.28, 0.31), tone);
-  const ridgeLight = height.mul(height).mul(0.6).add(0.7);
+  const graphite = mix(vec3(0.03, 0.03, 0.036), vec3(0.17, 0.17, 0.19), tone);
+  const ridgeLight = height.mul(height).mul(0.6).add(0.6);
   const stained = mix(graphite.mul(ridgeLight), vec3(0.20, 0.085, 0.05), oxide.mul(0.5));
   const basalt = mix(stained, stained.mul(0.45), pits);
   material.colorNode = mix(basalt, vec3(0.012, 0.01, 0.009), molten);
@@ -73,15 +74,31 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   // Roughness map, not a constant: rubble is matte with sharp grain breakup,
   // the glassy skin is polished but streaked by flow lines, vesicle pits and
   // dusty valleys scatter more, and molten rock is a glossy liquid.
-  const crustRoughness = mix(float(0.92), float(0.3), glass)
-    .add(grain.sub(0.5).mul(0.26))
+  const crustRoughness = mix(float(0.86), float(0.26), glass)
+    .add(grain.sub(0.5).mul(0.22))
     .add(streaks.sub(0.5).mul(0.2).mul(glass))
     .add(pits.mul(0.1))
     .add(height.oneMinus().mul(0.06));
   const moltenRoughness = float(0.32).add(streaks.sub(0.5).mul(0.1));
   material.roughnessNode = mix(crustRoughness, moltenRoughness, molten).clamp(0.05, 1);
-  material.clearcoatNode = glass.mul(0.7).mul(molten.oneMinus());
+  material.clearcoatNode = glass.mul(0.75).mul(molten.oneMinus());
   material.clearcoatRoughnessNode = float(0.22).add(grain.sub(0.5).mul(0.15)).clamp(0.05, 1);
+
+  // PBR refinement, all from WGSL: cavity occlusion keeps crevices dark
+  // under the environment light, specular mottling breaks up the sheen,
+  // glinting mineral facets read as tiny metallic flakes, and the glassy
+  // skin gets a faint thin-film iridescence.
+  const pbr = crustPbr({ position: p, t });
+  const cavity = pbr.x;
+  const irid = pbr.y;
+  const specMottle = pbr.z;
+  const facets = pbr.w;
+  material.aoNode = cavity;
+  material.specularIntensityNode = mix(specMottle, float(1), molten);
+  material.metalnessNode = facets.mul(glass.mul(0.4).add(0.1)).mul(molten.oneMinus());
+  material.iridescenceNode = irid.mul(glass).mul(0.3);
+  material.iridescenceIORNode = float(2.0);
+  material.iridescenceThicknessNode = irid.mul(250).add(150);
 
   // Plates bulge up, molten channels sink. The sink mask is a separate wide,
   // low-frequency field so coarse meshes sample it without stippling.
@@ -113,6 +130,11 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
     .sub(microTangent.mul(mix(float(0.035), float(0.006), molten)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
+
+  // The clearcoat is the frozen glass skin draped over the rock: it follows
+  // the plates but not the mineral grain, so it gets its own smoother normal.
+  const skinNormal = normalLocal.sub(tangentGrad.mul(0.1)).normalize();
+  material.clearcoatNormalNode = transformNormalToView(skinNormal);
 
   return { material, glowIntensity, scale };
 }

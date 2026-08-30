@@ -9,6 +9,7 @@ import { float } from "three/tsl";
 import { createMarbleMaterial } from "./marble-material.ts";
 import { createLavaMaterial } from "./lava-material.ts";
 import { applyNightEnvironment } from "./environment.ts";
+import { createBloomPipeline } from "./post.ts";
 
 declare global {
   interface Window { __result?: unknown }
@@ -53,10 +54,10 @@ async function run(): Promise<unknown> {
     // HDRI ambient plus a moonlight key; the warm floor bounce fakes the
     // glow lighting the crust back.
     await applyNightEnvironment(scene);
-    const key = new THREE.DirectionalLight(0xcfd8e6, 3.4 * lightScale);
+    const key = new THREE.DirectionalLight(0xcfd8e6, 2.2 * lightScale);
     key.position.set(3, 2.2, 2);
     scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.35));
+    scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.22));
   } else {
     const key = new THREE.DirectionalLight(0xffffff, 2.4 * lightScale);
     key.position.set(3, 4, 2);
@@ -74,9 +75,16 @@ async function run(): Promise<unknown> {
   }
   scene.add(buildMesh(meshKind, material));
 
-  const target = new THREE.RenderTarget(size, size, { samples: 4 });
+  // With the bloom chain, MSAA lives on the scene pass; the final quad
+  // composite needs no samples of its own.
+  const target = new THREE.RenderTarget(size, size, { samples: materialName === "lava" ? 1 : 4 });
   renderer.setRenderTarget(target);
-  await renderer.renderAsync(scene, camera);
+  if (materialName === "lava" && params.get("post") !== "0") {
+    const postProcessing = createBloomPipeline(renderer, scene, camera);
+    await postProcessing.renderAsync();
+  } else {
+    await renderer.renderAsync(scene, camera);
+  }
   const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)) as Uint8Array;
 
   let lit = 0;

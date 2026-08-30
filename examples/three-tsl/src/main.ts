@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createMarbleMaterial } from "./marble-material.ts";
 import { createLavaMaterial } from "./lava-material.ts";
 import { applyNightEnvironment } from "./environment.ts";
+import { createBloomPipeline } from "./post.ts";
 
 async function main(): Promise<void> {
   if (navigator.gpu === undefined) {
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
   const mesh = new THREE.Mesh(new THREE.TorusKnotGeometry(1, 0.38, 400, 64), material);
   scene.add(mesh);
 
+  const postProcessing = materialName === "lava" ? createBloomPipeline(renderer, scene, camera) : null;
+
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -55,7 +58,8 @@ async function main(): Promise<void> {
   renderer.setAnimationLoop(() => {
     mesh.rotation.y += 0.0012;
     controls.update();
-    renderer.render(scene, camera);
+    if (postProcessing) postProcessing.render();
+    else renderer.render(scene, camera);
   });
 }
 

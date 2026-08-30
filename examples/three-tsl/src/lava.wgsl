@@ -139,6 +139,20 @@ export fn microDetail(position: vec3f) -> vec2f {
   return vec2f(grain, streaks);
 }
 
+// PBR refinement masks:
+// x = cavity occlusion (crevices and pits trap ambient light),
+// y = iridescence patches of the glassy skin,
+// z = specular-intensity mottling, w = glinting mineral facets.
+export fn crustPbr(position: vec3f, t: f32) -> vec4f {
+  let domain = lavaDomain(position, t);
+  let crevice = smoothstep(0.52, 0.24, fbm3(position * 13.0, 4u));
+  let cavity = clamp(1.0 - crevice * 0.5 - vesiclePits(position) * 0.35, 0.0, 1.0);
+  let irid = smoothstep(0.5, 0.8, fbm3(domain * 1.6 + vec3f(31.0, 7.0, 19.0), 3u));
+  let spec = 0.55 + 0.45 * fbm3(domain * 3.0 + vec3f(9.0, 1.0, 25.0), 3u);
+  let facets = smoothstep(0.72, 0.92, perlin3(position * 21.0 + vec3f(11.0, 3.0, 29.0)));
+  return vec4f(cavity, irid, spec, facets);
+}
+
 // Shading masks for the crust skin:
 // x = tone mottling, y = oxide staining, z = glassy-sheen mask, w = vesicle pits.
 export fn crustSurface(position: vec3f, t: f32) -> vec4f {

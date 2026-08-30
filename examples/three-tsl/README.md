@@ -51,9 +51,28 @@ TSL nodes:
   displacement, kept separate from the thin cracks so coarse meshes don't
   stipple.
 
+- `crustPbr` — a fourth `vec4f` of PBR masks: cavity occlusion (`aoNode`),
+  iridescence patches of the glassy skin (`iridescenceNode` + IOR +
+  thickness), specular-intensity mottling (`specularIntensityNode`), and
+  glinting mineral facets (`metalnessNode`). The clearcoat also gets its own
+  smoother `clearcoatNormalNode` — the frozen glass skin drapes over the
+  plates but not the mineral grain. In total the material feeds twelve
+  `MeshPhysicalNodeMaterial` slots from WGSL: color, emissive, roughness,
+  metalness, ao, normal, clearcoat, clearcoat roughness, clearcoat normal,
+  specular intensity, iridescence (+IOR/thickness), and position.
+
 Lighting is image-based: a CC0 Poly Haven night HDRI (via `@pmndrs/assets`)
 drives `scene.environment` and the backdrop, plus a cool moonlight key and a
 faint warm floor bounce standing in for the glow lighting the crust back.
+The lava scene renders through `THREE.PostProcessing` with an HDR bloom
+(`three/addons/tsl/display/BloomNode.js`) thresholded above anything the
+crust can reflect, so only the incandescent melt blooms.
+
+Note on the harness: rendering straight into a `RenderTarget` skips tone
+mapping and sRGB encoding (three treats targets as linear intermediates),
+while the `PostProcessing` chain bakes the full output transform — so
+harness screenshots match the on-screen image only on the post path
+(`?post=0` reads back linear and darker).
 
 ## How the bridge works
 

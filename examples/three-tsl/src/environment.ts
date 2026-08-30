@@ -11,7 +11,7 @@ export async function applyNightEnvironment(scene: THREE.Scene): Promise<void> {
   const texture = await new EXRLoader().loadAsync(nightHdri);
   texture.mapping = THREE.EquirectangularReflectionMapping;
   scene.environment = texture;
-  scene.environmentIntensity = 0.7;
+  scene.environmentIntensity = 0.4;
   scene.background = texture;
-  scene.backgroundIntensity = 0.4;
+  scene.backgroundIntensity = 0.25;
 }
