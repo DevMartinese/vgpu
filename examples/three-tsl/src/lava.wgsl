@@ -58,12 +58,16 @@ export fn flowStriations(position: vec3f, t: f32) -> f32 {
   let gain = 260.0 + 80.0 * fbm3(domain * 0.9 + vec3f(14.0, 6.0, 3.0), 2u);
   let jitter = fbm3(domain * 3.4 + vec3f(8.0, 3.0, 21.0), 3u);
   let band = 0.5 + 0.5 * sin(dot(domain, vec3f(1.3, 0.4, 1.0)) * 75.0 + arc * gain + jitter * 5.0);
-  // Bold width changes: a bimodal width field flips cords between fat bands
-  // and hairlines along their length instead of one uniform profile.
-  let widthNoise = fbm3(domain * 1.6 + vec3f(27.0, 11.0, 5.0), 3u);
-  let widthBias = smoothstep(0.2, 0.65, widthNoise);
-  let cut = mix(0.45, 0.94, widthBias);
-  let crest = smoothstep(cut, mix(cut, 1.0, 0.45), band);
+  // Bold width changes: a bimodal width field swings cords between fat
+  // bands and hairlines — and because the cut can exceed the sinusoid's
+  // peak, a cord narrows all the way to zero and vanishes, so the lines
+  // read as lens-shaped gleams that swell and pinch out instead of running
+  // forever. Intensity fades as the pinch approaches.
+  let widthNoise = fbm3(domain * 2.8 + vec3f(27.0, 11.0, 5.0), 3u);
+  let widthBias = smoothstep(0.24, 0.78, widthNoise);
+  let cut = mix(0.42, 1.12, widthBias);
+  let softEdge = cut + max(1.0 - cut, 0.0) * 0.45 + 0.001;
+  let crest = smoothstep(cut, softEdge, band) * smoothstep(1.1, 0.8, cut);
 
   // Anisotropic breaks: slow variation along the cord, fast across it, so
   // segments are elongated dashes and neighboring cords break differently.
