@@ -113,19 +113,27 @@ export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let washHeat = wash * (1.0 - islands * 0.92) * (1.0 - striae * 0.6);
   let meltHeat = clamp(coreHeat + washHeat, 0.0, 1.0) * (0.72 + 0.28 * activity) + rim * 0.55;
 
-  // --- fringe over solid crust: halo + embers, seeped through the grain ---
+  // --- fringe over solid crust ---
+  // A wide thermal gradient eases the rock-to-melt transition: crust near
+  // any melt sits on a broad dim-red base instead of jumping to black.
+  let warmWide = clamp(smoothstep(0.32, 0.0, primary) * 0.8 + smoothstep(0.1, 0.6, wash), 0.0, 1.0);
+  let warmFalloff = warmWide * warmWide;
   let fine = smoothstep(0.035, 0.0, secondary) * 0.4 * activity * activity;
-  let halo = smoothstep(0.22, 0.0, primary) * 0.16 * (0.3 + 0.7 * activity);
+  let halo = smoothstep(0.38, 0.0, primary) * 0.22 * (0.3 + 0.7 * activity);
   let creviceFine = smoothstep(0.52, 0.24, fbm3(position * 13.0, 4u));
   let creviceCoarse = smoothstep(0.48, 0.28, fbm3(position * 5.5 + vec3f(3.0, 9.0, 1.0), 3u)) * 0.6;
   let crevice = max(creviceFine, creviceCoarse);
-  let warmth = clamp(smoothstep(0.3, 0.0, primary) + wash, 0.0, 1.0);
-  let embers = crevice * warmth * (0.25 + 0.75 * activity) * 0.7;
+  let embers = crevice * warmWide * (0.25 + 0.75 * activity) * 0.7;
+  // The same flow cords run over the rock, but inverted: the crease centers
+  // glow as thin lava lines in the fold valleys, fading with distance from
+  // the melt.
+  let creaseGlow = smoothstep(0.45, 0.9, striae) * warmFalloff * (0.25 + 0.75 * activity) * 0.55;
   // Same grain register as microDetail, so the seep sits in the crevices of
   // the micro normals you actually see.
   let grain = turbulence3(position * 19.0, 5u);
   let seep = smoothstep(0.62, 0.25, grain);
-  let fringeHeat = (fine + halo + embers) * seep * (1.0 - meltMask);
+  let glowBase = warmFalloff * 0.15;
+  let fringeHeat = (glowBase + (fine + halo + embers) * seep + creaseGlow) * (1.0 - meltMask);
 
   // Slow breathing so the melt looks alive.
   let pulse = 0.9 + 0.1 * sin(t * 0.7 + fbm3(domain, 2u) * 6.2831853);
@@ -178,9 +186,9 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
   let lobes = ropeMask(domain);
   let rough = turbulence3(domain * 4.2, 6u) * 0.2;
-  let fine = turbulence3(domain * 9.5 + vec3f(2.0, 12.0, 6.0), 5u) * 0.12;
+  let fine = turbulence3(domain * 9.5 + vec3f(2.0, 12.0, 6.0), 5u) * 0.08;
   let ropes = ropeFolds(domain) * lobes * 0.38;
-  let rubble = turbulence3(position * 13.0, 5u) * (1.0 - lobes) * 0.3;
+  let rubble = turbulence3(position * 13.0, 5u) * (1.0 - lobes) * 0.22;
   let pits = vesiclePits(position) * 0.08;
   return clamp(dome * 0.45 + rough + fine + ropes + rubble - pits + 0.06, 0.0, 1.0);
 }

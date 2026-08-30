@@ -141,9 +141,9 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const striaeTangent = striaeGrad.sub(normalLocal.mul(striaeGrad.dot(normalLocal)));
 
   const bumped = normalLocal
-    .sub(tangentGrad.mul(mix(float(0.22), float(0.04), molten)))
-    .sub(microTangent.mul(mix(float(0.045), float(0.008), molten)))
-    .sub(striaeTangent.mul(molten.mul(0.012)))
+    .sub(tangentGrad.mul(mix(float(0.16), float(0.04), molten)))
+    .sub(microTangent.mul(mix(float(0.022), float(0.008), molten)))
+    .sub(striaeTangent.mul(mix(float(0.006), float(0.012), molten)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
 

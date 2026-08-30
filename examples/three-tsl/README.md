@@ -48,8 +48,10 @@ TSL nodes:
   boundaries (`f2 - f1` from `@vgpu/wgsl-std/noise`); melt washes flanking
   the channels, textured by `flowStriations` (thin cooled cords fanning
   through the melt skin, ~50 per lobe) with white-hot contact rims at wash
-  edges and around floating crust islands; and an ember fringe over solid
-  crust that only seeps through the crevices of the micro grain.
+  edges and around floating crust islands; and a fringe over solid crust —
+  a wide thermal gradient toward the melt, ember speckle seeping through
+  the micro grain, and the same flow cords inverted so their crease
+  centers glow as thin lava lines in the fold valleys.
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
