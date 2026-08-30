@@ -58,9 +58,12 @@ export fn flowStriations(position: vec3f, t: f32) -> f32 {
   let gain = 260.0 + 80.0 * fbm3(domain * 0.9 + vec3f(14.0, 6.0, 3.0), 2u);
   let jitter = fbm3(domain * 3.4 + vec3f(8.0, 3.0, 21.0), 3u);
   let band = 0.5 + 0.5 * sin(dot(domain, vec3f(1.3, 0.4, 1.0)) * 75.0 + arc * gain + jitter * 5.0);
-  // Very narrow crests: thin lines over wide bright gaps.
-  let band2 = band * band;
-  let crest = band2 * band2 * band2;
+  // Bold width changes: a bimodal width field flips cords between fat bands
+  // and hairlines along their length instead of one uniform profile.
+  let widthNoise = fbm3(domain * 1.6 + vec3f(27.0, 11.0, 5.0), 3u);
+  let widthBias = smoothstep(0.2, 0.65, widthNoise);
+  let cut = mix(0.45, 0.94, widthBias);
+  let crest = smoothstep(cut, mix(cut, 1.0, 0.45), band);
 
   // Anisotropic breaks: slow variation along the cord, fast across it, so
   // segments are elongated dashes and neighboring cords break differently.
@@ -125,16 +128,12 @@ export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let creviceCoarse = smoothstep(0.48, 0.28, fbm3(position * 5.5 + vec3f(3.0, 9.0, 1.0), 3u)) * 0.6;
   let crevice = max(creviceFine, creviceCoarse);
   let embers = crevice * warmWide * (0.25 + 0.75 * activity) * 0.7;
-  // The same flow cords run over the rock, but inverted: the crease centers
-  // glow as thin lava lines in the fold valleys, fading with distance from
-  // the melt.
-  let creaseGlow = smoothstep(0.45, 0.9, striae) * warmFalloff * (0.25 + 0.75 * activity) * 0.55;
   // Same grain register as microDetail, so the seep sits in the crevices of
   // the micro normals you actually see.
   let grain = turbulence3(position * 19.0, 5u);
   let seep = smoothstep(0.62, 0.25, grain);
   let glowBase = warmFalloff * 0.15;
-  let fringeHeat = (glowBase + (fine + halo + embers) * seep + creaseGlow) * (1.0 - meltMask);
+  let fringeHeat = (glowBase + (fine + halo + embers) * seep) * (1.0 - meltMask);
 
   // Slow breathing so the melt looks alive.
   let pulse = 0.9 + 0.1 * sin(t * 0.7 + fbm3(domain, 2u) * 6.2831853);
@@ -190,6 +189,19 @@ fn vesiclePits(position: vec3f) -> f32 {
   let cluster = smoothstep(0.52, 0.68, fbm3(position * 1.4 + vec3f(9.0, 27.0, 4.0), 3u));
   let sample = voronoi3d(position * 26.0);
   return smoothstep(0.14, 0.03, sample.f1) * cluster;
+}
+
+// Smooth vertex-scale relief, 0..1: domed plates and rope folds only. The
+// flaky scabs are per-cell plateaus — skin detail for normals, not for
+// vertices, where their discontinuities would show as stair-steps on the
+// mesh grid.
+export fn crustRelief(position: vec3f, t: f32) -> f32 {
+  let domain = lavaDomain(position, t);
+  let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
+  let lobes = ropeMask(domain);
+  let rough = turbulence3(domain * 4.2, 4u) * 0.14;
+  let ropes = ropeFolds(domain) * lobes * 0.38;
+  return clamp(dome * 0.45 + rough + ropes + 0.12, 0.0, 1.0);
 }
 
 // Crust relief height, 0..1: domed plates that sink toward the cracks,

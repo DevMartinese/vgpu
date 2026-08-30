@@ -1,13 +1,14 @@
 import * as THREE from "three/webgpu";
-import { float, mix, normalLocal, positionLocal, smoothstep, time, transformNormalToView, uniform, vec3 } from "three/tsl";
+import { float, fwidth, mix, normalLocal, positionLocal, smoothstep, time, transformNormalToView, uniform, vec3 } from "three/tsl";
 import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
 
-const { lavaGlow, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, microDetail, flowStriations } = tslExports(lavaModule, [
+const { lavaGlow, blackbody, crustHeight, crustRelief, crustSurface, crustPbr, lavaSink, microDetail, flowStriations } = tslExports(lavaModule, [
   "lavaGlow",
   "blackbody",
   "crustHeight",
+  "crustRelief",
   "crustSurface",
   "crustPbr",
   "lavaSink",
@@ -59,6 +60,13 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const grain = micro.x;
   const streaks = micro.y;
 
+  // Band-limiting: fade each detail register out as its wavelength drops
+  // under the pixel footprint, so distant/minified areas stay clean instead
+  // of dissolving into per-pixel speckle.
+  const footprint = fwidth(p).length();
+  const microFade = smoothstep(0.022, 0.007, footprint);
+  const striaeFade = smoothstep(0.012, 0.004, footprint);
+
   const material = new THREE.MeshPhysicalNodeMaterial({ metalness: 0 });
 
   // Basalt skin: warm dusty grey-brown, ridges catching more light than the
@@ -79,7 +87,7 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   // the glassy skin is polished but streaked by flow lines, vesicle pits and
   // dusty valleys scatter more, and molten rock is a glossy liquid.
   const crustRoughness = mix(float(0.94), float(0.55), glass)
-    .add(grain.sub(0.5).mul(0.14))
+    .add(grain.sub(0.5).mul(microFade.mul(0.14)))
     .add(streaks.sub(0.5).mul(0.12).mul(glass))
     .add(pits.mul(0.08))
     .add(height.oneMinus().mul(0.05));
@@ -104,10 +112,11 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   material.iridescenceIORNode = float(2.0);
   material.iridescenceThicknessNode = irid.mul(250).add(150);
 
-  // Plates bulge up, molten channels sink. The sink mask is a separate wide,
-  // low-frequency field so coarse meshes sample it without stippling.
+  // Plates bulge up, molten channels sink. Vertices only see smooth fields:
+  // crustRelief has no per-cell flake plateaus (those would stair-step on
+  // the mesh grid) and the sink mask is wide and low-frequency.
   const sink = lavaSink({ position: p, t });
-  const relief = height.mul(0.5).sub(sink.mul(0.4)).mul(0.12);
+  const relief = crustRelief({ position: p, t }).mul(0.5).sub(sink.mul(0.4)).mul(0.12);
   material.positionNode = positionLocal.add(normalLocal.mul(relief));
 
   // Bump normals in two registers, both by finite differences projected onto
@@ -142,8 +151,8 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
 
   const bumped = normalLocal
     .sub(tangentGrad.mul(mix(float(0.16), float(0.04), molten)))
-    .sub(microTangent.mul(mix(float(0.022), float(0.008), molten)))
-    .sub(striaeTangent.mul(mix(float(0.006), float(0.012), molten)))
+    .sub(microTangent.mul(mix(float(0.022), float(0.008), molten).mul(microFade)))
+    .sub(striaeTangent.mul(mix(float(0.006), float(0.012), molten).mul(striaeFade)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
 

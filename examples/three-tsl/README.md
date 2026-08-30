@@ -49,9 +49,10 @@ TSL nodes:
   the channels, textured by `flowStriations` (thin cooled cords fanning
   through the melt skin, ~50 per lobe) with white-hot contact rims at wash
   edges and around floating crust islands; and a fringe over solid crust —
-  a wide thermal gradient toward the melt, ember speckle seeping through
-  the micro grain, and the same flow cords inverted so their crease
-  centers glow as thin lava lines in the fold valleys.
+  a wide thermal gradient toward the melt plus ember speckle seeping
+  through the micro grain. The cords swing boldly between fat bands and
+  hairlines via a bimodal width field, and only mark the melt, never the
+  rock.
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,

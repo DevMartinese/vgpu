@@ -16,7 +16,7 @@ export function createBloomPipeline(
   const postProcessing = new THREE.PostProcessing(renderer);
   const scenePass = pass(scene, camera, { samples: options.samples ?? 4 });
   const sceneColor = scenePass.getTextureNode();
-  const bloomNode = bloom(sceneColor, 0.42, 0.28, 1.6);
+  const bloomNode = bloom(sceneColor, 0.42, 0.2, 1.6);
   postProcessing.outputNode = sceneColor.add(bloomNode);
   return postProcessing;
 }
