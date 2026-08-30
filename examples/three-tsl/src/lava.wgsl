@@ -29,9 +29,31 @@ fn plateEdge(position: vec3f) -> f32 {
   return sample.f2 - sample.f1;
 }
 
-// Heat of the molten network, 0..1. Thin polygonal cracks between crust
-// plates, a faint ember halo around them, and occasional molten pools.
-export fn lavaHeat(position: vec3f, t: f32) -> f32 {
+// Laminar flow striations in the melt skin: dozens of thin cords sweeping
+// in arcs, like the wrinkled surface of an advancing pahoehoe lobe. The
+// crests are slightly cooled skin, so callers *subtract* heat with it.
+export fn flowStriations(position: vec3f, t: f32) -> f32 {
+  let domain = lavaDomain(position, t);
+  // The arc term dominates the phase, so the cords follow the swirling
+  // contours of a smooth fbm — fans and whorls — instead of one direction;
+  // its high gain packs ~50 cords per lobe like the reference photos.
+  let arc = fbm3(domain * 0.55 + vec3f(4.7, 9.2, 1.3), 3u);
+  let jitter = fbm3(domain * 3.4 + vec3f(8.0, 3.0, 21.0), 3u);
+  let phase = dot(domain, vec3f(1.3, 0.4, 1.0)) * 110.0 + arc * 260.0 + jitter * 8.0;
+  let band = 0.5 + 0.5 * sin(phase);
+  // Narrow crests over wide bright gaps: the cords read as thin cooled
+  // lines, not a soft sinusoid.
+  return band * band * band * band;
+}
+
+// Final glow composition: x = heat 0..1 (feed the blackbody ramp),
+// y = continuous-melt mask 0..1 (liquid gloss, not ember fringe).
+//
+// Two families, matching reference photos: laminar melt (crack cores and
+// washes, textured by flow striations, with white-hot contact rims), and a
+// fringe over solid crust (halo + ember speckle) that only seeps through
+// the crevices of the micro grain instead of sitting painted on top.
+export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let domain = lavaDomain(position, t);
   // Fine wiggle so voronoi boundaries stop looking ruler-straight.
   let wiggle = domain + (vec3f(
@@ -46,36 +68,47 @@ export fn lavaHeat(position: vec3f, t: f32) -> f32 {
   // Not every crack is active: many have cooled shut.
   let activity = 0.12 + 0.88 * smoothstep(0.35, 0.8, fbm3(domain * 0.7 + vec3f(0.0, 0.0, 0.02) * t, 3u));
 
-  // Crack width varies along the crack: pinches, and widenings that expose melt.
+  // --- continuous melt: crack cores plus washes, laminar ---
   let coreWidth = 0.028 + 0.05 * fbm3(domain * 1.3 + vec3f(42.0, 13.0, 27.0), 3u);
-  let core = smoothstep(coreWidth, 0.0, primary);              // white-hot crack center
-  let fine = smoothstep(0.035, 0.0, secondary) * 0.4;          // secondary hairline cracks
-  let halo = smoothstep(0.22, 0.0, primary) * 0.16;            // ember glow bleeding into crust
-
-  // Broad melt windows with darker crust islands floating on them, so
-  // exposed melt reads as a patchy wash instead of another line.
-  // Melt washes open beside the main channels, plus standalone windows;
-  // darker crust islands float on both so the melt reads as a patchy wash.
+  let core = smoothstep(coreWidth, 0.0, primary);
   let window = smoothstep(0.6, 0.78, fbm3(domain * 0.5, 4u));
   let flank = smoothstep(0.28, 0.04, primary) * smoothstep(0.53, 0.76, fbm3(domain * 1.1 + vec3f(17.0, 2.0, 12.0), 3u));
+  let wash = clamp(window + flank * 0.9, 0.0, 1.0);
   let islands = smoothstep(0.42, 0.68, fbm3(domain * 2.1 + vec3f(6.0, 21.0, 9.0), 4u));
-  let meltTexture = 0.7 + 0.3 * valueNoise3(domain * vec3f(2.2, 6.5, 2.2) + vec3f(0.0, 0.1, 0.0) * t);
-  let pools = clamp(window + flank * 0.8, 0.0, 1.0) * mix(1.0, 0.12, islands) * meltTexture;
+  let meltMask = clamp(core * (0.4 + 0.6 * activity) + wash * (1.0 - islands * 0.92), 0.0, 1.0);
 
-  // Ember speckle: the joints between clinker blocks glow wherever the
-  // ground is warm, in two granule sizes. The fine register reuses the
-  // rubble grain field from crustHeight, so the embers sit inside the
-  // crevices of the relief you actually see.
+  // Contact rims burn white where fresh interior is exposed: at the outer
+  // edges of washes and around the crust islands floating on them.
+  let washRim = smoothstep(0.02, 0.2, wash) * smoothstep(0.75, 0.28, wash);
+  let islandRim = islands * (1.0 - islands) * 4.0 * wash;
+  let rim = clamp(washRim + islandRim * 0.6, 0.0, 1.0) * (0.4 + 0.6 * activity);
+
+  // The melt skin cools in cords: striation crests drop toward deep red
+  // while the troughs stay orange. Crack cores are freshly torn and stay
+  // nearly uniform white-hot.
+  let striae = flowStriations(position, t);
+  let coreHeat = core * (0.4 + 0.6 * activity) * (1.0 - striae * 0.18);
+  let washHeat = wash * (1.0 - islands * 0.92) * (1.0 - striae * 0.55);
+  let meltHeat = clamp(coreHeat + washHeat, 0.0, 1.0) * (0.72 + 0.28 * activity) + rim * 0.55;
+
+  // --- fringe over solid crust: halo + embers, seeped through the grain ---
+  let fine = smoothstep(0.035, 0.0, secondary) * 0.4 * activity * activity;
+  let halo = smoothstep(0.22, 0.0, primary) * 0.16 * (0.3 + 0.7 * activity);
   let creviceFine = smoothstep(0.52, 0.24, fbm3(position * 13.0, 4u));
   let creviceCoarse = smoothstep(0.48, 0.28, fbm3(position * 5.5 + vec3f(3.0, 9.0, 1.0), 3u)) * 0.6;
   let crevice = max(creviceFine, creviceCoarse);
-  let warmth = clamp(smoothstep(0.3, 0.0, primary) + window, 0.0, 1.0);
+  let warmth = clamp(smoothstep(0.3, 0.0, primary) + wash, 0.0, 1.0);
   let embers = crevice * warmth * (0.25 + 0.75 * activity) * 0.7;
+  // Same grain register as microDetail, so the seep sits in the crevices of
+  // the micro normals you actually see.
+  let grain = turbulence3(position * 19.0, 5u);
+  let seep = smoothstep(0.62, 0.25, grain);
+  let fringeHeat = (fine + halo + embers) * seep * (1.0 - meltMask);
 
-  let heat = core * (0.55 + 0.45 * activity) + fine * activity * activity + halo * (0.3 + 0.7 * activity) + pools + embers;
   // Slow breathing so the melt looks alive.
   let pulse = 0.9 + 0.1 * sin(t * 0.7 + fbm3(domain, 2u) * 6.2831853);
-  return clamp(heat * pulse, 0.0, 1.0);
+  let heat = clamp((meltHeat + fringeHeat) * pulse, 0.0, 1.0);
+  return vec2f(heat, clamp(meltMask + rim * 0.5, 0.0, 1.0));
 }
 
 // Wide, smooth channel mask for vertex displacement: 1 inside molten

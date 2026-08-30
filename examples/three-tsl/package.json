@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "previews": "vite-node scripts/generate-previews.ts"
+    "previews": "vite-node scripts/generate-previews.ts",
+    "field-viz": "vite-node scripts/field-viz.ts"
   },
   "dependencies": {
     "@vgpu/wgsl": "workspace:*",

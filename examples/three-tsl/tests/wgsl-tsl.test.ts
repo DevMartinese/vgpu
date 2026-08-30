@@ -61,14 +61,14 @@ describe("tslExports over a vgpu-resolved module", () => {
     const entry = fileURLToPath(new URL("../src/lava.wgsl", import.meta.url));
     const resolved = await resolveShader({ entry });
 
-    const names = ["lavaHeat", "blackbody", "crustHeight", "crustSurface", "crustPbr", "lavaSink", "microDetail"] as const;
+    const names = ["lavaGlow", "flowStriations", "blackbody", "crustHeight", "crustSurface", "crustPbr", "lavaSink", "microDetail"] as const;
     const nodes = tslExports(resolved.wgsl, names);
     for (const name of names) expect(typeof nodes[name]).toBe("function");
 
-    // lavaHeat's signature survives the flatten+mangle round trip.
-    const header = parseFunctionHeader(resolved.wgsl, "lavaHeat");
+    // lavaGlow's signature survives the flatten+mangle round trip.
+    const header = parseFunctionHeader(resolved.wgsl, "lavaGlow");
     expect(header.paramNames).toEqual(["position", "t"]);
-    expect(header.returnType).toBe("f32");
+    expect(header.returnType).toBe("vec2f");
   });
 
   it("wraps the flattened module graph by authored names", async () => {
@@ -76,7 +76,7 @@ describe("tslExports over a vgpu-resolved module", () => {
     const resolved = await resolveShader({ entry });
 
     // Non-entry-point functions are mangled per module; export keywords are gone.
-    expect(resolved.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__lavaHeat\(/);
+    expect(resolved.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__lavaGlow\(/);
     expect(resolved.wgsl).toMatch(/_vgsl_[0-9a-f]{8}__voronoi3d/);
     expect(resolved.wgsl).not.toMatch(/\bexport\b/);
 
@@ -87,9 +87,9 @@ describe("tslExports over a vgpu-resolved module", () => {
     expect(forwardingWrapper(header)).toContain(`return ${header.resolvedName}(t);`);
 
     // wgslFn returns a callable; invoking it with named inputs builds a call node.
-    const nodes = tslExports(resolved.wgsl, ["lavaHeat", "blackbody"]);
+    const nodes = tslExports(resolved.wgsl, ["lavaGlow", "blackbody"]);
     expect(typeof nodes.blackbody).toBe("function");
-    const call = nodes.lavaHeat({ position: vec3(0, 0, 0), t: 6 });
+    const call = nodes.lavaGlow({ position: vec3(0, 0, 0), t: 6 });
     expect(call.isNode).toBe(true);
   });
 });

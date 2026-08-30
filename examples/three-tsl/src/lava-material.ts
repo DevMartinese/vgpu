@@ -4,8 +4,8 @@ import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
 
-const { lavaHeat, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, microDetail } = tslExports(lavaModule, [
-  "lavaHeat",
+const { lavaGlow, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, microDetail } = tslExports(lavaModule, [
+  "lavaGlow",
   "blackbody",
   "crustHeight",
   "crustSurface",
@@ -38,7 +38,12 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const t = options.timeNode ?? time;
 
   const p = positionLocal.mul(scale);
-  const heat = lavaHeat({ position: p, t });
+  // The whole glow composition (laminar melt with striations and contact
+  // rims, plus the grain-seeped ember fringe) lives in lava.wgsl: x = heat,
+  // y = continuous-melt mask.
+  const glow = lavaGlow({ position: p, t });
+  const heat = glow.x;
+  const molten = glow.y;
   const height = crustHeight({ position: p, t });
   const surface = crustSurface({ position: p, t });
   const tone = surface.x;
@@ -47,21 +52,11 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const pits = surface.w;
 
   // High-frequency surface detail: mineral grain plus flow-line streaks
-  // frozen into the glassy skin. Shared by the glow seep mask, the
-  // roughness map, and the micro normal pass below.
+  // frozen into the glassy skin. Shared by the roughness map and the micro
+  // normal pass below.
   const micro = microDetail({ position: p });
   const grain = micro.x;
   const streaks = micro.y;
-
-  // The dim fringe of the glow seeps through the micro grain instead of
-  // sitting painted on top of it: crevices let heat through, grain bumps
-  // occlude it, and hot cores burn through everything.
-  const seep = smoothstep(0.62, 0.25, grain);
-  const burnThrough = smoothstep(0.5, 0.85, heat);
-  const glowHeat = heat.mul(mix(seep, float(1), burnThrough));
-
-  // How exposed the melt is: crust occludes low heat completely.
-  const molten = smoothstep(0.3, 0.75, glowHeat);
 
   const material = new THREE.MeshPhysicalNodeMaterial({ metalness: 0 });
 
@@ -74,10 +69,10 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const basalt = mix(stained, stained.mul(0.45), pits);
   material.colorNode = mix(basalt, vec3(0.012, 0.01, 0.009), molten);
 
-  // Incandescence: blackbody ramp over the seeped heat field, crushed
-  // slightly so crack cores go yellow-white while edges cool through deep
-  // red inside the grain crevices.
-  material.emissiveNode = blackbody({ t: glowHeat.pow(1.35) }).mul(glowIntensity);
+  // Incandescence: blackbody ramp over the composed heat field, crushed
+  // slightly so contact rims go yellow-white while striation crests cool
+  // through deep red.
+  material.emissiveNode = blackbody({ t: heat.pow(1.35) }).mul(glowIntensity);
 
   // Roughness map, not a constant: rubble is matte with sharp grain breakup,
   // the glassy skin is polished but streaked by flow lines, vesicle pits and

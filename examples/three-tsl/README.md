@@ -26,6 +26,7 @@ src/scenes.ts          shared scene/lights/mesh builders
 src/main.ts            torus knot scene, WebGPURenderer
 src/harness.ts         offscreen render smoke check (also runs headless)
 scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
+scripts/field-viz.ts          renders lava.wgsl fields to PNGs with pure vgpu
 ```
 
 ## Run
@@ -42,13 +43,13 @@ Open the printed URL in a WebGPU-capable browser.
 Everything procedural lives in `lava.wgsl` and flows into the material as
 TSL nodes:
 
-- `lavaHeat` — three registers of glow, matching how real flows read:
+- `lavaGlow` — the full glow composition as `vec2f(heat, meltMask)`:
   variable-width incandescent cracks along fbm-warped voronoi plate
-  boundaries (`f2 - f1` from `@vgpu/wgsl-std/noise`) with hairline
-  secondaries gated by an "activity" field; patchy melt washes flanking the
-  main channels with darker crust islands floating on them; and a
-  two-size ember speckle that glows in the joints of the same rubble grain
-  the relief shows.
+  boundaries (`f2 - f1` from `@vgpu/wgsl-std/noise`); melt washes flanking
+  the channels, textured by `flowStriations` (thin cooled cords fanning
+  through the melt skin, ~50 per lobe) with white-hot contact rims at wash
+  edges and around floating crust islands; and an ember fringe over solid
+  crust that only seeps through the crevices of the micro grain.
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
