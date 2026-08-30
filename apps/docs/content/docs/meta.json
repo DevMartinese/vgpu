@@ -1,0 +1,16 @@
+{
+  "root": true,
+  "title": "Documentation",
+  "description": "Build WebGPU applications for browsers, Node.js, and automated workflows.",
+  "pages": [
+    "get-started",
+    "concepts",
+    "guides",
+    "[Examples](/examples)",
+    "examples-api",
+    "cli",
+    "mcp",
+    "ml",
+    "reference"
+  ]
+}

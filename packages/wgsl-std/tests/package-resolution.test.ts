@@ -46,6 +46,40 @@ fn main() -> f32 {
   expect(result.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__fullscreenTriangleClip\(index: u32\) -> vec4f/);
 });
 
+test("structs imported from a package subpath can type bindings and struct members (#212)", async () => {
+  const dir = await workspaceFixture();
+  const entry = join(dir, "app", "main.wgsl");
+  await writeFile(entry, `import { VoronoiSample2, VoronoiSample3, voronoi2d, voronoi3d } from "@vgpu/wgsl-std/noise";
+
+struct Report {
+  flat: VoronoiSample2,
+  volume: VoronoiSample3,
+}
+
+@group(0) @binding(0) var<storage, read_write> report: Report;
+@group(0) @binding(1) var<storage, read_write> latest: VoronoiSample2;
+
+@compute @workgroup_size(1) fn main() {
+  report.flat = voronoi2d(vec2f(0.5, 0.25));
+  report.volume = voronoi3d(vec3f(0.5, 0.25, 0.125));
+  latest = report.flat;
+}`);
+
+  const { reflection } = await resolveShader({ entry, validate: false });
+  const [report, latest] = reflection.bindings;
+
+  expect(report?.layout?.members?.map((member) => [member.name, member.offset, member.size])).toEqual([
+    ["flat", 0, 16],
+    ["volume", 16, 32],
+  ]);
+  expect(latest?.struct?.name).toBe("VoronoiSample2");
+  expect(latest?.layout?.members?.map((member) => [member.name, member.offset])).toEqual([
+    ["f1", 0],
+    ["f2", 4],
+    ["cell", 8],
+  ]);
+});
+
 test("wgsl-std has no root WGSL export", async () => {
   const dir = await workspaceFixture();
   const entry = join(dir, "app", "main.wgsl");
@@ -76,6 +110,52 @@ fn main() -> f32 {
   expect(compact).not.toContain("vec2f(");
   expect(compact).not.toMatch(/inverseLerp|remap|safeNormalize|rotate2d/u);
 });
+
+test("importing @vgpu/wgsl-std/noise/perlin does not pull in simplex, and vice versa", async () => {
+  const dir = await workspaceFixture();
+
+  const perlinEntry = join(dir, "app", "perlin.wgsl");
+  await writeFile(perlinEntry, `import { perlin2d } from "@vgpu/wgsl-std/noise/perlin";
+fn main() -> f32 { return perlin2d(vec2f(0.25, 0.75)); }`);
+  const perlinResult = await resolveShader({ entry: perlinEntry, validate: false });
+
+  expect(perlinResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/perlin/index.wgsl"))).toBe(true);
+  expect(perlinResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/internal/gradient.wgsl"))).toBe(true);
+  expect(perlinResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/hash/index.wgsl"))).toBe(true);
+  expect(perlinResult.deps.some((dep) => dep.includes("/noise/simplex/"))).toBe(false);
+  expect(stripWgslComments(perlinResult.wgsl).toLowerCase()).not.toContain("simplex");
+
+  const simplexEntry = join(dir, "app", "simplex.wgsl");
+  await writeFile(simplexEntry, `import { simplex2d } from "@vgpu/wgsl-std/noise/simplex";
+fn main() -> f32 { return simplex2d(vec2f(0.25, 0.75)); }`);
+  const simplexResult = await resolveShader({ entry: simplexEntry, validate: false });
+
+  expect(simplexResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/simplex/index.wgsl"))).toBe(true);
+  expect(simplexResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/noise/internal/gradient.wgsl"))).toBe(true);
+  expect(simplexResult.deps.some((dep) => dep.endsWith("node_modules/@vgpu/wgsl-std/src/hash/index.wgsl"))).toBe(true);
+  expect(simplexResult.deps.some((dep) => dep.includes("/noise/perlin/"))).toBe(false);
+  expect(stripWgslComments(simplexResult.wgsl).toLowerCase()).not.toContain("perlin");
+});
+
+test("importing both noise/perlin and noise/simplex resolves each module's declarations exactly once", async () => {
+  const dir = await workspaceFixture();
+  const entry = join(dir, "app", "main.wgsl");
+  await writeFile(entry, `import { perlin2d } from "@vgpu/wgsl-std/noise/perlin";
+import { simplex2d } from "@vgpu/wgsl-std/noise/simplex";
+fn main() -> f32 { return perlin2d(vec2f(0.25, 0.75)) + simplex2d(vec2f(0.25, 0.75)); }`);
+
+  const result = await resolveShader({ entry, validate: false });
+  const wgsl = stripWgslComments(result.wgsl);
+
+  for (const symbol of ["gradIndex2", "gradDot2", "gradIndex3", "gradDot3", "noiseFade2", "noiseFade3"]) {
+    const occurrences = wgsl.match(new RegExp(`fn _vgsl_[0-9a-f]{8}__${symbol}\\(`, "gu")) ?? [];
+    expect(occurrences.length).toBe(1);
+  }
+});
+
+function stripWgslComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//gu, " ").replace(/\/\/[^\n]*/gu, " ");
+}
 
 async function workspaceFixture(): Promise<string> {
   const dir = await mkdirTemp();

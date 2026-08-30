@@ -1,5 +1,6 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { FrameRunner } from "../src/frame.ts";
+import { init, effect, frame, frameLoop, target } from "../src/mock.ts";
 
 type RafCallback = (timestamp: number) => void;
 
@@ -43,8 +44,92 @@ test("FrameRunner.loop caps callbacks to the requested fps", () => {
   expect(callbacks.has(6)).toBe(false);
 });
 
+test("gpu.dispose() stops the render loops that gpu started", async () => {
+  const callbacks = mockAnimationFrames();
+  const gpu = await init();
+  const colorTarget = target(gpu, { size: [4, 4] });
+  const shader = effect(gpu, `@fragment fn fs_main() -> @location(0) vec4f { return vec4f(1); }`);
+
+  let calls = 0;
+  frameLoop(gpu, (currentFrame) => {
+    calls += 1;
+    currentFrame.pass(colorTarget, shader);
+  });
+  fire(callbacks, 1, 0);
+  expect(calls).toBe(1);
+
+  // A tick can already be queued when dispose lands: keep the callback the loop rescheduled.
+  const queuedTick = callbacks.get(2);
+  expect(queuedTick).toBeDefined();
+  gpu.dispose();
+
+  // The handle was cancelled, and the tick that slipped through returns without touching the device.
+  expect(callbacks.size).toBe(0);
+  expect(() => queuedTick?.(16)).not.toThrow();
+  expect(calls).toBe(1);
+});
+
+test("a loop stopped by hand is untracked, so gpu.dispose() has nothing left to stop", async () => {
+  const callbacks = mockAnimationFrames();
+  const gpu = await init();
+
+  let calls = 0;
+  const handle = frameLoop(gpu, () => { calls += 1; });
+  fire(callbacks, 1, 0);
+  handle.stop();
+  expect(callbacks.size).toBe(0);
+
+  expect(() => gpu.dispose()).not.toThrow();
+  expect(calls).toBe(1);
+});
+
+test("disposing the gpu inside its loop callback does not enqueue one final tick", async () => {
+  const callbacks = mockAnimationFrames();
+  const gpu = await init();
+
+  frameLoop(gpu, () => { gpu.dispose(); });
+  fire(callbacks, 1, 0);
+
+  // dispose() ran while tick 1 was executing. The tick must observe stop() before scheduling tick 2.
+  expect(callbacks.size).toBe(0);
+});
+
+function mockAnimationFrames(): Map<number, RafCallback> {
+  const callbacks = new Map<number, RafCallback>();
+  let nextId = 1;
+  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+    const id = nextId++;
+    callbacks.set(id, cb);
+    return id;
+  }) as typeof requestAnimationFrame;
+  globalThis.cancelAnimationFrame = ((id: number) => { callbacks.delete(id); }) as typeof cancelAnimationFrame;
+  return callbacks;
+}
+
 function fire(callbacks: Map<number, RafCallback>, id: number, timestamp: number): void {
   const cb = callbacks.get(id);
   callbacks.delete(id);
   cb?.(timestamp);
 }
+
+test("dispose stops the loops before the device goes down, then tears down once", async () => {
+  const callbacks = mockAnimationFrames();
+  const gpu = await init();
+  const order: string[] = [];
+
+  const handle = frameLoop(gpu, () => undefined);
+  const stop = handle.stop.bind(handle);
+  handle.stop = () => { order.push("loop.stop"); stop(); };
+  const colorTarget = target(gpu, { size: [4, 4] });
+  const shader = effect(gpu, `@fragment fn fs_main() -> @location(0) vec4f { return vec4f(1); }`);
+  frame(gpu, (currentFrame) => currentFrame.pass(colorTarget, shader)); // materializes the pipeline cache
+  vi.spyOn(gpu.device, "dispose").mockImplementation(() => { order.push("device.dispose"); });
+
+  gpu.dispose();
+  gpu.dispose();
+
+  // Schedulers first, device last, and exactly once each: a rAF tick landing mid-teardown must not
+  // encode against a device that is already gone.
+  expect(order).toEqual(["loop.stop", "device.dispose"]);
+  expect(callbacks.size).toBe(0);
+});

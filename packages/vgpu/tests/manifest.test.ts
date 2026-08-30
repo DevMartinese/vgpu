@@ -58,7 +58,7 @@ test("includes guide docs as a first-class kind", () => {
 test("extracts schema v3 topic metadata from symbol docs", () => {
   const manifest = createManifest("vgpu Effect packages/vgpu-api/src/effect.docs.md", {
     exists: () => true,
-    read: () => `# Effect\n\nFullscreen-fragment render unit created by \`gpu.effect()\`.\n\n\`\`\`ts\nconst effect = gpu.effect(shader);\n\`\`\`\n`,
+    read: () => `# Effect\n\nFullscreen-fragment render unit created by \`effect(gpu, source)\`.\n\n\`\`\`ts\nconst shading = effect(gpu, shader);\n\`\`\`\n`,
   });
 
   expect(manifest.schemaVersion).toBe(3);
@@ -67,9 +67,40 @@ test("extracts schema v3 topic metadata from symbol docs", () => {
     topicTitle: "Effect",
     anchor: "effect",
     symbolKind: "type",
-    summary: "Fullscreen-fragment render unit created by `gpu.effect()`.",
-    snippet: "const effect = gpu.effect(shader);",
+    summary: "Fullscreen-fragment render unit created by `effect(gpu, source)`.",
+    snippet: "const shading = effect(gpu, shader);",
   });
+});
+
+test("parses declared search keywords for guides", () => {
+  const manifest = createManifest("", {
+    exists: () => true,
+    read: () => "---\ntitle: Using vgpu with Next.js\nkeywords: nextjs, Next.js, wgsl loader, declare module, , nextjs\n---\n\n# Using vgpu with Next.js\n\nBody.\n",
+    guides: ["docs/topics/nextjs.docs.md"],
+  });
+
+  expect(manifest.records[0]).toMatchObject({
+    symbol: "nextjs",
+    topicTitle: "Using vgpu with Next.js",
+    keywords: ["nextjs", "next.js", "wgsl loader", "declare module"],
+  });
+});
+
+test("omits keywords when a doc declares none", () => {
+  const manifest = createManifest("", {
+    exists: () => true,
+    read: () => "# Plain guide\n\nBody.\n",
+    guides: ["docs/topics/plain.docs.md"],
+  });
+
+  expect(manifest.records[0]).not.toHaveProperty("keywords");
+});
+
+test("the shipped nextjs guide declares the queries agents type", () => {
+  const record = docsManifest.records.find((item) => item.symbol === "nextjs");
+
+  expect(record).toMatchObject({ package: "guides", kind: "guide", repoPath: "docs/topics/nextjs.docs.md" });
+  expect(record?.keywords).toEqual(expect.arrayContaining(["nextjs", "next.js", "webpack", "turbopack", "vite", "bundler", "declare module"]));
 });
 
 test("fails on a missing guide doc", () => {
@@ -86,6 +117,22 @@ test("manifest includes getting-started as a guide", () => {
     virtualPath: "/guides/getting-started.docs.md",
     kind: "guide",
   });
+});
+
+test("exports the CLI reference to the docs corpus and skill", () => {
+  expect(docsManifest.records.find((record) => record.symbol === "cli")).toMatchObject({
+    package: "guides",
+    symbol: "cli",
+    repoPath: "docs/topics/cli.docs.md",
+    virtualPath: "/guides/cli.docs.md",
+    kind: "guide",
+    topicTitle: "CLI",
+    websitePath: "/cli",
+  });
+
+  const skill = buildSkill(docsManifest);
+  expect(skill.get("SKILL.md")).toContain("## CLI reference");
+  expect(skill.get("references/guides/cli.docs.md")).toContain("# CLI");
 });
 
 test("getting-started cat references resolve against the docs index", () => {

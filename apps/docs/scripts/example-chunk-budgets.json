@@ -1,0 +1,56 @@
+{
+  "description": "Production Turbopack gzip baselines for every canonical preview route after the examples were made self-contained. The checker requires exact coverage of exampleSlugs, allows the larger of 2% or 5 KiB growth per example and 5 KiB for the shared host, rejects stale builds and shared route-owned chunks, and supplements those checks with surviving WGSL source markers. ML runtimes and model files are fetched dynamically as public assets and are not attributed to route chunks.",
+  "$comment:tgeist-08": "All 22 current baselines and the shared host were measured from the same Node 22 / Next 16.3.2 production build and confirmed by a second build. previousAppsDocsBaseline remains read-only historical provenance, including examples that no longer exist.",
+  "sharedHost": {
+    "gzipBytes": 2104,
+    "maxGrowthBytes": 5120
+  },
+  "examples": {
+    "gradient": 49332,
+    "triangle-led-front": 82892,
+    "anti-aliasing": 63798,
+    "black-hole": 54666,
+    "optimized-black-hole": 15499,
+    "earth": 77585,
+    "fluid": 56336,
+    "instanced-rendering": 68694,
+    "batch-rendering": 60580,
+    "fft-ocean": 57413,
+    "fft-ocean-surface": 77154,
+    "raymarched-fractal": 53573,
+    "glass-fractal": 78160,
+    "environment-map": 64637,
+    "transmission": 76076,
+    "clipping": 59215,
+    "radiance-cascades": 67214,
+    "agent-radiance-cascades": 66236,
+    "nextjs-flare": 74593,
+    "depth-estimation": 65647,
+    "mnist-classifier": 63571,
+    "air-painting": 71822
+  },
+  "exampleGrowth": {
+    "percent": 2,
+    "minimumBytes": 5120
+  },
+  "previousAppsDocsBaseline": {
+    "$comment": "Read-only provenance, not used by check-example-bundles.mjs: the numbers this file carried in apps/docs, so the before/after table can be regenerated from the repo alone. apps/docs keeps its own copy of this file, unmodified, until cutover (TGEIST-15).",
+    "sharedHost": 1876,
+    "examples": {
+      "gradient": 49388,
+      "triangle-led-front": 89616,
+      "anti-aliasing": 52839,
+      "post-processing": 53340,
+      "black-hole": 55089,
+      "fluid": 57612,
+      "instanced-rendering": 59822,
+      "batch-rendering": 59682,
+      "fft-ocean": 58296,
+      "raymarched-fractal": 52589,
+      "radiance-cascades": 61618,
+      "depth-estimation": 58595,
+      "mnist-classifier": 56061,
+      "air-painting": 70613
+    }
+  }
+}

@@ -1,0 +1,38 @@
+---
+title: Agents
+description: Point your agent at npx vgpu, install the vgpu skill, or connect through MCP.
+---
+
+# Agents
+
+vgpu is an agent-first library. Start with the CLI for documentation versioned with the API in your `node_modules`, install the skill for guided reference loading, or connect the hosted MCP server for remote read-only access.
+
+## Point your agent at the docs
+
+```bash
+npx vgpu
+```
+
+That's the whole instruction. The command prints its own guide — starting with the agent get-started, `vgpu docs cat getting-started.md` — plus the tools to explore and search every reference page, guide, and error code. Your agent takes it from there.
+
+## Install the skill
+
+```bash
+npx skills add vercel-labs/vgpu
+```
+
+For agents that support skills, this installs the vgpu skill: the same reference docs plus guidance on when to load each one, so the agent reads only the doc it needs.
+
+## Connect the hosted MCP server
+
+Use `add-mcp` to detect installed MCP clients and add the hosted VGPU server globally:
+
+```bash
+npx -y add-mcp https://vgpu.sh/api/mcp -g
+```
+
+The installer lets you review its detected clients before writing their configuration. The server requires no authentication and gives the agent two read-only tools: `docs` for searching and resolving the VGPU documentation, and `examples` for finding and reading verified example source.
+
+If the agent needs to download an example, run `npx -y vgpu mcp --project-from-cwd` locally on Linux or macOS. Filesystem writes remain disabled until you explicitly select an output boundary. See the [MCP reference](/docs/mcp) for hosted HTTP details, local stdio setup, safe download destinations, and editor-specific guidance.
+
+Everything an agent learns this way, you can read on this site — it is the human mirror of the same content.

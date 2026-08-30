@@ -63,6 +63,21 @@ export interface SamplingPair {
   readonly mode: "filtering" | "comparison";
 }
 
+/**
+ * One `@vertex`/`@fragment`/`@compute` entry point.
+ *
+ * ## Serialization contract
+ *
+ * `EntryPointInfo` is **plain data**: every field — including `bindings`, `samplingPairs` and
+ * `inputs` — is an ordinary enumerable, own, writable property. `JSON.stringify`, `{ ...entry }`,
+ * `Object.keys`/`Object.entries`/`Object.assign`, `structuredClone` and worker `postMessage` all see
+ * the complete shape, so nothing is silently dropped across a serialization or structured-clone
+ * boundary (issue #252). There is no `toJSON` hook and no hidden metadata.
+ *
+ * Tests that want a smaller or more stable projection of an entry point should say so explicitly
+ * (destructure the fields they care about, or register a custom snapshot serializer) rather than
+ * relying on the runtime object hiding fields from them.
+ */
 export interface EntryPointInfo {
   readonly name: string;
   readonly mangledName: string;
@@ -75,7 +90,8 @@ export interface EntryPointInfo {
   readonly samplingPairs?: readonly SamplingPair[];
 }
 
-export interface OverrideInfo { readonly name: string; readonly mangledName: string; readonly defaultValue?: string }
+/** Pipeline-overridable constant (`override`) declaration. `id` is the `@id(N)` pipeline constant ID when the declaration has one; `defaultValue` is the raw initializer expression, present only when the declaration has a default. */
+export interface OverrideInfo { readonly name: string; readonly mangledName: string; readonly id?: number; readonly defaultValue?: string }
 
 export interface AliasInfo { readonly name: string; readonly mangledName: string; readonly target: WGSLType }
 export interface StructInfo { readonly name: string; readonly mangledName: string; readonly members: readonly StructMemberInfo[] }

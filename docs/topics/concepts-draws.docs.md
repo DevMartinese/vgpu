@@ -1,14 +1,14 @@
 ---
 title: Draws
-summary: gpu.draw() renders geometry with custom vertex buffers — you write the vertex stage, gpu.mesh() supplies the buffers.
+summary: draw(gpu, opts) renders geometry with custom vertex buffers — you write the vertex stage, geometry(gpu, ...) supplies the buffers.
 relatedSymbols:
   - Draw
   - DrawOptions
-  - MeshLike
+  - GeometryLike
 prevNext:
   prev:
-    title: Context
-    href: /concepts/context
+    title: WGSL modules
+    href: /concepts/wgsl-modules
   next:
     title: Compilation
     href: /concepts/compilation
@@ -17,14 +17,14 @@ order: 20
 
 # Draws
 
-A [`Draw`](/reference/vgpu/draw#draw) renders geometry with custom vertex buffers: you write both the vertex and the fragment stage, and a mesh supplies the buffers. If you want to render a full-screen shader instead, use an [Effect](/concepts/effects).
+A [`Draw`](/reference/vgpu/draw#draw) renders geometry with custom vertex buffers: you write both the vertex and the fragment stage, and a geometry supplies the buffers. If you want to render a full-screen shader instead, use an [Effect](/concepts/effects).
 
-## Draw a mesh
+## Draw a geometry
 
-`gpu.mesh(geometry)` turns geometry from `vgpu/scene` into vertex and index buffers. Your vertex shader declares the attributes it consumes — `@location(0) position`, `@location(1) normal` — and the mesh feeds them.
+`geometry(gpu, geometry)` turns geometry from `vgpu/scene` into vertex and index buffers. Your vertex shader declares the attributes it consumes — `@location(0) position`, `@location(1) normal` — and the geometry feeds them.
 
 ```ts
-import { init } from "vgpu";
+import { init, draw, geometry, target } from "vgpu";
 
 const gpu = await init();
 
@@ -52,35 +52,36 @@ const shader = `
   }
 `;
 
-const target = gpu.target({ size: [1280, 720], depth: true });
+const colorTarget = target(gpu, { size: [1280, 720], depth: true });
 const camera = perspectiveCamera({ fov: 45, aspect: 16 / 9, position: [2, 2, 3], target: [0, 0, 0] });
 
-const cube = gpu.draw({ shader, mesh: gpu.mesh(box({ size: 1 })) });
+const cube = draw(gpu, { shader, geometry: geometry(gpu, box({ size: 1 })) });
 cube.set({
   camera: { viewProjection: camera.viewProjection },
   model: { model: orbit(0) },
 });
 
-cube.draw(target);
+cube.draw(colorTarget);
 ```
 
 Everything works like the rest of vgpu: bindings are reflected from the WGSL, `set()` writes uniforms by name, and the draw renders one-shot into any target. Pipelines are compiled per target format and cached, so the same `Draw` can render into different targets. See [Compilation](/concepts/compilation) to pre-warm each signature before the first draw.
 
-Two details specific to geometry:
+Three details specific to geometry:
 
-- 3D needs a depth buffer, and surfaces don't have one — render into a `gpu.target({ depth: true })` and composite it to the canvas. [Effects](/concepts/effects) and [Passes](/concepts/passes) show how.
-- `MeshLike` is an open interface: `gpu.mesh()` builds one from `vgpu/scene` geometry, but you can also pass your own `GPUBuffer`s and vertex layouts. See the [reference](/reference/vgpu/draw#meshlike).
+- 3D needs a depth buffer, and surfaces don't have one — render into a `target(gpu, { depth: true })` and composite it to the canvas. [Effects](/concepts/effects) and [Passes](/concepts/passes) show how. Deep scenes fight z-fighting with reversed-Z: `depth: { compare: "greater" }` on the draw, `clearDepth: 0` on the pass.
+- A closed geometry like this box never shows its back faces — add `cull: "back"` to the draw and skip roughly half the fragment work.
+- `GeometryLike` is an open interface: `geometry(gpu)` builds one from `vgpu/scene` geometry, but you can also pass your own `GPUBuffer`s and vertex layouts. See the [reference](/reference/vgpu/draw#geometrylike).
 
-## No mesh? You spawn triangles
+## No geometry? You spawn triangles
 
-Leave `mesh` out and the draw runs with no buffers at all: `vertices` defaults to `3`, so every instance is one triangle whose corners you position from `@builtin(vertex_index)`. Combined with `instances`, that spawns a particle system from nothing:
+Leave `geometry` out and the draw runs with no buffers at all: `vertices` defaults to `3`, so every instance is one triangle whose corners you position from `@builtin(vertex_index)`. Combined with `instances`, that spawns a particle system from nothing:
 
 ```ts
-import { init } from "vgpu";
+import { init, draw, surface } from "vgpu";
 
 const gpu = await init();
 const canvas = document.querySelector("canvas")!;
-const surface = gpu.surface(canvas);
+const canvasSurface = surface(gpu, canvas);
 
 // ---cut---
 const smokeShader = `
@@ -107,10 +108,10 @@ const smokeShader = `
   }
 `;
 
-const smoke = gpu.draw({ shader: smokeShader, instances: 10_000 });
+const smoke = draw(gpu, { shader: smokeShader, instances: 10_000 });
 
-smoke.set({ params: { time: 2.5 } }); // drive with gpu.time in a frame loop
-smoke.draw(surface);
+smoke.set({ params: { time: 2.5 } }); // drive with clock(gpu).time in a frame loop
+smoke.draw(canvasSurface);
 ```
 
 One draw call, 10,000 smoke puffs, zero buffers — each particle derives its position, size, and fade from `instance_index` and `time`. Counts can also change per call: `smoke.draw({ target: surface, instances: 500 })`.

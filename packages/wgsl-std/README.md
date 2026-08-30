@@ -17,6 +17,14 @@ There is no root WGSL export. Subpath exports resolve to physical WGSL files:
 - `@vgpu/wgsl-std/color` -> `src/color/index.wgsl`
 - `@vgpu/wgsl-std/sampling` -> `src/sampling/index.wgsl`
 - `@vgpu/wgsl-std/constants` -> `src/constants/index.wgsl`
+- `@vgpu/wgsl-std/hash` -> `src/hash/index.wgsl`
+- `@vgpu/wgsl-std/noise` -> `src/noise/index.wgsl` (Voronoi/cellular noise only)
+- `@vgpu/wgsl-std/noise/perlin` -> `src/noise/perlin/index.wgsl` (Perlin gradient noise + fBM)
+- `@vgpu/wgsl-std/noise/simplex` -> `src/noise/simplex/index.wgsl` (simplex gradient noise + fBM)
+- `@vgpu/wgsl-std/fullscreen` -> `src/fullscreen/index.wgsl`
+- `@vgpu/wgsl-std/light` -> `src/light/index.wgsl`
+
+`@vgpu/wgsl-std/noise` stays Voronoi-only for backward compatibility; it does not re-export Perlin or simplex. Import `@vgpu/wgsl-std/noise/perlin` or `@vgpu/wgsl-std/noise/simplex` directly for smooth gradient noise — `import { perlin2d } from "@vgpu/wgsl-std/noise"` does not work, each family is its own subpath so importing one never pulls the other's WGSL into your bundle.
 
 WGSL snippets in this package must stay pure declaration modules: functions, constants, structs, and aliases only. They must not introduce hidden bindings, resource variables, overrides, or entry points.
 
@@ -101,6 +109,6 @@ fn localVogelDisk(index: u32, count: u32, phi: f32) -> vec2f {
 
 Performance note: `vogelDisk` uses `sqrt`, `cos`, and `sin`; precompute fixed kernels if they are reused heavily. `hammersley2d`/`radicalInverseVdc` are stateless integer/float math and are not random-number generators.
 
-Provenance: Vogel disk sampling is an original WGSL transcription of Vogel's 1979 published golden-angle phyllotaxis model. Van der Corput and Hammersley samples are standard low-discrepancy sequence formulas implemented here with original WGSL bit operations; they are deliberate reviewed additions beyond the original minimal `vogelDisk` requirement to satisfy the updated user preference for fewer deferrals while staying provenance-clean. `concentricDisk` is deferred for separate API review of disk-mapping conventions and edge behavior, and Perlin/simplex/fBM/value noise plus shader-magic hash/random snippets are deferred for separate API and provenance review.
+Provenance: Vogel disk sampling is an original WGSL transcription of Vogel's 1979 published golden-angle phyllotaxis model. Van der Corput and Hammersley samples are standard low-discrepancy sequence formulas implemented here with original WGSL bit operations; they are deliberate reviewed additions beyond the original minimal `vogelDisk` requirement to satisfy the updated user preference for fewer deferrals while staying provenance-clean. `concentricDisk` is deferred for separate API review of disk-mapping conventions and edge behavior. Perlin (`@vgpu/wgsl-std/noise/perlin`) and simplex (`@vgpu/wgsl-std/noise/simplex`) gradient noise, each with amplitude-normalized fBM, have since shipped as their own table-free, integer-hash-based subpaths (see each module's `index.docs.md`); value noise plus shader-magic hash/random snippets remain deferred for separate API and provenance review.
 
 See `src/sampling/index.docs.md` for examples, input ranges, and edge-case notes.

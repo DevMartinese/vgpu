@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { getMockGPUDeviceInstrumentation, init } from "../src/mock.ts";
+import { getMockGPUDeviceInstrumentation, init, draw, geometry, target } from "../src/mock.ts";
 import { pipelineKeyOf } from "../src/pipeline-store.ts";
 
 const WGSL = `
@@ -9,15 +9,23 @@ const WGSL = `
 @fragment fn fs_main() -> @location(0) vec4f { return vec4f(1.0); }
 `;
 
+const MESHLESS_WGSL = `
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+  var pos = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  return vec4f(pos[vi], 0.0, 1.0);
+}
+@fragment fn fs_main() -> @location(0) vec4f { return vec4f(1.0); }
+`;
+
 test("topology and stripIndexFormat participate in pipeline descriptors and keys while ranges do not", async () => {
   const gpu = await init();
   try {
-    const target = gpu.target({ size: [2, 2] });
-    const a = gpu.mesh({ topology: "triangle-strip", buffers: [{ data: new Float32Array([0, 0, 1, 0]), attributes: { position: { format: "float32x2", location: 0 } } }], indices: new Uint16Array([0, 1]) });
-    const b = gpu.mesh({ topology: "line-strip", buffers: [{ data: new Float32Array([0, 0, 1, 0]), attributes: { position: { format: "float32x2", location: 0 } } }], indices: new Uint16Array([0, 1]) });
+    const colorTarget = target(gpu, { size: [2, 2] });
+    const a = geometry(gpu, { topology: "triangle-strip", buffers: [{ data: new Float32Array([0, 0, 1, 0]), attributes: { position: { format: "float32x2", location: 0 } } }], indices: new Uint16Array([0, 1]) });
+    const b = geometry(gpu, { topology: "line-strip", buffers: [{ data: new Float32Array([0, 0, 1, 0]), attributes: { position: { format: "float32x2", location: 0 } } }], indices: new Uint16Array([0, 1]) });
 
-    gpu.draw({ shader: WGSL, label: "strip-a", mesh: a }).draw(target);
-    gpu.draw({ shader: WGSL, label: "strip-b", mesh: b }).draw(target);
+    draw(gpu, { shader: WGSL, label: "strip-a", geometry: a }).draw(colorTarget);
+    draw(gpu, { shader: WGSL, label: "strip-b", geometry: b }).draw(colorTarget);
 
     const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
     expect(mock.createRenderPipelineDescriptors.at(-2)?.primitive).toMatchObject({ topology: "triangle-strip", stripIndexFormat: "uint16" });
@@ -34,61 +42,94 @@ test("topology and stripIndexFormat participate in pipeline descriptors and keys
   }
 });
 
-test("indexed draw ranges and instance counts use draw options over slice over mesh", async () => {
+test("cull and frontFace participate in pipeline descriptors and keys", async () => {
+  const gpu = await init();
+  try {
+    const colorTarget = target(gpu, { size: [2, 2] });
+    draw(gpu, { shader: MESHLESS_WGSL, label: "cull-back", cull: "back", frontFace: "cw" }).draw(colorTarget);
+    draw(gpu, { shader: MESHLESS_WGSL, label: "cull-front", cull: "front" }).draw(colorTarget);
+    draw(gpu, { shader: MESHLESS_WGSL, label: "cull-default" }).draw(colorTarget);
+
+    const mock = getMockGPUDeviceInstrumentation(gpu.device.gpu);
+    expect(mock.createRenderPipelineDescriptors.at(-3)?.primitive).toEqual({ topology: "triangle-list", cullMode: "back", frontFace: "cw" });
+    expect(mock.createRenderPipelineDescriptors.at(-2)?.primitive).toEqual({ topology: "triangle-list", cullMode: "front" });
+    expect(mock.createRenderPipelineDescriptors.at(-1)?.primitive).toEqual({ topology: "triangle-list" });
+    expect(mock.calls.createRenderPipeline).toBe(3);
+
+    const parts = { module: {} as GPUShaderModule, pipelineLayout: {} as GPUPipelineLayout, signature: { colors: ["rgba8unorm"] as const } };
+    expect(pipelineKeyOf({ ...parts, cullMode: "back" })).not.toBe(pipelineKeyOf(parts));
+    expect(pipelineKeyOf({ ...parts, cullMode: "back", frontFace: "cw" })).not.toBe(pipelineKeyOf({ ...parts, cullMode: "back" }));
+    expect(pipelineKeyOf({ ...parts, cullMode: undefined, frontFace: undefined })).toBe(pipelineKeyOf(parts));
+  } finally {
+    gpu.dispose();
+  }
+});
+
+test("invalid cull and frontFace options fail at draw construction", async () => {
+  const gpu = await init();
+  try {
+    expect(() => draw(gpu, { shader: MESHLESS_WGSL, label: "badCull", cull: "backwards" as never })).toThrowError(/VGPU-CULL-INVALID|Invalid cull/);
+    expect(() => draw(gpu, { shader: MESHLESS_WGSL, label: "badFace", frontFace: "clockwise" as never })).toThrowError(/VGPU-FRONTFACE-INVALID|Invalid frontFace/);
+  } finally {
+    gpu.dispose();
+  }
+});
+
+test("indexed draw ranges and instance counts use draw options over slice over geometry", async () => {
   const gpu = await init();
   const indexedCalls = spyIndexedDraws(gpu.device.gpu);
   try {
-    const mesh = gpu.mesh({
+    const geo = geometry(gpu, {
       instanceCount: 5,
       buffers: [{ data: new Float32Array([0, 0, 1, 0, 0, 1]), attributes: { position: { format: "float32x2", location: 0 } } }],
       indices: new Uint16Array([0, 1, 2, 0, 2, 1]),
     });
-    const slice = mesh.slice({ firstIndex: 2, indexCount: 3, baseVertex: 1, instanceCount: 4 });
-    const draw = gpu.draw({ shader: WGSL, label: "ranges", mesh: slice, instances: 6 });
-    const target = gpu.target({ size: [2, 2] });
+    const slice = geo.slice({ firstIndex: 2, indexCount: 3, baseVertex: 1, instanceCount: 4 });
+    const drawable = draw(gpu, { shader: WGSL, label: "ranges", geometry: slice, instances: 6 });
+    const colorTarget = target(gpu, { size: [2, 2] });
 
-    draw.draw(target);
-    draw.draw({ target, indices: 2, firstIndex: 1, baseVertex: 0, instances: 7 });
-    draw.draw({ target, indices: 6, firstIndex: 0 });
+    drawable.draw(colorTarget);
+    drawable.draw({ target: colorTarget, indices: 2, firstIndex: 1, baseVertex: 0, instances: 7 });
+    drawable.draw({ target: colorTarget, indices: 6, firstIndex: 0 });
 
     expect(indexedCalls).toEqual([
       [3, 6, 2, 1, 0],
       [2, 7, 1, 0, 0],
       [6, 6, 0, 1, 0],
     ]);
-    expect(() => draw.draw({ target, indices: 5 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
-    expect(() => draw.draw({ target, indices: 6, firstIndex: 1 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
-    expect(() => draw.draw({ target, indices: -1 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
+    expect(() => drawable.draw({ target: colorTarget, indices: 5 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
+    expect(() => drawable.draw({ target: colorTarget, indices: 6, firstIndex: 1 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
+    expect(() => drawable.draw({ target: colorTarget, indices: -1 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
   } finally {
     gpu.dispose();
     vi.restoreAllMocks();
   }
 });
 
-test("structural MeshLike ranges remain a native-validation escape hatch", async () => {
+test("structural GeometryLike ranges remain a native-validation escape hatch", async () => {
   const gpu = await init();
   try {
-    const target = gpu.target({ size: [2, 2] });
+    const colorTarget = target(gpu, { size: [2, 2] });
     const vertexBuffer = gpu.device.gpu.createBuffer({ size: 64, usage: 32 });
     const layout = [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x2" as const }] }];
-    expect(() => gpu.draw({ shader: WGSL, mesh: { vertexBuffers: [vertexBuffer], vertexBufferLayouts: layout, vertexCount: 3, firstVertex: 2 } }).draw(target)).not.toThrow();
+    expect(() => draw(gpu, { shader: WGSL, geometry: { vertexBuffers: [vertexBuffer], vertexBufferLayouts: layout, vertexCount: 3, firstVertex: 2 } }).draw(colorTarget)).not.toThrow();
     const indexBuffer = gpu.device.gpu.createBuffer({ size: 64, usage: 16 });
-    expect(() => gpu.draw({ shader: WGSL, mesh: { vertexBuffers: [vertexBuffer], vertexBufferLayouts: layout, indexBuffer, indexFormat: "uint16", indexCount: 3, firstIndex: 2 } }).draw(target)).not.toThrow();
+    expect(() => draw(gpu, { shader: WGSL, geometry: { vertexBuffers: [vertexBuffer], vertexBufferLayouts: layout, indexBuffer, indexFormat: "uint16", indexCount: 3, firstIndex: 2 } }).draw(colorTarget)).not.toThrow();
   } finally {
     gpu.dispose();
   }
 });
 
-test("non-indexed draw overrides validate absolute intervals against the parent mesh", async () => {
+test("non-indexed draw overrides validate absolute intervals against the parent geometry", async () => {
   const gpu = await init();
   try {
-    const mesh = gpu.mesh({ buffers: [{ data: new Float32Array([0, 0, 1, 0, 0, 1, 1, 1, 2, 1, 1, 2]), attributes: { position: { format: "float32x2", location: 0 } } }] });
-    const slice = mesh.slice({ firstVertex: 2, vertexCount: 2 });
-    const draw = gpu.draw({ shader: WGSL, label: "vertex-ranges", mesh: slice });
-    const target = gpu.target({ size: [2, 2] });
-    expect(() => draw.draw({ target, firstVertex: 1, vertices: 5 })).not.toThrow();
-    expect(() => draw.draw({ target, firstVertex: 2, vertices: 5 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
-    expect(() => draw.draw({ target, firstVertex: Number.NaN })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
+    const geo = geometry(gpu, { buffers: [{ data: new Float32Array([0, 0, 1, 0, 0, 1, 1, 1, 2, 1, 1, 2]), attributes: { position: { format: "float32x2", location: 0 } } }] });
+    const slice = geo.slice({ firstVertex: 2, vertexCount: 2 });
+    const drawable = draw(gpu, { shader: WGSL, label: "vertex-ranges", geometry: slice });
+    const colorTarget = target(gpu, { size: [2, 2] });
+    expect(() => drawable.draw({ target: colorTarget, firstVertex: 1, vertices: 5 })).not.toThrow();
+    expect(() => drawable.draw({ target: colorTarget, firstVertex: 2, vertices: 5 })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
+    expect(() => drawable.draw({ target: colorTarget, firstVertex: Number.NaN })).toThrowError(/VGPU-MESH-RANGE-INVALID/);
   } finally {
     gpu.dispose();
   }

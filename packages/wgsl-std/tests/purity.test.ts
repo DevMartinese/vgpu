@@ -24,6 +24,9 @@ test("exported wgsl-std snippets stay pure declaration modules", async () => {
     "src/light/index.wgsl",
     "src/math/index.wgsl",
     "src/noise/index.wgsl",
+    "src/noise/internal/gradient.wgsl",
+    "src/noise/perlin/index.wgsl",
+    "src/noise/simplex/index.wgsl",
     "src/sampling/index.wgsl",
   ]);
 

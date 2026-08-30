@@ -19,7 +19,8 @@ interface ResolveOptions {
   readonly rootDir?: string;
   readonly packageMap?: Record<string, string>;
   readonly modules?: Record<string, string>;
-  readonly validate?: boolean;
+  readonly onDependency?: (path: string) => void;
+  readonly validate?: "off" | "auto" | "require" | boolean;
   readonly minify?: boolean | { readonly whitespace?: boolean; readonly identifiers?: "none" | "safe" };
 }
 
@@ -34,10 +35,15 @@ declare function resolveShader(opts: ResolveOptions): Promise<ResolvedShader>;
 | opts.rootDir | string | ✖ | `dirname(entry)` for cache-key grouping; no `@/` alias unless provided | Base directory for `@/foo.wgsl` imports. Also used as the default root passed to cache key generation when present. |
 | opts.packageMap | `Record<string, string>` | ✖ | `{}` | Prefix map for package-style WGSL imports. If a specifier starts with a key, the target prefix is joined with the remainder. |
 | opts.modules | `Record<string, string>` | ✖ | filesystem reads | In-memory WGSL filesystem. Keys are normalized with `/`; relative imports use virtual paths and package imports require `packageMap`. |
-| opts.validate | boolean | ✖ | `true` | When not `false`, validates emitted WGSL via `validateWGSL`. In normal processes validation is a no-op unless `VGPU_DOCKER_TEST=1`; in that mode Naga/WebGPU diagnostics can throw. |
+| opts.onDependency | `(path: string) => void` | ✖ | no callback | Called once for each imported module as soon as its path resolves, before that module is read or parsed. Already-loaded modules and the entry are omitted. Discovered dependencies are still reported when a later resolution step throws, allowing build tools to watch the files that can repair a failed graph. |
+| opts.validate | `"off" | "auto" | "require" | boolean` | ✖ | `"auto"`, or `VGPU_VALIDATE` when set | Device-backed validation of emitted WGSL (`createShaderModule` plus a compilation-info round trip) through a lazily imported `@vgpu/adapter-node`. `"auto"` attempts validation and throws `VGPU-WGSL-NAGA-UNKNOWN` for invalid WGSL, but when no device/adapter is available it warns once to stderr and continues, recording the skip on `ResolvedShader.validation`. `"require"` (or `true`) throws `VGPU-WGSL-VALIDATE-NO-DEVICE`/`VGPU-WGSL-VALIDATE-ADAPTER-MISSING` instead of skipping. `"off"` (or `false`) never attempts validation and never imports device code. An explicit value here always wins over `VGPU_VALIDATE` (`"off"|"auto"|"require"`; anything else throws `VGPU-WGSL-VALIDATE-ENV-INVALID`). Independent of this option, `minify` with `identifiers: "safe"` always self-checks that renaming left no dangling reference (`VGPU-WGSL-MINIFY-DANGLING-IDENT`), with no GPU involved. |
 | opts.minify | `boolean | MinifyOptions` | ✖ | `false` | `true` means `{ whitespace: true, identifiers: "safe" }`; object form defaults to `{ whitespace: true, identifiers: "none" }`; `false` or omitted preserves whitespace/comments after resolver emission and DCE. |
 
-**Returns:** `Promise<ResolvedShader>` — resolved WGSL plus dependency paths, cache keys, lightweight AST modules, source map, diagnostics, and reflection for entry points/resources.
+Validation always covers the WGSL you get back. When `minify` rewrites the emitted text, validation runs twice: first on the unminified emission, because that text is what gives diagnostics accurate line/column mapping back to your modules, and then on the final minified string. So a successful resolve with `validation.ok === true` means the exact `wgsl` returned was accepted by the device — a minifier bug cannot slip corrupt output past a passing validation. Both passes share the same leased device, and the second one is skipped when minification changed nothing (the returned text was already validated).
+
+Validation acquires one WebGPU device per process through `@vgpu/adapter-node` and reuses it across calls, then destroys it shortly after the last validation finishes — a live device holds handles on the Node event loop, so without that release a script that validated a shader would never exit on its own. A later `resolveShader` transparently acquires a new device; a *failed* acquisition is remembered and **not retried for the lifetime of the process**, so after installing a device (for example `npx vgpu install-software-renderer`) restart the process rather than expecting the next call to pick it up.
+
+**Returns:** `Promise<ResolvedShader>` — resolved WGSL plus dependency paths, cache keys, lightweight AST modules, source map, diagnostics, reflection for entry points/resources, and `validation: { mode, attempted, ok, skipped? }` reporting what the device-backed check actually did (`skipped` carries the `code`, `message`, and `fix` when `"auto"` could not get a device).
 
 **Throws:** `VGPU-RESOLVE-MODULE-BINDING` when a non-entry imported module declares any `@group(...)` or `@binding(...)` resource — move the resource declaration into the entry module and export only structs/functions from the module. The error message is exactly:
 
@@ -50,7 +56,15 @@ Modules cannot declare bindings — export the struct and declare it in your ent
 
 **Throws:** `VGPU-WGSL-RES-ABS` when an import specifier starts with `/` — use a relative, `@/`, or package import.
 **Throws:** `VGPU-WGSL-RES-NOTFOUND` when the entry/import path or virtual module cannot be found, or when an import path token is not a string — add the module, fix the spelling, or add `.wgsl`/`index.wgsl`.
-**Throws:** `VGPU-WGSL-PKG-NOTFOUND` when a package or package export cannot be found — install/map the package or fix `packageMap`/exports.
+**Throws:** `VGPU-WGSL-PKG-NOTFOUND` when a package or package export cannot be found. WGSL package imports resolve through `node_modules` exactly like JavaScript imports, so the message names the package and the fix:
+
+```text
+Package @vgpu/wgsl-std was not found. Install the package (npm install @vgpu/wgsl-std) or check the specifier
+```
+
+With `modules` (in-memory resolution) `node_modules` is never consulted, so the same code reports `Map it with packageMap or add the module to modules`. An unknown subpath reports `Package export ./missing was not found in <pkg>. Check the package's exports map or fix the import subpath`.
+
+Package specifiers resolve in two steps: first by walking `node_modules` up from the importing file, so a copy in the project always wins; then, only if that fails, through Node's own resolver next to `@vgpu/wgsl`. The second step is what lets a package that reaches the project transitively — `@vgpu/wgsl-std` through `vgpu`, for example — resolve under pnpm's isolated `node_modules` and Yarn PnP, where it is installed but absent from the project's own tree.
 **Throws:** `VGPU-WGSL-IMP-SELF` when the graph contains an import cycle — break the cycle.
 **Throws:** `VGPU-WGSL-IMP-ORDER` when an `import` appears after declarations — move imports before declarations.
 **Throws:** `VGPU-WGSL-IMP-SIDEEFFECT` for `import "x"` — import named symbols or a namespace.
@@ -64,7 +78,13 @@ Modules cannot declare bindings — export the struct and declare it in your ent
 **Throws:** `VGPU-WGSL-NS-NOTVALUE` or `VGPU-WGSL-NS-NOMEMBER` for invalid namespace use — access exported namespace members directly.
 **Throws:** `VGPU-WGSL-MINIFY-IDENTIFIERS` when `minify.identifiers` is not `"none"` or `"safe"` — pass a valid mode.
 **Throws:** `VGPU-WGSL-MINIFY-BLOCK`, `VGPU-WGSL-LEX-UNTERM-COMMENT`, or `VGPU-WGSL-LEX-UNTERM-STRING` for unterminated WGSL comments/strings during scanning/minification — close the token.
-**Throws:** `VGPU-WGSL-NAGA-UNKNOWN` when validation is active and WebGPU/Naga rejects emitted WGSL or no validation adapter is available — fix the WGSL reported by the diagnostic.
+**Throws:** `VGPU-WGSL-IDENT-NONASCII` when an identifier in any resolved module contains a non-ASCII character (`let Ω = 1.0;`, `fn åhelper()`, `let café = 1.0;`) — rename it using ASCII letters, digits and `_`. WGSL itself allows Unicode (XID) identifiers; vgpu does not yet, and rejects them in the scanner so no path can half-support them (support is tracked in [issue #294](https://github.com/vercel-labs/vgpu/issues/294)). The diagnostic names the identifier and carries `line`/`column` plus `range.file` for the module that declared it. Non-ASCII text in **comments**, in string literals and in import paths stays legal, as does a leading byte-order mark; only code positions are rejected.
+**Throws:** `VGPU-WGSL-NAGA-UNKNOWN` when validation is active (`"auto"` or `"require"`) and WebGPU/Naga rejects emitted WGSL — fix the WGSL reported by the diagnostic.
+**Throws:** `VGPU-WGSL-VALIDATE-NO-DEVICE` in `"require"` mode when `@vgpu/adapter-node` cannot acquire a device — the error forwards adapter-node's own `fix` (and `metadata.causeCode`); run `npx vgpu doctor`, or use `"auto"`/`"off"` on machines without a GPU.
+**Throws:** `VGPU-WGSL-VALIDATE-ADAPTER-MISSING` in `"require"` mode when `@vgpu/adapter-node` (an optional peer dependency) cannot be imported — install it (`pnpm add -D @vgpu/adapter-node`), or pass `validate: "off"`.
+**Throws:** `VGPU-WGSL-VALIDATE-ENV-INVALID` when `VGPU_VALIDATE` is set to anything other than `off`, `auto`, or `require` — unset it or use one of those values.
+
+**Diagnostic:** `VGPU-WGSL-RESERVED-IDENT` (severity `error`, never thrown) for every declared identifier that WGSL reserves — struct names, struct members, type aliases, module-scope variables, overrides, functions, parameters, and local variables. Each diagnostic carries the offending name, `line`/`column`, and a `range` pointing at the source module. Rename the declaration; Dawn/Tint would otherwise reject the shader only at pipeline creation.
 
 ## Examples
 
@@ -128,5 +148,8 @@ console.log(resolved.deps.length);
 - `resolveShader()` is for setup, tests, loaders, and build tooling. Do not call it per frame; resolve and create pipelines off the render hot path.
 - Declaration-level DCE always runs before validation/minification when entry points exist. There is no DCE opt-out in this release.
 - `minify: true` is the production preset. Safe identifier minification is conservative and does not rename entry points, resources, overrides, structs, fields, import/export names, attributes, builtins, or predeclared WGSL names.
+- Reserved-word diagnostics are collected per loaded module before emission, so imported modules report their own file/line. `import`/`export`/`from`/`as` module syntax is exempt; only declared identifiers are checked.
 - Validation maps diagnostics back to generated module headers. Columns can be approximate when substituted identifiers appear; those diagnostics include `VGPU-WGSL-COL-APPROX` metadata.
+- **`wgslWebpackLoader` and `wgslVitePlugin` always pass `validate: false` and expose no `validate` option** — the bundler build never runs this device-backed check, for leaf files or import graphs. `opts.validate` above only takes effect when you call `resolveShader()` yourself (setup scripts, tests, tooling) or through the CLI. The gate for a Next.js/Vite app is `npx vgpu check --require-validation <file>` run in CI or pre-commit, not the dev server or the production build. See `wgslWebpackLoader`, `wgslVitePlugin`, and `npx vgpu docs cat cli.docs.md`.
+- **Works from ESM and CommonJS:** the `./runtime` subpath's `exports` map in `@vgpu/wgsl` declares both an `import` and a `require` condition, both pointing at the same ESM file. `import { resolveShader } from "@vgpu/wgsl/runtime"` works as expected, and so does `const { resolveShader } = require("@vgpu/wgsl/runtime")` from a plain CommonJS entry point (no `"type": "module"`, no `.mjs`/`.mts` rename needed) — Node resolves the `require` condition and loads the ESM file through its native `require(esm)` support. See the [no-bundler guide](/guides/no-bundler.docs.md) for the full script-from-disk workflow.
 - **See also:** `compile`, `ShaderSource`, `wgslVitePlugin`, `wgslWebpackLoader`, `@vgpu/wgsl-std/hash`.

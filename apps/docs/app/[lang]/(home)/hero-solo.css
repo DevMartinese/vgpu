@@ -1,0 +1,25 @@
+/* This hero switches at a literal tablet boundary rather than the docs theme's
+   custom `md` breakpoint (601px). */
+@media (min-width: 768px) {
+  [data-hero-tabs-list] {
+    justify-content: flex-start;
+  }
+
+  [data-hero-tabs-copy] {
+    padding-left: 0;
+    padding-right: 1.75rem;
+    text-align: left;
+  }
+}
+
+/* Ease only the bottom of the GPU scene into the regular page surface. */
+[data-hero-foot-fade] {
+  background: linear-gradient(
+    to top,
+    var(--home-page-background) 0%,
+    color-mix(in srgb, var(--home-page-background) 72%, transparent) 24%,
+    color-mix(in srgb, var(--home-page-background) 38%, transparent) 52%,
+    color-mix(in srgb, var(--home-page-background) 14%, transparent) 76%,
+    transparent 100%
+  );
+}

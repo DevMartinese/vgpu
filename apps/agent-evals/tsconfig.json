@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    // The pack script stays a plain .mjs runnable with bare `node` (it must work
+    // before anything is built), but is imported from typed code.
+    "allowJs": true,
+    "checkJs": false,
+    // eve authors import siblings with an explicit `.ts` extension.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "include": ["agent/**/*.ts", "evals/**/*.ts", "scripts/**/*.mjs"],
+  // Seed trees are inputs handed to the agent, not sources of this package.
+  // n1's next-env.d.ts references `next` types that only exist inside the
+  // sandbox, so typechecking them here would fail on a file that is correct.
+  "exclude": ["agent/sandbox/tasks/**"]
+}

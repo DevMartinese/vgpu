@@ -41,7 +41,7 @@ declare function wgslVitePlugin(options?: WgslVitePluginOptions): {
 | id | string | ✔ | — | WGSL file id/path. Used as resolver entry for import graphs. Plugin transform ignores ids that do not end with `.wgsl`. |
 | opts.source | string | ✔ | — | Object-overload source field. |
 | opts.id | string | ✔ | — | Object-overload id field. |
-| opts.onDependency | `(absPath: string) => void` | ✖ | no callback | Called for transitive dependencies other than the entry when imports are resolved. Leaf files intentionally do not call it. |
+| opts.onDependency | `(absPath: string) => void` | ✖ | no callback | Called for each transitive dependency as soon as its path resolves, before it is loaded. Discovered dependencies are still reported when a later resolution step throws. Leaf files intentionally do not call it. |
 
 **Returns:** `Promise<ViteLoadResult>` from `transformWgsl()` with JavaScript module `code` and `map: null`; plugin `transform` returns that result for `.wgsl` ids or `null` for other ids.
 
@@ -76,7 +76,7 @@ console.log(result.map === null, result.code.includes("version"));
 
 - Transform output default-exports `ShaderSource` v1: `{ version: 1, wgsl: "..." }`.
 - `wgslVitePlugin()` only handles ids ending with `.wgsl`; use `transformWgsl()` directly for tests and non-Vite tooling.
-- Leaf shader transforms do not call `onDependency` because Vite already tracks the entry file. Imported graph transforms call it for transitive deps.
+- Leaf shader transforms do not call `onDependency` because Vite already tracks the entry file. Imported graph transforms call it for transitive dependencies before loading them, including on resolution paths that later fail.
 - A leaf WGSL file may declare entry resources. Shared/imported modules must be pure: no `@group/@binding` outside the entry.
-- The transform calls `resolveShader({ validate: false })` for imported graphs; parsing, purity checks, DCE, mangling, and optional minification still apply.
-- **See also:** `ShaderSource`, `resolveShader`, `wgslWebpackLoader`.
+- **The plugin never validates WGSL, in any mode, for either leaf files or import graphs.** It calls `resolveShader({ validate: false })` for imported graphs — parsing, purity checks, DCE, mangling, and optional minification still apply, but the device-backed `createShaderModule` check does not run. Leaf files (no imports) never call `resolveShader()` at all and are emitted directly, so they get no semantic processing beyond the raw text. There is no plugin option to opt into validation; a `validate` key in the plugin options is silently ignored. `vite build`/`vite dev` will happily compile and ship invalid WGSL. The validation gate is `npx vgpu check --require-validation <file>` — run it in CI or as a pre-commit hook; see `npx vgpu docs cat cli.docs.md`.
+- **See also:** `ShaderSource`, `resolveShader`, `wgslWebpackLoader`, and the `nextjs` guide (`npx vgpu docs cat nextjs.md`) for the ambient `.d.ts` that types `.wgsl` imports.

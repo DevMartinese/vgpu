@@ -3,7 +3,7 @@ import { bindingKind, reflectedBindingLayout } from "./reflect-bind-layout.ts";
 import { parseDeclarations } from "./reflect-declarations.ts";
 import { layoutOf } from "./reflect-layout.ts";
 import { entrySamplingPairs } from "./reflect-sampling.ts";
-import { buildModuleSymbols, buildRegistry, resolveType, unwrapAlias } from "./reflect-symbols.ts";
+import { buildModuleSymbols, buildRegistry, resolveType, unwrapAlias, type ImportPathResolver } from "./reflect-symbols.ts";
 import type { Attr, BindingInfo, BindingRef, EntryPointInfo, EntryPointInputInfo, HostShareableLayout, ModuleSymbols, ParsedDecls, ParsedEntryPoint, ParsedStructMember, Reflection, Registry } from "./reflect-types.ts";
 import { numericAttr } from "./reflect-utils.ts";
 import { analyzeWgslTokens } from "./scope-walker.ts";
@@ -40,10 +40,13 @@ export type {
 /**
  * Reflects mangled WGSL modules into the frozen ReflectionFacade contract.
  * The returned names preserve source-facing identifiers while `mangledName` points at emitted WGSL.
+ * `resolveImport` is the graph resolver that loaded the modules; passing it lets imported nominal
+ * types (binding/struct-member types) resolve through bare package specifiers, `packageMap`
+ * entries and root aliases instead of relative/absolute paths only.
  */
-export function reflect(modules: readonly MangleModule[]): Reflection {
+export function reflect(modules: readonly MangleModule[], resolveImport?: ImportPathResolver): Reflection {
   const raw = modules.map(parseDeclarations);
-  const moduleSymbols = buildModuleSymbols(modules, raw);
+  const moduleSymbols = buildModuleSymbols(modules, raw, resolveImport);
   const registry = buildRegistry(raw, moduleSymbols);
   const bindings: BindingInfo[] = [];
   const hostShareableLayouts: HostShareableLayout[] = [];
@@ -136,11 +139,21 @@ function entryBindingUses(modules: readonly MangleModule[], raw: readonly Parsed
 }
 
 function publicEntryPoint(entry: ParsedEntryPoint, structs: readonly { readonly path: string; readonly mangledName: string; readonly members: readonly ParsedStructMember[] }[], symbols: ReadonlyMap<string, ModuleSymbols>, registry: Registry, bindings: readonly BindingRef[], samplingPairs: EntryPointInfo["samplingPairs"]): EntryPointInfo {
-  const result: EntryPointInfo = { name: entry.name, mangledName: entry.mangledName, stage: entry.stage, workgroupSize: entry.workgroupSize };
-  Object.defineProperty(result, "bindings", { value: bindings.map(({ group, binding }) => ({ group, binding })), enumerable: false, configurable: true });
-  Object.defineProperty(result, "samplingPairs", { value: samplingPairs, enumerable: false, configurable: true });
-  if (entry.stage === "vertex") Object.defineProperty(result, "inputs", { value: vertexInputs(entry, structs, symbols, registry), enumerable: false });
-  return result;
+  // Plain data on purpose: every field is an ordinary enumerable own property, so the whole shape
+  // survives `JSON.stringify`, spread, `Object.keys/assign`, `structuredClone` and `postMessage`.
+  // Key order here is the observable `Object.keys()` order and is asserted in the tests.
+  return {
+    name: entry.name,
+    mangledName: entry.mangledName,
+    stage: entry.stage,
+    // `workgroupSize` and `inputs` stay absent rather than `undefined`-valued when they do not
+    // apply: an own key valued `undefined` survives structuredClone but is dropped by
+    // JSON.stringify, which would make the key set differ across serialization boundaries.
+    ...(entry.workgroupSize ? { workgroupSize: entry.workgroupSize } : {}),
+    bindings: bindings.map(({ group, binding }) => ({ group, binding })),
+    samplingPairs,
+    ...(entry.stage === "vertex" ? { inputs: vertexInputs(entry, structs, symbols, registry) } : {}),
+  };
 }
 
 function vertexInputs(entry: ParsedEntryPoint, structs: readonly { readonly path: string; readonly mangledName: string; readonly members: readonly ParsedStructMember[] }[], symbols: ReadonlyMap<string, ModuleSymbols>, registry: Registry): readonly EntryPointInputInfo[] {

@@ -15,6 +15,23 @@ pnpm changeset
 
 Choose each affected `@vgpu/*` package, select the appropriate semver bump (`patch`, `minor`, or `major`), and write a short summary. That summary becomes the changelog entry for the release.
 
+## Bundle budgets
+
+`pnpm bundle-check` enforces gzip budgets stored in each package's `package.json`. Budgets are tiered by audience:
+
+- `"client"` (default when unclassified) — browser-facing entries. **Hard gate**: one byte over budget fails.
+- `"tooling"` — loaders, the Node runtime, the CLI and package tarballs. **Soft gate**: over budget warns, and only fails past `vgpuBundleBudgetGrowthThreshold` (default 5%).
+
+Classify with `vgpuBundleAudience` (package-wide) or `vgpuExportBundleAudiences` (per export subpath). Tarball budgets measure published dist bytes: `*.docs.md` files, sourcemap `sourcesContent` and the budget metadata itself are excluded, so documenting the API never competes with the size gate.
+
+When growth is intentional, re-baseline instead of hand-editing numbers:
+
+```bash
+pnpm bundle-check --update   # budget = next 512 B multiple at least 512 B above measured
+```
+
+Run `pnpm build` first, since budgets are measured from `dist`.
+
 ## PR checklist
 
 - [ ] Code changes to a published package include a `.changeset/*.md` file.
@@ -22,60 +39,78 @@ Choose each affected `@vgpu/*` package, select the appropriate semver bump (`pat
 - [ ] `pnpm typecheck` passes locally.
 - [ ] `pnpm test:fast` passes locally.
 
-## Releasing (automated)
+## Releasing
 
-Releases are automated from `main`.
+Releases are cut by hand and published by CI. There is no bot and no automatic
+version-packages PR: `.github/workflows/release.yml` runs on a **published GitHub
+Release** whose tag starts with `v`, and that is the only thing that publishes to npm.
 
-1. A PR with package changes merges to `main`.
-2. The Release workflow runs and opens or updates a `chore(release): version packages` PR.
-3. Merging that release PR runs the same workflow again.
-4. `changesets/action` publishes any queued packages to npm with Trusted Publishing (OIDC), then creates tags and GitHub releases.
+All published packages (`vgpu`, `@vgpu/core`, `@vgpu/wgsl`, `@vgpu/wgsl-std`,
+`@vgpu/adapter-node`, `@vgpu/adapter-mock`, `@vgpu/render`) version together via the
+`fixed` group in `.changeset/config.json`; private packages (`@vgpu/cli`, the docs app)
+keep independent lineages outside that group.
 
-This PR does not publish anything by itself. Publishing only happens after a version-packages PR is merged on `main` and npm Trusted Publishing has been configured.
+### 1. Version the packages (a PR of its own)
 
-## Initial setup (one-time, after this PR merges)
-
-### 1. Bootstrap publish v0.0.1 manually
-
-Trusted Publishing requires each package to already exist on npm. Publish the current `0.0.1` packages manually once, in dependency order:
-
-1. `@vgpu/wgsl`
-2. `@vgpu/core`
-3. `@vgpu/render`
-4. `@vgpu/adapter-mock`
-5. `@vgpu/adapter-node`
-
-From each package directory, run:
+From an up-to-date `main`, on a release branch:
 
 ```bash
-pnpm publish --access public --otp=<code>
+pnpm changeset status   # what will be bumped, and why
+pnpm changeset version  # applies the bumps, writes CHANGELOGs, consumes .changeset/*.md
+pnpm install            # refresh the lockfile with the new internal versions
 ```
 
-### 2. Configure Trusted Publishers on npm
+`changeset version` rewrites every `package.json` version, folds each `.changeset/*.md`
+into the matching `CHANGELOG.md`, and deletes the changesets it consumed. Review the
+diff — the changelog text is the public release note — then open a PR titled something
+like `chore(release): 0.2.0` and merge it to `main`.
 
-For each package, open its npm settings and add a Trusted Publisher with:
+Private packages (`@vgpu/cli`, the docs app) are versioned so they get changelog entries,
+but they are never published. `@vgpu/cli` ships *inside* the `vgpu` tarball: `copy-cli.mjs`
+writes a synthetic `package.json` stamped with `vgpu`'s version, so its own version field
+is internal bookkeeping only — nothing at runtime reads it. Running the CLI **from a
+checkout** (`node packages/vgpu/bin/vgpu.js ...`) ignores it too: `bin/vgpu.js` detects it is
+in-repo and resolves its version from `packages/vgpu-api/package.json`, so the in-repo binary
+reports (and negotiates with `https://vgpu.sh`) the same version the published package would.
+Never hand-edit `packages/vgpu/package.json`'s version to work around a version-gate error —
+it has no effect.
 
-- Provider: GitHub Actions
-- Owner: `vercel-labs`
-- Repository: `vgpu`
-- Workflow filename: `release.yml`
-- Environment: leave blank
+### 2. Tag and publish
 
-Package settings pages:
+Once the versioning PR is on `main`, create a **GitHub Release** on that commit with the
+tag `vX.Y.Z` matching the new `vgpu` version. Publishing the release triggers
+`release.yml`, which checks out the tag, builds, runs the release gates (typecheck, the
+test suites that run on a plain runner, and `pnpm bundle-check`) and then runs
+`pnpm -r publish --access public` with npm Trusted Publishing (OIDC).
 
-- `https://www.npmjs.com/package/@vgpu/wgsl`
-- `https://www.npmjs.com/package/@vgpu/core`
-- `https://www.npmjs.com/package/@vgpu/render`
-- `https://www.npmjs.com/package/@vgpu/adapter-mock`
-- `https://www.npmjs.com/package/@vgpu/adapter-node`
+Only tags starting with `v` publish. Binary-asset releases such as `dawn-*` are ignored by
+the workflow's `if:` gate.
 
-### 3. Verify
+If a gate fails the release publishes nothing: fix `main`, then delete and recreate the
+release/tag.
 
-Merge the next `chore(release): version packages` PR after Trusted Publishers are configured. The Release workflow should publish automatically, and the npm package pages should show provenance for the published version.
+### Release candidates
 
-### 4. Cleanup
+Run `pnpm changeset version` as usual, then append `-rc.N` by hand to the version of each
+package you intend to publish. Tag the merge commit `vX.Y.Z-rc.N` and create the GitHub
+Release with **Set as a pre-release** ticked: the workflow reads that flag and publishes
+under the `next` dist-tag, so `latest` — and therefore a plain `npm install vgpu` — keeps
+pointing at the last stable. Testers opt in with `npm install vgpu@next`.
 
-If an `NPM_TOKEN` repository secret was ever added during earlier experiments, delete it. It is not used by this workflow.
+Forgetting the checkbox is the one mistake that would push a release candidate to `latest`,
+so the workflow refuses any tag containing a hyphen unless the pre-release flag is set.
+
+Promoting an RC is a clean re-release: version the packages to stable `vX.Y.Z`, tag, and
+publish a normal (non-pre-release) GitHub Release. Do **not** use `npm dist-tag add` — in a
+monorepo it has to be repeated for every package, and one forgotten package leaves `latest`
+silently pointing at a release candidate.
+
+### npm Trusted Publishing
+
+Publishing uses OIDC, not a token — there is no `NPM_TOKEN` secret. Each published package
+has a Trusted Publisher configured on npm (provider GitHub Actions, owner `vercel-labs`,
+repository `vgpu`, workflow `release.yml`, no environment). A **new** package has to be
+published manually once before Trusted Publishing can be configured for it.
 
 ## Prereleases (future)
 

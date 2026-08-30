@@ -1,6 +1,6 @@
 {
   "name": "@vgpu/adapter-mock",
-  "version": "0.1.5",
+  "version": "0.3.1",
   "description": "Mock GPU adapter for testing vgpu code without real WebGPU hardware.",
   "keywords": [
     "webgpu",
@@ -10,7 +10,7 @@
     "testing",
     "adapter"
   ],
-  "homepage": "https://github.com/vercel-labs/vgpu#readme",
+  "homepage": "https://vgpu.sh",
   "bugs": {
     "url": "https://github.com/vercel-labs/vgpu/issues"
   },
@@ -35,6 +35,7 @@
   },
   "files": [
     "dist",
+    "!dist/tsconfig.tsbuildinfo",
     "src/**/*.docs.md",
     "README.md",
     "LICENSE"
@@ -45,5 +46,7 @@
   "dependencies": {
     "@vgpu/core": "workspace:*"
   },
-  "vgpuBundleBudgetGzipBytes": 20480
+  "vgpuBundleAudience": "tooling",
+  "vgpuBundleBudgetGzipBytes": 13312,
+  "vgpuBundleBudgetNote": "Gzip ceilings use 512-byte granularity: each budget is the next 512-byte multiple strictly above the measured size. Regenerate with `pnpm bundle-check --update`. vgpuBundleAudience/vgpuExportBundleAudiences select the gate: \"client\" entries ship to browsers and fail on any byte over budget; \"tooling\" entries (loaders, Node runtime, CLI, package tarballs) only warn until growth passes vgpuBundleBudgetGrowthThreshold (default 5%). Tarballs measure published dist bytes with sourcemap sourcesContent stripped and *.docs.md excluded."
 }
