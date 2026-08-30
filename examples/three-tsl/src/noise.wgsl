@@ -62,6 +62,23 @@ export fn fbm3(position: vec3f, octaves: u32) -> f32 {
   return total / max(normalization, 1e-5);
 }
 
+// Turbulence: fbm over |signed noise|. The absolute value folds every zero
+// crossing into a crease, so the result reads as fractal rock rather than
+// smooth clouds.
+export fn turbulence3(position: vec3f, octaves: u32) -> f32 {
+  var total = 0.0;
+  var amplitude = 0.5;
+  var sample = position;
+  var normalization = 0.0;
+  for (var i = 0u; i < octaves; i++) {
+    total += abs(perlin3(sample) * 2.0 - 1.0) * amplitude;
+    normalization += amplitude;
+    amplitude *= 0.55;
+    sample = octaveRotation * sample * 2.13 + vec3f(11.5, 5.2, 7.8);
+  }
+  return total / max(normalization, 1e-5);
+}
+
 // Ridged multifractal: sharp creases where the noise crosses its midline.
 // Returns 0..1 with thin bright ridges near 1.
 export fn ridged3(position: vec3f, octaves: u32) -> f32 {

@@ -84,11 +84,8 @@ async function run(): Promise<unknown> {
   view.style.imageRendering = "pixelated";
   const context2d = view.getContext("2d")!;
   const image = context2d.createImageData(size, size);
-  for (let y = 0; y < size; y++) {
-    // readRenderTargetPixelsAsync returns rows bottom-up; 2D canvas is top-down.
-    const src = (size - 1 - y) * size * 4;
-    image.data.set(pixels.subarray(src, src + size * 4), y * size * 4);
-  }
+  // WebGPU framebuffers are top-left origin: rows come back top-down already.
+  image.data.set(pixels.subarray(0, size * size * 4));
   context2d.putImageData(image, 0, 0);
   document.body.append(view);
 

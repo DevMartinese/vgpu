@@ -1,4 +1,4 @@
-import { fbm3, perlin3, valueNoise3 } from "./noise.wgsl";
+import { fbm3, perlin3, turbulence3, valueNoise3 } from "./noise.wgsl";
 import { voronoi3d } from "@vgpu/wgsl-std/noise";
 
 // Incandescence ramp for molten rock: 0 = cold black crust, 1 = white-hot.
@@ -122,10 +122,10 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
   let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
   let lobes = ropeMask(domain);
-  let rough = fbm3(domain * 4.2, 5u) * 0.2;
-  let fine = fbm3(domain * 9.5 + vec3f(2.0, 12.0, 6.0), 4u) * 0.1;
+  let rough = turbulence3(domain * 4.2, 6u) * 0.2;
+  let fine = turbulence3(domain * 9.5 + vec3f(2.0, 12.0, 6.0), 5u) * 0.12;
   let ropes = ropeFolds(domain) * lobes * 0.38;
-  let rubble = fbm3(position * 13.0, 4u) * (1.0 - lobes) * 0.3;
+  let rubble = turbulence3(position * 13.0, 5u) * (1.0 - lobes) * 0.3;
   let pits = vesiclePits(position) * 0.08;
   return clamp(dome * 0.45 + rough + fine + ropes + rubble - pits + 0.06, 0.0, 1.0);
 }
@@ -134,7 +134,7 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
 // small epsilon for micro normals:
 // x = sharp mineral grain, y = flow-line streaks frozen into the glassy skin.
 export fn microDetail(position: vec3f) -> vec2f {
-  let grain = fbm3(position * 17.0, 5u);
+  let grain = turbulence3(position * 19.0, 5u);
   let streaks = perlin3(position * vec3f(24.0, 7.0, 24.0) + vec3f(4.0, 8.0, 15.0));
   return vec2f(grain, streaks);
 }
@@ -157,7 +157,7 @@ export fn crustPbr(position: vec3f, t: f32) -> vec4f {
 // x = tone mottling, y = oxide staining, z = glassy-sheen mask, w = vesicle pits.
 export fn crustSurface(position: vec3f, t: f32) -> vec4f {
   let domain = lavaDomain(position, t);
-  let tone = fbm3(domain * 2.4 + vec3f(3.3, 7.7, 5.1), 4u);
+  let tone = turbulence3(domain * 2.4 + vec3f(3.3, 7.7, 5.1), 5u);
   let oxide = smoothstep(0.55, 0.8, fbm3(domain * 1.7 + vec3f(13.0, 3.0, 8.0), 4u));
   // Fresh pahoehoe skin cools into volcanic glass; rubble stays matte.
   let glass = smoothstep(0.45, 0.72, fbm3(domain * 1.1 + vec3f(23.0, 15.0, 2.0), 3u)) * ropeMask(domain);

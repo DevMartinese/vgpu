@@ -111,11 +111,8 @@ async function main(): Promise<void> {
     const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, SIZE, SIZE)) as Uint8Array;
 
     const png = new PNG({ width: SIZE, height: SIZE });
-    for (let y = 0; y < SIZE; y++) {
-      // readRenderTargetPixelsAsync returns rows bottom-up; PNG is top-down.
-      const src = (SIZE - 1 - y) * SIZE * 4;
-      png.data.set(pixels.subarray(src, src + SIZE * 4), y * SIZE * 4);
-    }
+    // WebGPU framebuffers are top-left origin: rows come back top-down already.
+    png.data.set(pixels.subarray(0, SIZE * SIZE * 4));
     for (let i = 3; i < png.data.length; i += 4) png.data[i] = 255;
     const file = `${OUT_DIR}${materialName}.png`;
     writeFileSync(file, PNG.sync.write(png));

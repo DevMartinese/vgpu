@@ -117,7 +117,7 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   ).div(eps);
   const tangentGrad = grad.sub(normalLocal.mul(grad.dot(normalLocal)));
 
-  const microEps = 0.008;
+  const microEps = 0.005;
   const microGrad = vec3(
     microDetail({ position: p.add(vec3(microEps, 0, 0)) }).x.sub(grain),
     microDetail({ position: p.add(vec3(0, microEps, 0)) }).x.sub(grain),
@@ -127,7 +127,7 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
 
   const bumped = normalLocal
     .sub(tangentGrad.mul(mix(float(0.22), float(0.04), molten)))
-    .sub(microTangent.mul(mix(float(0.035), float(0.006), molten)))
+    .sub(microTangent.mul(mix(float(0.045), float(0.008), molten)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
 
