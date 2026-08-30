@@ -1,5 +1,5 @@
-// Generates previews/<material>.png by running the three.js demo scenes
-// headless in Node on vgpu's Dawn-backed device — no browser involved.
+// Generates previews/lava.png by running the three.js demo scene headless
+// in Node on vgpu's Dawn-backed device — no browser involved.
 //
 //   pnpm --filter @vgpu/example-three-tsl previews
 //
@@ -39,16 +39,6 @@ function stubBrowserGlobals(): void {
       this.loaded = init.loaded ?? 0;
       this.total = init.total ?? 0;
     }
-  };
-  globals.document ??= {
-    createElement: () => ({
-      style: {},
-      width: 0,
-      height: 0,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      getContext: () => null,
-    }),
   };
 }
 
@@ -91,35 +81,33 @@ async function main(): Promise<void> {
     context: fakeContext as unknown as GPUCanvasContext,
     canvas: fakeCanvas as unknown as HTMLCanvasElement,
   });
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   await renderer.init();
 
+  const { scene } = await createDemoScene({ timeNode: float(FRAME_TIME) });
+  const camera = createDemoCamera(1);
+
+  // The readback goes through the post chain so it carries the full output
+  // transform (tone mapping + sRGB); render targets are otherwise linear
+  // intermediates in three.
+  const target = new THREE.RenderTarget(SIZE, SIZE);
+  renderer.setRenderTarget(target);
+  // Dawn's swiftshader backend rejects multisampled rgba16float, so the
+  // scene pass runs single-sampled here; the preview size hides the AA.
+  const postProcessing = createBloomPipeline(renderer, scene, camera, { samples: 1 });
+  await postProcessing.renderAsync();
+  const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, SIZE, SIZE)) as Uint8Array;
+
+  const png = new PNG({ width: SIZE, height: SIZE });
+  // WebGPU framebuffers are top-left origin: rows come back top-down already.
+  png.data.set(pixels.subarray(0, SIZE * SIZE * 4));
+  for (let i = 3; i < png.data.length; i += 4) png.data[i] = 255;
   mkdirSync(OUT_DIR, { recursive: true });
-  for (const materialName of ["lava", "marble"] as const) {
-    renderer.toneMapping = materialName === "lava" ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
-    const { scene } = await createDemoScene(materialName, { timeNode: float(FRAME_TIME) });
-    const camera = createDemoCamera(1);
+  const file = `${OUT_DIR}lava.png`;
+  writeFileSync(file, PNG.sync.write(png));
+  console.log(`wrote ${file}`);
 
-    // Both materials go through the post chain so the readback carries the
-    // full output transform (tone mapping + sRGB); render targets are
-    // otherwise linear intermediates in three.
-    const target = new THREE.RenderTarget(SIZE, SIZE);
-    renderer.setRenderTarget(target);
-    // Dawn's swiftshader backend rejects multisampled rgba16float, so the
-    // scene pass runs single-sampled here; the preview size hides the AA.
-    const postProcessing = createBloomPipeline(renderer, scene, camera, { samples: 1 });
-    await postProcessing.renderAsync();
-    const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, SIZE, SIZE)) as Uint8Array;
-
-    const png = new PNG({ width: SIZE, height: SIZE });
-    // WebGPU framebuffers are top-left origin: rows come back top-down already.
-    png.data.set(pixels.subarray(0, SIZE * SIZE * 4));
-    for (let i = 3; i < png.data.length; i += 4) png.data[i] = 255;
-    const file = `${OUT_DIR}${materialName}.png`;
-    writeFileSync(file, PNG.sync.write(png));
-    console.log(`wrote ${file}`);
-    target.dispose();
-  }
-
+  target.dispose();
   renderer.dispose();
   gpu.dispose();
 }

@@ -1,13 +1,12 @@
 # three-tsl
 
 Imports WGSL modules through the `@vgpu/wgsl` Vite loader and connects their
-functions to three.js `MeshPhysicalNodeMaterial`s as TSL nodes.
+functions to a three.js `MeshPhysicalNodeMaterial` as TSL nodes, driving a
+procedural lava demo.
 
-| Lava (default) | Marble (`?material=marble`) |
-| --- | --- |
-| ![Lava preview](./previews/lava.png) | ![Marble preview](./previews/marble.png) |
+![Lava preview](./previews/lava.png)
 
-The previews are rendered headless in Node by `pnpm previews`
+The preview is rendered headless in Node by `pnpm previews`
 (`scripts/generate-previews.ts`): `vgpu/node` creates the Dawn-backed WebGPU
 device, three's `WebGPURenderer` receives that same `GPUDevice` (plus stub
 canvas/context and a handful of browser-global shims), and the frame is read
@@ -20,13 +19,11 @@ system requirements: `VK_ICD_FILENAMES`, `XDG_RUNTIME_DIR`,
 src/noise.wgsl         shared value noise / fbm / ridged noise module
 src/lava.wgsl          heat, crust, sink, and blackbody fields; uses
                        @vgpu/wgsl-std voronoi3d + noise.wgsl
-src/marble.wgsl        marble veins; imports fbm3 from noise.wgsl
 src/wgsl-tsl.ts        tslExports(): loader output -> callable wgslFn TSL nodes
 src/lava-material.ts   physical material: emissive cracks, bump normals, and
                        vertex relief all driven by lava.wgsl
-src/marble-material.ts physical material with colorNode/roughnessNode from WGSL
-src/scenes.ts          shared scene/lights/mesh builders for both demos
-src/main.ts            torus knot scene, WebGPURenderer (?material=marble)
+src/scenes.ts          shared scene/lights/mesh builders
+src/main.ts            torus knot scene, WebGPURenderer
 src/harness.ts         offscreen render smoke check (also runs headless)
 scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
 ```
@@ -38,8 +35,7 @@ pnpm install
 pnpm --filter @vgpu/example-three-tsl dev
 ```
 
-Open the printed URL in a WebGPU-capable browser. The default scene is the
-lava material; append `?material=marble` for the marble demo.
+Open the printed URL in a WebGPU-capable browser.
 
 ## The lava material
 
@@ -91,21 +87,21 @@ harness screenshots match the on-screen image only on the post path
 
 ## How the bridge works
 
-- `import marbleModule from "./marble.wgsl"` returns `{ version: 1, wgsl }`:
+- `import lavaModule from "./lava.wgsl"` returns `{ version: 1, wgsl }`:
   the flattened module graph, with imported helpers mangled to
   `_vgsl_<hash>__<name>` and no `export` keywords left.
-- `tslExports(marbleModule, ["marble", "fbm3"])` finds each function by its
-  authored name (accepting the mangle prefix), reads its parameter list and
-  return type from the header, and emits a forwarding wrapper via TSL's
+- `tslExports(lavaModule, ["lavaHeat", "blackbody"])` finds each function by
+  its authored name (accepting the mangle prefix), reads its parameter list
+  and return type from the header, and emits a forwarding wrapper via TSL's
   `wgslFn`, attaching the whole module once as a shared `wgsl()` include.
 - The returned nodes are callable with inputs keyed by WGSL parameter names.
   TSL uniforms flow in as plain function parameters — three owns the actual
   `@group/@binding` layout when it builds the shader:
 
 ```ts
-const { marble } = tslExports(marbleModule, ["marble"]);
-const warp = uniform(6.0);
-material.colorNode = mix(baseColor, veinColor, marble({ position: positionLocal, warp }));
+const { lavaHeat, blackbody } = tslExports(lavaModule, ["lavaHeat", "blackbody"]);
+const glowIntensity = uniform(2.4);
+material.emissiveNode = blackbody({ t: lavaHeat({ position: positionLocal, t: time }) }).mul(glowIntensity);
 ```
 
 Entry points and functions that touch `@group/@binding` resources do not map
@@ -115,7 +111,7 @@ to `wgslFn` — TSL manages bindings itself. Pure functions (like everything in
 ## Tests
 
 `pnpm --filter @vgpu/example-three-tsl test` covers the header parser and
-wrapper generation, and resolves `src/marble.wgsl` through
+wrapper generation, and resolves `src/lava.wgsl` through
 `@vgpu/wgsl/runtime` to check the bridge against real loader output.
 
 `/harness.html` (dev server) renders the material into a `RenderTarget` with a

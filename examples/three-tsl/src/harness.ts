@@ -1,14 +1,14 @@
-// Offscreen verification harness: renders a material into a RenderTarget
-// with a stubbed canvas context, so it runs in headless chromium where
-// WebGPU canvas presentation is unavailable.
+// Offscreen verification harness: renders the lava material into a
+// RenderTarget with a stubbed canvas context, so it runs in headless
+// chromium where WebGPU canvas presentation is unavailable.
 //
-// Query params: ?material=lava|marble  &mesh=knot|sphere|plane
-//               &t=<seconds, fixed frame time>  &size=<pixels>
-//               &dist=<camera distance>  &glow=<emissive intensity>
-//               &light=<key light multiplier>  &post=0 (linear, no bloom)
+// Query params: ?mesh=knot|sphere|plane  &t=<seconds, fixed frame time>
+//               &size=<pixels>  &dist=<camera distance>
+//               &glow=<emissive intensity>  &light=<key light multiplier>
+//               &post=0 (linear readback, no bloom)
 import * as THREE from "three/webgpu";
 import { float } from "three/tsl";
-import { createDemoCamera, createDemoScene, type DemoMaterialName, type DemoMeshKind } from "./scenes.ts";
+import { createDemoCamera, createDemoScene, type DemoMeshKind } from "./scenes.ts";
 import { createBloomPipeline } from "./post.ts";
 
 declare global {
@@ -17,12 +17,10 @@ declare global {
 
 async function run(): Promise<unknown> {
   const params = new URLSearchParams(location.search);
-  const materialName = (params.get("material") ?? "lava") as DemoMaterialName;
   const meshKind = (params.get("mesh") ?? "knot") as DemoMeshKind;
   const frameTime = Number(params.get("t") ?? "0");
   const size = Number(params.get("size") ?? "256");
   const glowOverride = params.get("glow");
-  const lightScale = Number(params.get("light") ?? "1");
 
   const fakeContext = {
     configure() {},
@@ -30,13 +28,13 @@ async function run(): Promise<unknown> {
     getCurrentTexture(): never { throw new Error("harness renders offscreen only"); },
   };
   const renderer = new THREE.WebGPURenderer({ context: fakeContext as unknown as GPUCanvasContext });
-  if (materialName === "lava") renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   await renderer.init();
 
-  const { scene, usesBloom } = await createDemoScene(materialName, {
+  const { scene } = await createDemoScene({
     mesh: meshKind,
     timeNode: float(frameTime),
-    lightScale,
+    lightScale: Number(params.get("light") ?? "1"),
     glowIntensity: glowOverride === null ? undefined : Number(glowOverride),
   });
 
@@ -47,7 +45,7 @@ async function run(): Promise<unknown> {
 
   // With the bloom chain, MSAA lives on the scene pass; the final quad
   // composite needs no samples of its own.
-  const withPost = usesBloom && params.get("post") !== "0";
+  const withPost = params.get("post") !== "0";
   const target = new THREE.RenderTarget(size, size, { samples: withPost ? 1 : 4 });
   renderer.setRenderTarget(target);
   if (withPost) {
@@ -89,7 +87,7 @@ async function run(): Promise<unknown> {
   context2d.putImageData(image, 0, 0);
   document.body.append(view);
 
-  return { material: materialName, mesh: meshKind, total: pixels.length / 4, lit, distinct: distinct.size, crust };
+  return { mesh: meshKind, total: pixels.length / 4, lit, distinct: distinct.size, crust };
 }
 
 run().then(

@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { createDemoCamera, createDemoScene, type DemoMaterialName } from "./scenes.ts";
+import { createDemoCamera, createDemoScene } from "./scenes.ts";
 import { createBloomPipeline } from "./post.ts";
 
 async function main(): Promise<void> {
@@ -9,22 +9,20 @@ async function main(): Promise<void> {
     return;
   }
 
-  const materialName = (new URLSearchParams(location.search).get("material") ?? "lava") as DemoMaterialName;
-
   const renderer = new THREE.WebGPURenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (materialName === "lava") renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.querySelector("#app")!.append(renderer.domElement);
   await renderer.init();
 
-  const { scene, mesh, usesBloom } = await createDemoScene(materialName);
+  const { scene, mesh } = await createDemoScene();
   const camera = createDemoCamera(window.innerWidth / window.innerHeight);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  const postProcessing = usesBloom ? createBloomPipeline(renderer, scene, camera) : null;
+  const postProcessing = createBloomPipeline(renderer, scene, camera);
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -35,8 +33,7 @@ async function main(): Promise<void> {
   renderer.setAnimationLoop(() => {
     mesh.rotation.y += 0.0012;
     controls.update();
-    if (postProcessing) postProcessing.render();
-    else renderer.render(scene, camera);
+    postProcessing.render();
   });
 }
 

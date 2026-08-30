@@ -1,10 +1,8 @@
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
-import { createMarbleMaterial } from "./marble-material.ts";
 import { createLavaMaterial } from "./lava-material.ts";
 import { applyNightEnvironment } from "./environment.ts";
 
-export type DemoMaterialName = "lava" | "marble";
 export type DemoMeshKind = "knot" | "sphere" | "plane";
 
 export interface DemoSceneOptions {
@@ -20,8 +18,6 @@ export interface DemoSceneOptions {
 export interface DemoScene {
   readonly scene: THREE.Scene;
   readonly mesh: THREE.Mesh;
-  /** The lava scene expects the bloom post chain and ACES tone mapping. */
-  readonly usesBloom: boolean;
 }
 
 export function buildDemoMesh(kind: DemoMeshKind, material: THREE.Material): THREE.Mesh {
@@ -42,36 +38,22 @@ export function createDemoCamera(aspect: number): THREE.PerspectiveCamera {
   return camera;
 }
 
-/** Scene, lights, environment, and mesh for one demo material. */
-export async function createDemoScene(
-  materialName: DemoMaterialName,
-  options: DemoSceneOptions = {},
-): Promise<DemoScene> {
-  const lightScale = options.lightScale ?? 1;
+/** Scene, lights, environment, and mesh for the lava demo. */
+export async function createDemoScene(options: DemoSceneOptions = {}): Promise<DemoScene> {
   const scene = new THREE.Scene();
 
-  let material: THREE.Material;
-  if (materialName === "marble") {
-    scene.background = new THREE.Color(0x0b0d10);
-    const key = new THREE.DirectionalLight(0xffffff, 2.4 * lightScale);
-    key.position.set(3, 4, 2);
-    scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x8fb4dd, 0x40342a, 0.8));
-    material = createMarbleMaterial().material;
-  } else {
-    // HDRI ambient (backdrop stays black) plus a moonlight key; the warm
-    // floor bounce fakes the glow lighting the crust back.
-    await applyNightEnvironment(scene);
-    const key = new THREE.DirectionalLight(0xcfd8e6, 2.2 * lightScale);
-    key.position.set(3, 2.2, 2);
-    scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.22));
-    const lava = createLavaMaterial({ timeNode: options.timeNode });
-    if (options.glowIntensity !== undefined) lava.glowIntensity.value = options.glowIntensity;
-    material = lava.material;
-  }
+  // HDRI ambient (backdrop stays black) plus a moonlight key; the warm
+  // floor bounce fakes the glow lighting the crust back.
+  await applyNightEnvironment(scene);
+  const key = new THREE.DirectionalLight(0xcfd8e6, 2.2 * (options.lightScale ?? 1));
+  key.position.set(3, 2.2, 2);
+  scene.add(key);
+  scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.22));
 
-  const mesh = buildDemoMesh(options.mesh ?? "knot", material);
+  const lava = createLavaMaterial({ timeNode: options.timeNode });
+  if (options.glowIntensity !== undefined) lava.glowIntensity.value = options.glowIntensity;
+
+  const mesh = buildDemoMesh(options.mesh ?? "knot", lava.material);
   scene.add(mesh);
-  return { scene, mesh, usesBloom: materialName === "lava" };
+  return { scene, mesh };
 }

@@ -46,8 +46,22 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const glass = surface.z;
   const pits = surface.w;
 
+  // High-frequency surface detail: mineral grain plus flow-line streaks
+  // frozen into the glassy skin. Shared by the glow seep mask, the
+  // roughness map, and the micro normal pass below.
+  const micro = microDetail({ position: p });
+  const grain = micro.x;
+  const streaks = micro.y;
+
+  // The dim fringe of the glow seeps through the micro grain instead of
+  // sitting painted on top of it: crevices let heat through, grain bumps
+  // occlude it, and hot cores burn through everything.
+  const seep = smoothstep(0.62, 0.25, grain);
+  const burnThrough = smoothstep(0.5, 0.85, heat);
+  const glowHeat = heat.mul(mix(seep, float(1), burnThrough));
+
   // How exposed the melt is: crust occludes low heat completely.
-  const molten = smoothstep(0.3, 0.75, heat);
+  const molten = smoothstep(0.3, 0.75, glowHeat);
 
   const material = new THREE.MeshPhysicalNodeMaterial({ metalness: 0 });
 
@@ -60,16 +74,10 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const basalt = mix(stained, stained.mul(0.45), pits);
   material.colorNode = mix(basalt, vec3(0.012, 0.01, 0.009), molten);
 
-  // Incandescence: blackbody ramp over the heat field, crushed slightly so
-  // crack cores go yellow-white while edges cool through deep red.
-  material.emissiveNode = blackbody({ t: heat.pow(1.35) }).mul(glowIntensity);
-
-  // High-frequency surface detail: mineral grain plus flow-line streaks
-  // frozen into the glassy skin. Shared by the roughness map and the micro
-  // normal pass below.
-  const micro = microDetail({ position: p });
-  const grain = micro.x;
-  const streaks = micro.y;
+  // Incandescence: blackbody ramp over the seeped heat field, crushed
+  // slightly so crack cores go yellow-white while edges cool through deep
+  // red inside the grain crevices.
+  material.emissiveNode = blackbody({ t: glowHeat.pow(1.35) }).mul(glowIntensity);
 
   // Roughness map, not a constant: rubble is matte with sharp grain breakup,
   // the glassy skin is polished but streaked by flow lines, vesicle pits and

@@ -71,27 +71,25 @@ describe("tslExports over a vgpu-resolved module", () => {
     expect(header.returnType).toBe("f32");
   });
 
-  it("wraps the entry module's exports from the flattened WGSL", async () => {
-    const entry = fileURLToPath(new URL("../src/marble.wgsl", import.meta.url));
+  it("wraps the flattened module graph by authored names", async () => {
+    const entry = fileURLToPath(new URL("../src/lava.wgsl", import.meta.url));
     const resolved = await resolveShader({ entry });
 
     // Non-entry-point functions are mangled per module; export keywords are gone.
-    expect(resolved.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__marble\(/);
-    expect(resolved.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__fbm3\(/);
-    expect(resolved.wgsl).toMatch(/_vgsl_[0-9a-f]{8}__hash3/);
+    expect(resolved.wgsl).toMatch(/fn _vgsl_[0-9a-f]{8}__lavaHeat\(/);
+    expect(resolved.wgsl).toMatch(/_vgsl_[0-9a-f]{8}__voronoi3d/);
     expect(resolved.wgsl).not.toMatch(/\bexport\b/);
 
-    // The helper still resolves functions by their authored names.
-    const marbleHeader = parseFunctionHeader(resolved.wgsl, "marble");
-    expect(marbleHeader.resolvedName).toMatch(/^_vgsl_[0-9a-f]{8}__marble$/);
-    expect(marbleHeader.paramNames).toEqual(["position", "warp"]);
-    expect(forwardingWrapper(marbleHeader)).toContain(`return ${marbleHeader.resolvedName}(position, warp);`);
+    // The helper resolves functions by their authored names.
+    const header = parseFunctionHeader(resolved.wgsl, "blackbody");
+    expect(header.resolvedName).toMatch(/^_vgsl_[0-9a-f]{8}__blackbody$/);
+    expect(header.paramNames).toEqual(["t"]);
+    expect(forwardingWrapper(header)).toContain(`return ${header.resolvedName}(t);`);
 
     // wgslFn returns a callable; invoking it with named inputs builds a call node.
-    const nodes = tslExports(resolved.wgsl, ["marble", "fbm3"]);
-    expect(typeof nodes.marble).toBe("function");
-    const call = nodes.marble({ position: vec3(0, 0, 0), warp: 6 });
+    const nodes = tslExports(resolved.wgsl, ["lavaHeat", "blackbody"]);
+    expect(typeof nodes.blackbody).toBe("function");
+    const call = nodes.lavaHeat({ position: vec3(0, 0, 0), t: 6 });
     expect(call.isNode).toBe(true);
-    expect(typeof nodes.fbm3).toBe("function");
   });
 });
