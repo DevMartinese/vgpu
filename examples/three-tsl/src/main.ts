@@ -2,6 +2,7 @@ import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createMarbleMaterial } from "./marble-material.ts";
 import { createLavaMaterial } from "./lava-material.ts";
+import { applyNightEnvironment } from "./environment.ts";
 
 async function main(): Promise<void> {
   if (navigator.gpu === undefined) {
@@ -27,11 +28,13 @@ async function main(): Promise<void> {
   controls.enableDamping = true;
 
   if (materialName === "lava") {
-    // Cool moonlight key plus a warm floor bounce standing in for the glow.
-    const key = new THREE.DirectionalLight(0xcfd8e6, 5.0);
+    // HDRI ambient plus a cool moonlight key; the warm floor bounce stands
+    // in for the glow lighting the crust back.
+    await applyNightEnvironment(scene);
+    const key = new THREE.DirectionalLight(0xcfd8e6, 3.4);
     key.position.set(3, 2.2, 2);
     scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x2a3140, 0xb33a10, 0.55));
+    scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.35));
   } else {
     const key = new THREE.DirectionalLight(0xffffff, 2.4);
     key.position.set(3, 4, 2);

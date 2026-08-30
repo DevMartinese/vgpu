@@ -8,6 +8,7 @@ import * as THREE from "three/webgpu";
 import { float } from "three/tsl";
 import { createMarbleMaterial } from "./marble-material.ts";
 import { createLavaMaterial } from "./lava-material.ts";
+import { applyNightEnvironment } from "./environment.ts";
 
 declare global {
   interface Window { __result?: unknown }
@@ -47,15 +48,20 @@ async function run(): Promise<unknown> {
   camera.position.set(0, 1.2, 4.2);
   camera.lookAt(0, 0, 0);
 
-  const key = new THREE.DirectionalLight(materialName === "lava" ? 0xcfd8e6 : 0xffffff, (materialName === "lava" ? 5.0 : 2.4) * lightScale);
-  key.position.set(3, materialName === "lava" ? 2.2 : 4, 2);
-  scene.add(key);
-  // For lava, the ground bounce is the glow itself: warm hemisphere floor.
-  scene.add(
-    materialName === "lava"
-      ? new THREE.HemisphereLight(0x2a3140, 0xb33a10, 0.55)
-      : new THREE.HemisphereLight(0x8fb4dd, 0x40342a, 0.8),
-  );
+  if (materialName === "lava") {
+    // HDRI ambient plus a moonlight key; the warm floor bounce fakes the
+    // glow lighting the crust back.
+    await applyNightEnvironment(scene);
+    const key = new THREE.DirectionalLight(0xcfd8e6, 3.4 * lightScale);
+    key.position.set(3, 2.2, 2);
+    scene.add(key);
+    scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.35));
+  } else {
+    const key = new THREE.DirectionalLight(0xffffff, 2.4 * lightScale);
+    key.position.set(3, 4, 2);
+    scene.add(key);
+    scene.add(new THREE.HemisphereLight(0x8fb4dd, 0x40342a, 0.8));
+  }
 
   let material: THREE.Material;
   if (materialName === "marble") {

@@ -61,7 +61,7 @@ describe("tslExports over a vgpu-resolved module", () => {
     const entry = fileURLToPath(new URL("../src/lava.wgsl", import.meta.url));
     const resolved = await resolveShader({ entry });
 
-    const names = ["lavaHeat", "blackbody", "crustHeight", "crustTone", "lavaSink"] as const;
+    const names = ["lavaHeat", "blackbody", "crustHeight", "crustSurface", "lavaSink"] as const;
     const nodes = tslExports(resolved.wgsl, names);
     for (const name of names) expect(typeof nodes[name]).toBe("function");
 

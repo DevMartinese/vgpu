@@ -15,6 +15,7 @@
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "@pmndrs/assets": "^1.7.0",
     "@types/three": "^0.180.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.0",

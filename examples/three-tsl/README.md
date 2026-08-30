@@ -37,11 +37,20 @@ TSL nodes:
   "activity" field, and occasional streaked melt windows.
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
-- `crustHeight` — plate relief; sampled once for shading and three more times
-  by finite differences in TSL to build `normalNode` bump detail.
+- `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
+  clinkery rubble elsewhere, and clustered vesicle pits; sampled once for
+  shading and three more times by finite differences in TSL to build
+  `normalNode` bump detail.
+- `crustSurface` — one `vec4f` of shading masks (tone mottling, oxide
+  staining, glassy-skin mask, vesicle pits) driving albedo, roughness
+  variation, and a clearcoat "volcanic glass" sheen.
 - `lavaSink` — a wide low-frequency channel mask for `positionNode` vertex
   displacement, kept separate from the thin cracks so coarse meshes don't
   stipple.
+
+Lighting is image-based: a CC0 Poly Haven night HDRI (via `@pmndrs/assets`)
+drives `scene.environment` and the backdrop, plus a cool moonlight key and a
+faint warm floor bounce standing in for the glow lighting the crust back.
 
 ## How the bridge works
 

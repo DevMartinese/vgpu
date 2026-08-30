@@ -77,18 +77,50 @@ export fn lavaSink(position: vec3f, t: f32) -> f32 {
   return clamp(channel * 0.7 + pools, 0.0, 1.0);
 }
 
-// Crust relief height, 0..1: domed plates that sink toward the cracks.
+// Pahoehoe rope folds: curved parallel cords, 0..1 with rounded crests.
+// The arc term bends the bands the way drapes of skin wrinkle ahead of a
+// slowly advancing lobe.
+fn ropeFolds(domain: vec3f) -> f32 {
+  let arc = fbm3(domain * 0.7 + vec3f(8.4, 2.2, 6.6), 3u);
+  let phase = dot(domain, vec3f(2.1, 0.6, 1.6)) * 7.0 + arc * 11.0;
+  let band = 0.5 + 0.5 * sin(phase + fbm3(domain * 2.6, 3u) * 2.0);
+  return band * band;
+}
+
+// Where the crust is ropy pahoehoe skin vs broken clinkery rubble, 0..1.
+fn ropeMask(domain: vec3f) -> f32 {
+  return smoothstep(0.38, 0.62, fbm3(domain * 0.32 + vec3f(19.0, 5.0, 11.0), 3u));
+}
+
+// Clustered vesicle pits (frozen gas bubbles) in the crust skin, 1 inside a
+// pit. Pits only appear in patches, the way outgassed skin does.
+fn vesiclePits(position: vec3f) -> f32 {
+  let cluster = smoothstep(0.52, 0.68, fbm3(position * 1.4 + vec3f(9.0, 27.0, 4.0), 3u));
+  let sample = voronoi3d(position * 26.0);
+  return smoothstep(0.14, 0.03, sample.f1) * cluster;
+}
+
+// Crust relief height, 0..1: domed plates that sink toward the cracks,
+// wrinkled into ropes on pahoehoe lobes and broken into rubble elsewhere.
 export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
   let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
-  let rough = fbm3(domain * 4.2, 5u) * 0.35;
+  let lobes = ropeMask(domain);
+  let rough = fbm3(domain * 4.2, 5u) * 0.22;
+  let ropes = ropeFolds(domain) * lobes * 0.38;
   // Two skewed samples so the high-frequency grain has no lattice direction.
-  let rubble = (valueNoise3(position * 14.0) * 0.6 + valueNoise3(position.zxy * 10.7 + vec3f(31.0, 17.0, 5.0)) * 0.4) * 0.2;
-  return clamp(dome * 0.55 + rough + rubble, 0.0, 1.0);
+  let rubble = (valueNoise3(position * 14.0) * 0.6 + valueNoise3(position.zxy * 10.7 + vec3f(31.0, 17.0, 5.0)) * 0.4) * (1.0 - lobes) * 0.32;
+  let pits = vesiclePits(position) * 0.08;
+  return clamp(dome * 0.45 + rough + ropes + rubble - pits + 0.08, 0.0, 1.0);
 }
 
-// Albedo mottling for the solidified crust, 0..1.
-export fn crustTone(position: vec3f, t: f32) -> f32 {
+// Shading masks for the crust skin:
+// x = tone mottling, y = oxide staining, z = glassy-sheen mask, w = vesicle pits.
+export fn crustSurface(position: vec3f, t: f32) -> vec4f {
   let domain = lavaDomain(position, t);
-  return fbm3(domain * 2.4 + vec3f(3.3, 7.7, 5.1), 4u);
+  let tone = fbm3(domain * 2.4 + vec3f(3.3, 7.7, 5.1), 4u);
+  let oxide = smoothstep(0.55, 0.8, fbm3(domain * 1.7 + vec3f(13.0, 3.0, 8.0), 4u));
+  // Fresh pahoehoe skin cools into volcanic glass; rubble stays matte.
+  let glass = smoothstep(0.45, 0.72, fbm3(domain * 1.1 + vec3f(23.0, 15.0, 2.0), 3u)) * ropeMask(domain);
+  return vec4f(tone, oxide, glass, vesiclePits(position));
 }
