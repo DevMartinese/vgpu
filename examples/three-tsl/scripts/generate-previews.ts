@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   await renderer.init();
 
-  const { scene } = await createDemoScene({ timeNode: float(FRAME_TIME) });
+  const { scene } = await createDemoScene({ mesh: "sphere", timeNode: float(FRAME_TIME) });
   const camera = createDemoCamera(1);
 
   // The readback goes through the post chain so it carries the full output
