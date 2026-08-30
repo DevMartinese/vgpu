@@ -3,7 +3,7 @@
 // (heat through the blackbody ramp, melt mask, striations, crust height)
 // on the same 2D slice the plane demo shows.
 //
-//   pnpm --filter @vgpu/example-three-tsl field-viz [heat|melt|striae|crust ...]
+//   pnpm --filter @vgpu/example-three-tsl field-viz [heat|melt|skin|crust ...]
 //
 // Needs the same Vulkan ICD environment as generate-previews.ts.
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,11 +17,11 @@ const FRAME_TIME = 8;
 const EXAMPLE_DIR = fileURLToPath(new URL("../", import.meta.url));
 const OUT_DIR = `${EXAMPLE_DIR}field-viz/`;
 
-const MODES: Record<string, number> = { heat: 0, melt: 1, striae: 2, crust: 3 };
+const MODES: Record<string, number> = { heat: 0, melt: 1, skin: 2, crust: 3 };
 
 const VIZ_ENTRY = `${OUT_DIR}entry.wgsl`;
 const VIZ_SOURCE = /* wgsl */ `
-import { lavaGlow, flowStriations, blackbody, crustHeight } from "../src/lava.wgsl";
+import { lavaGlow, meltSkin, blackbody, crustHeight } from "../src/lava.wgsl";
 
 struct Params { mode: f32, t: f32, span: f32, center: vec2f }
 @group(0) @binding(0) var<uniform> params: Params;
@@ -36,8 +36,8 @@ struct Params { mode: f32, t: f32, span: f32, center: vec2f }
     let melt = lavaGlow(p, params.t).y;
     return vec4f(melt, melt, melt, 1.0);
   } else if (params.mode < 2.5) {
-    let striae = flowStriations(p, params.t);
-    return vec4f(striae, striae, striae, 1.0);
+    let skinValue = meltSkin(p, params.t);
+    return vec4f(skinValue, skinValue, skinValue, 1.0);
   }
   let height = crustHeight(p, params.t);
   return vec4f(height, height, height, 1.0);

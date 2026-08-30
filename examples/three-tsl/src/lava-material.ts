@@ -4,7 +4,7 @@ import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
 
-const { lavaGlow, blackbody, crustHeight, crustRelief, crustSurface, crustPbr, lavaSink, microDetail, flowStriations } = tslExports(lavaModule, [
+const { lavaGlow, blackbody, crustHeight, crustRelief, crustSurface, crustPbr, lavaSink, microDetail, meltSkin } = tslExports(lavaModule, [
   "lavaGlow",
   "blackbody",
   "crustHeight",
@@ -13,7 +13,7 @@ const { lavaGlow, blackbody, crustHeight, crustRelief, crustSurface, crustPbr, l
   "crustPbr",
   "lavaSink",
   "microDetail",
-  "flowStriations",
+  "meltSkin",
 ]);
 
 export interface LavaMaterialOptions {
@@ -35,7 +35,7 @@ export interface LavaMaterial {
  * loader; three only sees TSL nodes.
  */
 export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMaterial {
-  const glowIntensity = uniform(2.4);
+  const glowIntensity = uniform(1.6);
   const scale = uniform(1.0);
   const t = options.timeNode ?? time;
 
@@ -138,21 +138,22 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   ).div(microEps);
   const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
 
-  // The flow cords are physical wrinkles in the melt skin: finite-difference
-  // the striation field so each cord raises a small ridge, molten areas only.
-  const striaeEps = 0.004;
-  const striaeBase = flowStriations({ position: p, t });
-  const striaeGrad = vec3(
-    flowStriations({ position: p.add(vec3(striaeEps, 0, 0)), t }).sub(striaeBase),
-    flowStriations({ position: p.add(vec3(0, striaeEps, 0)), t }).sub(striaeBase),
-    flowStriations({ position: p.add(vec3(0, 0, striaeEps)), t }).sub(striaeBase),
-  ).div(striaeEps);
-  const striaeTangent = striaeGrad.sub(normalLocal.mul(striaeGrad.dot(normalLocal)));
+  // The cooled skin bands are physical ridges on the melt: finite-difference
+  // the skin field so they emboss the surface — molten areas only, the rock
+  // never carries these lines.
+  const skinEps = 0.006;
+  const skinBase = meltSkin({ position: p, t });
+  const skinGrad = vec3(
+    meltSkin({ position: p.add(vec3(skinEps, 0, 0)), t }).sub(skinBase),
+    meltSkin({ position: p.add(vec3(0, skinEps, 0)), t }).sub(skinBase),
+    meltSkin({ position: p.add(vec3(0, 0, skinEps)), t }).sub(skinBase),
+  ).div(skinEps);
+  const skinTangent = skinGrad.sub(normalLocal.mul(skinGrad.dot(normalLocal)));
 
   const bumped = normalLocal
     .sub(tangentGrad.mul(mix(float(0.16), float(0.04), molten)))
     .sub(microTangent.mul(mix(float(0.022), float(0.008), molten).mul(microFade)))
-    .sub(striaeTangent.mul(mix(float(0.006), float(0.012), molten).mul(striaeFade)))
+    .sub(skinTangent.mul(molten.mul(0.014).mul(striaeFade)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
 

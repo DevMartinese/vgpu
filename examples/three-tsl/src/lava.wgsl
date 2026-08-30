@@ -30,59 +30,34 @@ fn plateEdge(position: vec3f) -> f32 {
   return sample.f2 - sample.f1;
 }
 
-// Laminar flow striations in the melt skin: thin cooled cords that follow
-// the flow, and — like the real wrinkling skin — merge, bifurcate, and
-// break into segments instead of running forever.
-//
-// The cords are level sets of a smooth flow potential, so their direction
-// IS the local flow direction; a spatially varying gain changes how many
-// level sets fit, which forces merges and bifurcations; and a break field
-// stretched along the flow frame (from the potential's gradient) interrupts
-// each cord independently of its neighbors.
-export fn flowStriations(position: vec3f, t: f32) -> f32 {
+// Cooling skin of the melt, Substance-style: anisotropic streak noise
+// warped by perlin so the streaks follow organic flow, kept soft like a
+// blurred mask instead of hard lines. 0 = fresh hot melt, 1 = cooled skin
+// that merges back toward rock. Two anisotropic registers (coarse + fine)
+// give the granular flow direction.
+export fn meltSkin(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
-  let arcOffset = vec3f(4.7, 9.2, 1.3);
-  let arc = fbm3(domain * 0.55 + arcOffset, 3u);
-
-  // Flow frame: "across" points across the cords (gradient of the potential).
-  let eps = 0.05;
-  let grad = vec3f(
-    fbm3((domain + vec3f(eps, 0.0, 0.0)) * 0.55 + arcOffset, 3u) - arc,
-    fbm3((domain + vec3f(0.0, eps, 0.0)) * 0.55 + arcOffset, 3u) - arc,
-    fbm3((domain + vec3f(0.0, 0.0, eps)) * 0.55 + arcOffset, 3u) - arc,
-  );
-  let across = normalize(grad + vec3f(1e-4, 0.0, 0.0));
-
-  // Variable gain: cord count changes across the field, so level sets must
-  // appear, vanish, and split.
-  let gain = 260.0 + 80.0 * fbm3(domain * 0.9 + vec3f(14.0, 6.0, 3.0), 2u);
-  let jitter = fbm3(domain * 3.4 + vec3f(8.0, 3.0, 21.0), 3u);
-  let band = 0.5 + 0.5 * sin(dot(domain, vec3f(1.3, 0.4, 1.0)) * 75.0 + arc * gain + jitter * 5.0);
-  // Bold width changes: a bimodal width field swings cords between fat
-  // bands and hairlines — and because the cut can exceed the sinusoid's
-  // peak, a cord narrows all the way to zero and vanishes, so the lines
-  // read as lens-shaped gleams that swell and pinch out instead of running
-  // forever. Intensity fades as the pinch approaches.
-  let widthNoise = fbm3(domain * 2.8 + vec3f(27.0, 11.0, 5.0), 3u);
-  let widthBias = smoothstep(0.24, 0.78, widthNoise);
-  let cut = mix(0.42, 1.12, widthBias);
-  let softEdge = cut + max(1.0 - cut, 0.0) * 0.45 + 0.001;
-  let crest = smoothstep(cut, softEdge, band) * smoothstep(1.1, 0.8, cut);
-
-  // Anisotropic breaks: slow variation along the cord, fast across it, so
-  // segments are elongated dashes and neighboring cords break differently.
-  let breakField = fbm3(domain * 5.0 + across * dot(domain, across) * 20.0, 3u);
-  let continuity = smoothstep(0.34, 0.52, breakField);
-  return crest * continuity;
+  // Directional warp driven by perlin fbm (the tutorial's warp stage).
+  let warpA = fbm3(domain * 0.8 + vec3f(4.7, 9.2, 1.3), 3u);
+  let warpB = fbm3(domain * 0.8 + vec3f(11.0, 3.5, 7.7), 3u);
+  let warped = domain + vec3f(warpA - 0.5, (warpB - warpA) * 0.5, warpB - 0.5) * 1.1;
+  // Anisotropic streaks: long along the flow axis, fine across it.
+  let streaksCoarse = fbm3(warped * vec3f(7.0, 1.8, 7.0), 4u);
+  let streaksFine = fbm3(warped * vec3f(16.0, 3.5, 16.0) + vec3f(3.0, 21.0, 9.0), 3u);
+  let skin = streaksCoarse * 0.72 + streaksFine * 0.28;
+  // Soft remap: the viscous, merged look of slowly cooling rock.
+  return smoothstep(0.38, 0.72, skin);
 }
 
 // Final glow composition: x = heat 0..1 (feed the blackbody ramp),
 // y = continuous-melt mask 0..1 (liquid gloss, not ember fringe).
 //
-// Two families, matching reference photos: laminar melt (crack cores and
-// washes, textured by flow striations, with white-hot contact rims), and a
-// fringe over solid crust (halo + ember speckle) that only seeps through
-// the crevices of the micro grain instead of sitting painted on top.
+// Two families, matching reference photos: streaky melt (crack cores and
+// washes, textured by the cooling meltSkin field, with white-hot contact
+// rims), and a fringe over solid crust (halo + ember speckle) that only
+// seeps through the crevices of the micro grain instead of sitting painted
+// on top. Where the cooled skin fills in, the liquid mask carves out so the
+// material shades those bands as rock again.
 export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let domain = lavaDomain(position, t);
   // Fine wiggle so voronoi boundaries stop looking ruler-straight.
@@ -113,13 +88,17 @@ export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let islandRim = islands * (1.0 - islands) * 4.0 * wash;
   let rim = clamp(washRim + islandRim * 0.6, 0.0, 1.0) * (0.4 + 0.6 * activity);
 
-  // The melt skin cools in cords: striation crests drop toward deep red
-  // while the troughs stay orange. Crack cores are freshly torn and stay
-  // nearly uniform white-hot.
-  let striae = flowStriations(position, t);
-  let coreHeat = core * (0.4 + 0.6 * activity) * (1.0 - striae * 0.2);
-  let washHeat = wash * (1.0 - islands * 0.92) * (1.0 - striae * 0.6);
+  // The melt cools as a soft streaky skin: where the skin field fills in,
+  // heat drops and the surface merges back toward rock; fresh rivulets stay
+  // hot between the cooled bands. Crack cores are freshly torn and barely
+  // skin over.
+  let skin = meltSkin(position, t);
+  let coreHeat = core * (0.4 + 0.6 * activity) * (1.0 - skin * 0.25);
+  let washHeat = wash * (1.0 - islands * 0.92) * (1.0 - skin * 0.95);
   let meltHeat = clamp(coreHeat + washHeat, 0.0, 1.0) * (0.72 + 0.28 * activity) + rim * 0.55;
+  // The fuller the cooled skin, the more the surface is rock again: carve
+  // it out of the liquid mask so shading follows.
+  let skinned = smoothstep(0.55, 0.9, skin) * wash * 0.9;
 
   // --- fringe over solid crust ---
   // A wide thermal gradient eases the rock-to-melt transition: crust near
@@ -142,7 +121,7 @@ export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   // Slow breathing so the melt looks alive.
   let pulse = 0.9 + 0.1 * sin(t * 0.7 + fbm3(domain, 2u) * 6.2831853);
   let heat = clamp((meltHeat + fringeHeat) * pulse, 0.0, 1.0);
-  return vec2f(heat, clamp(meltMask + rim * 0.5, 0.0, 1.0));
+  return vec2f(heat, clamp(meltMask - skinned + rim * 0.5, 0.0, 1.0));
 }
 
 // Wide, smooth channel mask for vertex displacement: 1 inside molten

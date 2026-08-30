@@ -46,13 +46,14 @@ TSL nodes:
 - `lavaGlow` — the full glow composition as `vec2f(heat, meltMask)`:
   variable-width incandescent cracks along fbm-warped voronoi plate
   boundaries (`f2 - f1` from `@vgpu/wgsl-std/noise`); melt washes flanking
-  the channels, textured by `flowStriations` (thin cooled cords fanning
-  through the melt skin, ~50 per lobe) with white-hot contact rims at wash
-  edges and around floating crust islands; and a fringe over solid crust —
-  a wide thermal gradient toward the melt plus ember speckle seeping
-  through the micro grain. The cords swing boldly between fat bands and
-  hairlines via a bimodal width field, and only mark the melt, never the
-  rock.
+  the channels, textured by `meltSkin` — a Substance-style cooling-skin
+  field (anisotropic streak noise under perlin directional warps, soft like
+  a blurred mask) whose filled-in bands drop the heat AND carve out of the
+  liquid mask, so cooled skin shades as rock again — plus white-hot contact
+  rims at wash edges and around floating crust islands; and a fringe over
+  solid crust — a wide thermal gradient toward the melt plus ember speckle
+  seeping through the micro grain. The skin field embosses the melt
+  normals; the rock never carries these lines.
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
