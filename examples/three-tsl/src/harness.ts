@@ -2,7 +2,7 @@
 // RenderTarget with a stubbed canvas context, so it runs in headless
 // chromium where WebGPU canvas presentation is unavailable.
 //
-// Query params: ?mesh=knot|sphere|plane  &t=<seconds, fixed frame time>
+// Query params: ?mesh=sphere|knot|plane  &t=<seconds, fixed frame time>
 //               &size=<pixels>  &dist=<camera distance>
 //               &glow=<emissive intensity>  &light=<key light multiplier>
 //               &post=0 (linear readback, no bloom)
@@ -17,7 +17,7 @@ declare global {
 
 async function run(): Promise<unknown> {
   const params = new URLSearchParams(location.search);
-  const meshKind = (params.get("mesh") ?? "knot") as DemoMeshKind;
+  const meshKind = (params.get("mesh") ?? "sphere") as DemoMeshKind;
   const frameTime = Number(params.get("t") ?? "0");
   const size = Number(params.get("size") ?? "256");
   const glowOverride = params.get("glow");
