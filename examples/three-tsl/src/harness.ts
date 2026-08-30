@@ -4,31 +4,21 @@
 //
 // Query params: ?material=lava|marble  &mesh=knot|sphere|plane
 //               &t=<seconds, fixed frame time>  &size=<pixels>
+//               &dist=<camera distance>  &glow=<emissive intensity>
+//               &light=<key light multiplier>  &post=0 (linear, no bloom)
 import * as THREE from "three/webgpu";
 import { float } from "three/tsl";
-import { createMarbleMaterial } from "./marble-material.ts";
-import { createLavaMaterial } from "./lava-material.ts";
-import { applyNightEnvironment } from "./environment.ts";
+import { createDemoCamera, createDemoScene, type DemoMaterialName, type DemoMeshKind } from "./scenes.ts";
 import { createBloomPipeline } from "./post.ts";
 
 declare global {
   interface Window { __result?: unknown }
 }
 
-function buildMesh(kind: string, material: THREE.Material): THREE.Mesh {
-  if (kind === "sphere") return new THREE.Mesh(new THREE.IcosahedronGeometry(1.45, 96), material);
-  if (kind === "plane") {
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 4.4, 256, 256), material);
-    plane.rotation.x = -1.05;
-    return plane;
-  }
-  return new THREE.Mesh(new THREE.TorusKnotGeometry(1, 0.38, 256, 48), material);
-}
-
 async function run(): Promise<unknown> {
   const params = new URLSearchParams(location.search);
-  const materialName = params.get("material") ?? "lava";
-  const meshKind = params.get("mesh") ?? "knot";
+  const materialName = (params.get("material") ?? "lava") as DemoMaterialName;
+  const meshKind = (params.get("mesh") ?? "knot") as DemoMeshKind;
   const frameTime = Number(params.get("t") ?? "0");
   const size = Number(params.get("size") ?? "256");
   const glowOverride = params.get("glow");
@@ -40,46 +30,27 @@ async function run(): Promise<unknown> {
     getCurrentTexture(): never { throw new Error("harness renders offscreen only"); },
   };
   const renderer = new THREE.WebGPURenderer({ context: fakeContext as unknown as GPUCanvasContext });
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  if (materialName === "lava") renderer.toneMapping = THREE.ACESFilmicToneMapping;
   await renderer.init();
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(materialName === "lava" ? 0x000000 : 0x07080a);
+  const { scene, usesBloom } = await createDemoScene(materialName, {
+    mesh: meshKind,
+    timeNode: float(frameTime),
+    lightScale,
+    glowIntensity: glowOverride === null ? undefined : Number(glowOverride),
+  });
+
   const dist = Number(params.get("dist") ?? "4.2");
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
+  const camera = createDemoCamera(1);
   camera.position.set(0, (1.2 * dist) / 4.2, dist);
   camera.lookAt(0, 0, 0);
 
-  if (materialName === "lava") {
-    // HDRI ambient plus a moonlight key; the warm floor bounce fakes the
-    // glow lighting the crust back.
-    await applyNightEnvironment(scene);
-    const key = new THREE.DirectionalLight(0xcfd8e6, 2.2 * lightScale);
-    key.position.set(3, 2.2, 2);
-    scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.22));
-  } else {
-    const key = new THREE.DirectionalLight(0xffffff, 2.4 * lightScale);
-    key.position.set(3, 4, 2);
-    scene.add(key);
-    scene.add(new THREE.HemisphereLight(0x8fb4dd, 0x40342a, 0.8));
-  }
-
-  let material: THREE.Material;
-  if (materialName === "marble") {
-    material = createMarbleMaterial().material;
-  } else {
-    const lava = createLavaMaterial({ timeNode: float(frameTime) });
-    if (glowOverride !== null) lava.glowIntensity.value = Number(glowOverride);
-    material = lava.material;
-  }
-  scene.add(buildMesh(meshKind, material));
-
   // With the bloom chain, MSAA lives on the scene pass; the final quad
   // composite needs no samples of its own.
-  const target = new THREE.RenderTarget(size, size, { samples: materialName === "lava" ? 1 : 4 });
+  const withPost = usesBloom && params.get("post") !== "0";
+  const target = new THREE.RenderTarget(size, size, { samples: withPost ? 1 : 4 });
   renderer.setRenderTarget(target);
-  if (materialName === "lava" && params.get("post") !== "0") {
+  if (withPost) {
     const postProcessing = createBloomPipeline(renderer, scene, camera);
     await postProcessing.renderAsync();
   } else {

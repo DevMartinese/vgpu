@@ -3,6 +3,19 @@
 Imports WGSL modules through the `@vgpu/wgsl` Vite loader and connects their
 functions to three.js `MeshPhysicalNodeMaterial`s as TSL nodes.
 
+| Lava (default) | Marble (`?material=marble`) |
+| --- | --- |
+| ![Lava preview](./previews/lava.png) | ![Marble preview](./previews/marble.png) |
+
+The previews are rendered headless in Node by `pnpm previews`
+(`scripts/generate-previews.ts`): `vgpu/node` creates the Dawn-backed WebGPU
+device, three's `WebGPURenderer` receives that same `GPUDevice` (plus stub
+canvas/context and a handful of browser-global shims), and the frame is read
+back from a `RenderTarget` through the post chain — no browser involved.
+The environment needs a Vulkan ICD for Dawn (see `@vgpu/adapter-node`'s
+system requirements: `VK_ICD_FILENAMES`, `XDG_RUNTIME_DIR`,
+`VGPU_DAWN_FLAGS=backend=vulkan`).
+
 ```
 src/noise.wgsl         shared value noise / fbm / ridged noise module
 src/lava.wgsl          heat, crust, sink, and blackbody fields; uses
@@ -12,8 +25,10 @@ src/wgsl-tsl.ts        tslExports(): loader output -> callable wgslFn TSL nodes
 src/lava-material.ts   physical material: emissive cracks, bump normals, and
                        vertex relief all driven by lava.wgsl
 src/marble-material.ts physical material with colorNode/roughnessNode from WGSL
+src/scenes.ts          shared scene/lights/mesh builders for both demos
 src/main.ts            torus knot scene, WebGPURenderer (?material=marble)
 src/harness.ts         offscreen render smoke check (also runs headless)
+scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
 ```
 
 ## Run

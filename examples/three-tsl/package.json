@@ -7,7 +7,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "previews": "vite-node scripts/generate-previews.ts"
   },
   "dependencies": {
     "@vgpu/wgsl": "workspace:*",
@@ -16,9 +17,13 @@
   },
   "devDependencies": {
     "@pmndrs/assets": "^1.7.0",
+    "@types/pngjs": "^6.0.5",
     "@types/three": "^0.180.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.7.3",
+    "vgpu": "workspace:^",
     "vite": "^6.0.0",
+    "vite-node": "^2.1.9",
     "vitest": "^2.1.8"
   }
 }
