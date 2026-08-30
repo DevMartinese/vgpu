@@ -4,12 +4,13 @@ import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
 
-const { lavaHeat, blackbody, crustHeight, crustSurface, lavaSink } = tslExports(lavaModule, [
+const { lavaHeat, blackbody, crustHeight, crustSurface, lavaSink, microDetail } = tslExports(lavaModule, [
   "lavaHeat",
   "blackbody",
   "crustHeight",
   "crustSurface",
   "lavaSink",
+  "microDetail",
 ]);
 
 export interface LavaMaterialOptions {
@@ -62,15 +63,25 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   // crack cores go yellow-white while edges cool through deep red.
   material.emissiveNode = blackbody({ t: heat.pow(1.35) }).mul(glowIntensity);
 
-  // Rubble is matte; fresh pahoehoe skin froze into glass and picks up the
-  // environment; molten rock is a glossy liquid.
-  material.roughnessNode = mix(
-    mix(float(0.9), float(0.32), glass).add(pits.mul(0.08)).add(tone.sub(0.5).mul(0.14)),
-    float(0.35),
-    molten,
-  );
+  // High-frequency surface detail: mineral grain plus flow-line streaks
+  // frozen into the glassy skin. Shared by the roughness map and the micro
+  // normal pass below.
+  const micro = microDetail({ position: p });
+  const grain = micro.x;
+  const streaks = micro.y;
+
+  // Roughness map, not a constant: rubble is matte with sharp grain breakup,
+  // the glassy skin is polished but streaked by flow lines, vesicle pits and
+  // dusty valleys scatter more, and molten rock is a glossy liquid.
+  const crustRoughness = mix(float(0.92), float(0.3), glass)
+    .add(grain.sub(0.5).mul(0.26))
+    .add(streaks.sub(0.5).mul(0.2).mul(glass))
+    .add(pits.mul(0.1))
+    .add(height.oneMinus().mul(0.06));
+  const moltenRoughness = float(0.32).add(streaks.sub(0.5).mul(0.1));
+  material.roughnessNode = mix(crustRoughness, moltenRoughness, molten).clamp(0.05, 1);
   material.clearcoatNode = glass.mul(0.7).mul(molten.oneMinus());
-  material.clearcoatRoughnessNode = float(0.25);
+  material.clearcoatRoughnessNode = float(0.22).add(grain.sub(0.5).mul(0.15)).clamp(0.05, 1);
 
   // Plates bulge up, molten channels sink. The sink mask is a separate wide,
   // low-frequency field so coarse meshes sample it without stippling.
@@ -78,8 +89,9 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const relief = height.mul(0.5).sub(sink.mul(0.4)).mul(0.12);
   material.positionNode = positionLocal.add(normalLocal.mul(relief));
 
-  // Bump normals from the crust height field by finite differences, so the
-  // plates catch raking light. The gradient is projected onto the surface.
+  // Bump normals in two registers, both by finite differences projected onto
+  // the surface: the crust height field at a coarse epsilon for plates and
+  // ropes, and the micro grain at a fine epsilon for crisp mineral detail.
   const eps = 0.03;
   const grad = vec3(
     crustHeight({ position: p.add(vec3(eps, 0, 0)), t }).sub(height),
@@ -87,7 +99,19 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
     crustHeight({ position: p.add(vec3(0, 0, eps)), t }).sub(height),
   ).div(eps);
   const tangentGrad = grad.sub(normalLocal.mul(grad.dot(normalLocal)));
-  const bumped = normalLocal.sub(tangentGrad.mul(mix(float(0.22), float(0.04), molten))).normalize();
+
+  const microEps = 0.008;
+  const microGrad = vec3(
+    microDetail({ position: p.add(vec3(microEps, 0, 0)) }).x.sub(grain),
+    microDetail({ position: p.add(vec3(0, microEps, 0)) }).x.sub(grain),
+    microDetail({ position: p.add(vec3(0, 0, microEps)) }).x.sub(grain),
+  ).div(microEps);
+  const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
+
+  const bumped = normalLocal
+    .sub(tangentGrad.mul(mix(float(0.22), float(0.04), molten)))
+    .sub(microTangent.mul(mix(float(0.035), float(0.006), molten)))
+    .normalize();
   material.normalNode = transformNormalToView(bumped);
 
   return { material, glowIntensity, scale };

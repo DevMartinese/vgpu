@@ -44,8 +44,9 @@ async function run(): Promise<unknown> {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x07080a);
+  const dist = Number(params.get("dist") ?? "4.2");
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
-  camera.position.set(0, 1.2, 4.2);
+  camera.position.set(0, (1.2 * dist) / 4.2, dist);
   camera.lookAt(0, 0, 0);
 
   if (materialName === "lava") {

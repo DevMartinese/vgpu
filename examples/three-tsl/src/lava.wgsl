@@ -1,4 +1,4 @@
-import { fbm3, valueNoise3 } from "./noise.wgsl";
+import { fbm3, perlin3, valueNoise3 } from "./noise.wgsl";
 import { voronoi3d } from "@vgpu/wgsl-std/noise";
 
 // Incandescence ramp for molten rock: 0 = cold black crust, 1 = white-hot.
@@ -106,12 +106,21 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
   let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
   let lobes = ropeMask(domain);
-  let rough = fbm3(domain * 4.2, 5u) * 0.22;
+  let rough = fbm3(domain * 4.2, 5u) * 0.2;
+  let fine = fbm3(domain * 9.5 + vec3f(2.0, 12.0, 6.0), 4u) * 0.1;
   let ropes = ropeFolds(domain) * lobes * 0.38;
-  // Two skewed samples so the high-frequency grain has no lattice direction.
-  let rubble = (valueNoise3(position * 14.0) * 0.6 + valueNoise3(position.zxy * 10.7 + vec3f(31.0, 17.0, 5.0)) * 0.4) * (1.0 - lobes) * 0.32;
+  let rubble = fbm3(position * 13.0, 4u) * (1.0 - lobes) * 0.3;
   let pits = vesiclePits(position) * 0.08;
-  return clamp(dome * 0.45 + rough + ropes + rubble - pits + 0.08, 0.0, 1.0);
+  return clamp(dome * 0.45 + rough + fine + ropes + rubble - pits + 0.06, 0.0, 1.0);
+}
+
+// High-frequency surface detail, cheap enough to finite-difference at a
+// small epsilon for micro normals:
+// x = sharp mineral grain, y = flow-line streaks frozen into the glassy skin.
+export fn microDetail(position: vec3f) -> vec2f {
+  let grain = fbm3(position * 17.0, 5u);
+  let streaks = perlin3(position * vec3f(24.0, 7.0, 24.0) + vec3f(4.0, 8.0, 15.0));
+  return vec2f(grain, streaks);
 }
 
 // Shading masks for the crust skin:

@@ -18,16 +18,46 @@ export fn valueNoise3(position: vec3f) -> f32 {
   return mix(bottom, top, fade.z);
 }
 
+fn gradientAt(cell: vec3f) -> vec3f {
+  return hash3(cell) * 2.0 - 1.0;
+}
+
+// Quintic-faded gradient (Perlin-style) noise, ~0..1. Much crisper than
+// value noise: features are isotropic blobs instead of blurry lattice cells.
+export fn perlin3(position: vec3f) -> f32 {
+  let cell = floor(position);
+  let local = fract(position);
+  let fade = local * local * local * (local * (local * 6.0 - 15.0) + 10.0);
+  let d000 = dot(gradientAt(cell + vec3f(0.0, 0.0, 0.0)), local - vec3f(0.0, 0.0, 0.0));
+  let d100 = dot(gradientAt(cell + vec3f(1.0, 0.0, 0.0)), local - vec3f(1.0, 0.0, 0.0));
+  let d010 = dot(gradientAt(cell + vec3f(0.0, 1.0, 0.0)), local - vec3f(0.0, 1.0, 0.0));
+  let d110 = dot(gradientAt(cell + vec3f(1.0, 1.0, 0.0)), local - vec3f(1.0, 1.0, 0.0));
+  let d001 = dot(gradientAt(cell + vec3f(0.0, 0.0, 1.0)), local - vec3f(0.0, 0.0, 1.0));
+  let d101 = dot(gradientAt(cell + vec3f(1.0, 0.0, 1.0)), local - vec3f(1.0, 0.0, 1.0));
+  let d011 = dot(gradientAt(cell + vec3f(0.0, 1.0, 1.0)), local - vec3f(0.0, 1.0, 1.0));
+  let d111 = dot(gradientAt(cell + vec3f(1.0, 1.0, 1.0)), local - vec3f(1.0, 1.0, 1.0));
+  let bottom = mix(mix(d000, d100, fade.x), mix(d010, d110, fade.x), fade.y);
+  let top = mix(mix(d001, d101, fade.x), mix(d011, d111, fade.x), fade.y);
+  return clamp(mix(bottom, top, fade.z) * 0.72 + 0.5, 0.0, 1.0);
+}
+
+// Rotation applied between fbm octaves so no lattice direction survives.
+const octaveRotation = mat3x3f(
+  vec3f(0.0, 0.8, 0.6),
+  vec3f(-0.8, 0.36, -0.48),
+  vec3f(0.6, -0.48, 0.64),
+);
+
 export fn fbm3(position: vec3f, octaves: u32) -> f32 {
   var total = 0.0;
   var amplitude = 0.5;
-  var frequency = 1.0;
+  var sample = position;
   var normalization = 0.0;
   for (var i = 0u; i < octaves; i++) {
-    total += valueNoise3(position * frequency) * amplitude;
+    total += perlin3(sample) * amplitude;
     normalization += amplitude;
     amplitude *= 0.5;
-    frequency *= 2.0;
+    sample = octaveRotation * sample * 2.03 + vec3f(11.5, 5.2, 7.8);
   }
   return total / max(normalization, 1e-5);
 }
@@ -37,14 +67,14 @@ export fn fbm3(position: vec3f, octaves: u32) -> f32 {
 export fn ridged3(position: vec3f, octaves: u32) -> f32 {
   var total = 0.0;
   var amplitude = 0.5;
-  var frequency = 1.0;
+  var sample = position;
   var normalization = 0.0;
   for (var i = 0u; i < octaves; i++) {
-    let ridge = 1.0 - abs(valueNoise3(position * frequency) * 2.0 - 1.0);
+    let ridge = 1.0 - abs(perlin3(sample) * 2.0 - 1.0);
     total += ridge * ridge * amplitude;
     normalization += amplitude;
     amplitude *= 0.5;
-    frequency *= 2.0;
+    sample = octaveRotation * sample * 2.03 + vec3f(11.5, 5.2, 7.8);
   }
   return total / max(normalization, 1e-5);
 }
