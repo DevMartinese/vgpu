@@ -51,12 +51,28 @@ export fn lavaHeat(position: vec3f, t: f32) -> f32 {
   let core = smoothstep(coreWidth, 0.0, primary);              // white-hot crack center
   let fine = smoothstep(0.035, 0.0, secondary) * 0.4;          // secondary hairline cracks
   let halo = smoothstep(0.22, 0.0, primary) * 0.16;            // ember glow bleeding into crust
-  // Occasional exposed melt windows, streaked along the flow direction.
-  let window = smoothstep(0.64, 0.82, fbm3(domain * 0.5, 4u));
-  let streaks = 0.75 + 0.25 * valueNoise3(domain * vec3f(2.2, 6.5, 2.2) + vec3f(0.0, 0.1, 0.0) * t);
-  let pools = window * streaks;
 
-  let heat = core * (0.55 + 0.45 * activity) + fine * activity * activity + halo * (0.3 + 0.7 * activity) + pools * 0.95;
+  // Broad melt windows with darker crust islands floating on them, so
+  // exposed melt reads as a patchy wash instead of another line.
+  // Melt washes open beside the main channels, plus standalone windows;
+  // darker crust islands float on both so the melt reads as a patchy wash.
+  let window = smoothstep(0.6, 0.78, fbm3(domain * 0.5, 4u));
+  let flank = smoothstep(0.28, 0.04, primary) * smoothstep(0.53, 0.76, fbm3(domain * 1.1 + vec3f(17.0, 2.0, 12.0), 3u));
+  let islands = smoothstep(0.42, 0.68, fbm3(domain * 2.1 + vec3f(6.0, 21.0, 9.0), 4u));
+  let meltTexture = 0.7 + 0.3 * valueNoise3(domain * vec3f(2.2, 6.5, 2.2) + vec3f(0.0, 0.1, 0.0) * t);
+  let pools = clamp(window + flank * 0.8, 0.0, 1.0) * mix(1.0, 0.12, islands) * meltTexture;
+
+  // Ember speckle: the joints between clinker blocks glow wherever the
+  // ground is warm, in two granule sizes. The fine register reuses the
+  // rubble grain field from crustHeight, so the embers sit inside the
+  // crevices of the relief you actually see.
+  let creviceFine = smoothstep(0.52, 0.24, fbm3(position * 13.0, 4u));
+  let creviceCoarse = smoothstep(0.48, 0.28, fbm3(position * 5.5 + vec3f(3.0, 9.0, 1.0), 3u)) * 0.6;
+  let crevice = max(creviceFine, creviceCoarse);
+  let warmth = clamp(smoothstep(0.3, 0.0, primary) + window, 0.0, 1.0);
+  let embers = crevice * warmth * (0.25 + 0.75 * activity) * 0.7;
+
+  let heat = core * (0.55 + 0.45 * activity) + fine * activity * activity + halo * (0.3 + 0.7 * activity) + pools + embers;
   // Slow breathing so the melt looks alive.
   let pulse = 0.9 + 0.1 * sin(t * 0.7 + fbm3(domain, 2u) * 6.2831853);
   return clamp(heat * pulse, 0.0, 1.0);

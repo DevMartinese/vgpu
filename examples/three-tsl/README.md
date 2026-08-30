@@ -31,10 +31,13 @@ lava material; append `?material=marble` for the marble demo.
 Everything procedural lives in `lava.wgsl` and flows into the material as
 TSL nodes:
 
-- `lavaHeat` — voronoi plate boundaries (`f2 - f1` from
-  `@vgpu/wgsl-std/noise`) warped by fbm become variable-width incandescent
-  cracks, with an ember halo, hairline secondary cracks gated by an
-  "activity" field, and occasional streaked melt windows.
+- `lavaHeat` — three registers of glow, matching how real flows read:
+  variable-width incandescent cracks along fbm-warped voronoi plate
+  boundaries (`f2 - f1` from `@vgpu/wgsl-std/noise`) with hairline
+  secondaries gated by an "activity" field; patchy melt washes flanking the
+  main channels with darker crust islands floating on them; and a
+  two-size ember speckle that glows in the joints of the same rubble grain
+  the relief shows.
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
