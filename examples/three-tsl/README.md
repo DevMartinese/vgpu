@@ -91,7 +91,7 @@ harness screenshots match the on-screen image only on the post path
 - `import lavaModule from "./lava.wgsl"` returns `{ version: 1, wgsl }`:
   the flattened module graph, with imported helpers mangled to
   `_vgsl_<hash>__<name>` and no `export` keywords left.
-- `tslExports(lavaModule, ["lavaHeat", "blackbody"])` finds each function by
+- `tslExports(lavaModule, ["lavaGlow", "blackbody"])` finds each function by
   its authored name (accepting the mangle prefix), reads its parameter list
   and return type from the header, and emits a forwarding wrapper via TSL's
   `wgslFn`, attaching the whole module once as a shared `wgsl()` include.
@@ -100,9 +100,9 @@ harness screenshots match the on-screen image only on the post path
   `@group/@binding` layout when it builds the shader:
 
 ```ts
-const { lavaHeat, blackbody } = tslExports(lavaModule, ["lavaHeat", "blackbody"]);
+const { lavaGlow, blackbody } = tslExports(lavaModule, ["lavaGlow", "blackbody"]);
 const glowIntensity = uniform(2.4);
-material.emissiveNode = blackbody({ t: lavaHeat({ position: positionLocal, t: time }) }).mul(glowIntensity);
+material.emissiveNode = blackbody({ t: lavaGlow({ position: positionLocal, t: time }).x }).mul(glowIntensity);
 ```
 
 Entry points and functions that touch `@group/@binding` resources do not map
