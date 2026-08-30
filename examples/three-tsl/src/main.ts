@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   await renderer.init();
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(materialName === "lava" ? 0x07080a : 0x0b0d10);
+  scene.background = new THREE.Color(materialName === "lava" ? 0x000000 : 0x0b0d10);
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 50);
   camera.position.set(0, 1.2, 4.2);
 

@@ -44,7 +44,7 @@ async function run(): Promise<unknown> {
   await renderer.init();
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x07080a);
+  scene.background = new THREE.Color(materialName === "lava" ? 0x000000 : 0x07080a);
   const dist = Number(params.get("dist") ?? "4.2");
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
   camera.position.set(0, (1.2 * dist) / 4.2, dist);
@@ -109,7 +109,7 @@ async function run(): Promise<unknown> {
   const view = document.createElement("canvas");
   view.width = size;
   view.height = size;
-  view.style.width = "512px";
+  view.style.width = `${Math.max(size, 512)}px`;
   view.style.imageRendering = "pixelated";
   const context2d = view.getContext("2d")!;
   const image = context2d.createImageData(size, size);
