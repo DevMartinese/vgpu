@@ -1,6 +1,7 @@
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
 import { createLavaMaterial } from "./lava-material.ts";
+import { bakeLavaVolumes } from "./bake-lava.ts";
 import { applyNightEnvironment } from "./environment.ts";
 
 export type DemoMeshKind = "sphere" | "knot" | "plane";
@@ -12,6 +13,8 @@ export const DEMO_MESH_KINDS: readonly DemoMeshKind[] = [
 ];
 
 export interface DemoSceneOptions {
+  /** Bakes the lava field volumes; required since the material reads them. */
+  readonly renderer: THREE.WebGPURenderer;
   readonly mesh?: DemoMeshKind;
   /** Fixed frame time for deterministic stills; defaults to the live clock. */
   readonly timeNode?: Node;
@@ -36,17 +39,21 @@ function demoGeometry(kind: DemoMeshKind): {
   geometry: THREE.BufferGeometry;
   tiltX: number;
 } {
+  // Densities sized for the baked material: displacement is one low-frequency
+  // volume tap, so the mesh only has to carry the silhouette — the previous
+  // counts (96 / 400x64 / 256^2) were paying for per-vertex procedural noise
+  // that no longer runs.
   if (kind === "knot")
     return {
-      geometry: new THREE.TorusKnotGeometry(1, 0.38, 400, 64),
+      geometry: new THREE.TorusKnotGeometry(1, 0.38, 300, 48),
       tiltX: 0,
     };
   if (kind === "plane")
     return {
-      geometry: new THREE.PlaneGeometry(4.4, 4.4, 256, 256),
+      geometry: new THREE.PlaneGeometry(4.4, 4.4, 192, 192),
       tiltX: -1.05,
     };
-  return { geometry: new THREE.IcosahedronGeometry(1.45, 96), tiltX: 0 };
+  return { geometry: new THREE.IcosahedronGeometry(1.45, 64), tiltX: 0 };
 }
 
 export function buildDemoMesh(kind: DemoMeshKind, material: THREE.Material): THREE.Mesh {
@@ -65,7 +72,7 @@ export function createDemoCamera(aspect: number): THREE.PerspectiveCamera {
 }
 
 /** Scene, lights, environment, and mesh for the lava demo. */
-export async function createDemoScene(options: DemoSceneOptions = {}): Promise<DemoScene> {
+export async function createDemoScene(options: DemoSceneOptions): Promise<DemoScene> {
   const scene = new THREE.Scene();
 
   // HDRI ambient (backdrop stays black) plus a soft warm-neutral key; the
@@ -76,7 +83,8 @@ export async function createDemoScene(options: DemoSceneOptions = {}): Promise<D
   scene.add(key);
   scene.add(new THREE.HemisphereLight(0x3a3230, 0xb33a10, 0.25));
 
-  const lava = createLavaMaterial({ timeNode: options.timeNode });
+  const volumes = await bakeLavaVolumes(options.renderer, options.timeNode);
+  const lava = createLavaMaterial({ volumes, timeNode: options.timeNode });
   if (options.glowIntensity !== undefined) lava.glowIntensity.value = options.glowIntensity;
 
   const mesh = buildDemoMesh(options.mesh ?? "sphere", lava.material);

@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   document.querySelector("#app")!.append(renderer.domElement);
   await renderer.init();
 
-  const demo = await createDemoScene();
+  const demo = await createDemoScene({ renderer });
   const { scene, mesh } = demo;
   const camera = createDemoCamera(window.innerWidth / window.innerHeight);
 

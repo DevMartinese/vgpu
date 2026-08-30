@@ -20,6 +20,7 @@ export const meta = {
     "renderer.ts",
     "scenes.ts",
     "lava-material.ts",
+    "bake-lava.ts",
     "wgsl-tsl.ts",
     "environment.ts",
     "post.ts",

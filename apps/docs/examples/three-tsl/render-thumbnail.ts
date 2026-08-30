@@ -192,7 +192,7 @@ export async function renderThumbnail(
     const time = opts.time ?? 2.1;
     const dt = opts.dt ?? 1 / 60;
     const frozen = time + dt * Math.max(1, opts.warmupFrames ?? 3);
-    scene = await createDemoScene({ timeNode: float(frozen), hdriTexture: hdri });
+    scene = await createDemoScene({ renderer, timeNode: float(frozen), hdriTexture: hdri });
 
     const camera = createDemoCamera(width / height);
     renderTarget = new THREE.RenderTarget(width, height, {
