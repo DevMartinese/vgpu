@@ -1,6 +1,7 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { createDemoCamera, createDemoScene } from "./scenes.ts";
+import { GUI } from "three/addons/libs/lil-gui.module.min.js";
+import { createDemoCamera, createDemoScene, DEMO_MESH_KINDS, type DemoMeshKind } from "./scenes.ts";
 import { createBloomPipeline } from "./post.ts";
 
 async function main(): Promise<void> {
@@ -16,8 +17,15 @@ async function main(): Promise<void> {
   document.querySelector("#app")!.append(renderer.domElement);
   await renderer.init();
 
-  const { scene, mesh } = await createDemoScene();
+  const demo = await createDemoScene();
+  const { scene, mesh } = demo;
   const camera = createDemoCamera(window.innerWidth / window.innerHeight);
+
+  const gui = new GUI({ title: "lava" });
+  const settings: { mesh: DemoMeshKind } = { mesh: "sphere" };
+  gui
+    .add(settings, "mesh", [...DEMO_MESH_KINDS])
+    .onChange((kind: DemoMeshKind) => demo.setMesh(kind));
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;

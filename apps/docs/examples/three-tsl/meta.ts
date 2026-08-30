@@ -7,6 +7,7 @@ export const meta = {
   capabilities: [
     "webgpu",
     "pointer-orbit",
+    "select-control",
     "continuous-rendering",
     "responsive-canvas",
     "multi-pass",
