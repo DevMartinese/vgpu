@@ -1,5 +1,6 @@
 import { fbm3, perlin3, turbulence3, valueNoise3 } from "./noise.wgsl";
 import { voronoi3d } from "@vgpu/wgsl-std/noise";
+import { pcg3d, unitFloat } from "@vgpu/wgsl-std/hash";
 
 // Incandescence ramp for molten rock: 0 = cold black crust, 1 = white-hot.
 // Piecewise blend through deep red, orange, and yellow, in linear-ish space.
@@ -171,6 +172,18 @@ fn ropeMask(domain: vec3f) -> f32 {
   return smoothstep(0.38, 0.62, fbm3(domain * 0.32 + vec3f(19.0, 5.0, 11.0), 3u));
 }
 
+// Flaky scabs: voronoi plates with flat tops at random per-cell heights and
+// crack seams between them — the scaly, cracked-paint skin of cooled crust.
+// Returns x = flake height (flat per plate, dropping into the seams),
+// y = crack seam mask.
+fn flakes(position: vec3f, frequency: f32) -> vec2f {
+  let sample = voronoi3d(position * frequency);
+  let hashed = pcg3d(bitcast<vec3u>(sample.cell));
+  let plateHeight = unitFloat(hashed.x);
+  let crack = smoothstep(0.14, 0.02, sample.f2 - sample.f1);
+  return vec2f(plateHeight * (1.0 - crack * 0.75), crack);
+}
+
 // Clustered vesicle pits (frozen gas bubbles) in the crust skin, 1 inside a
 // pit. Pits only appear in patches, the way outgassed skin does.
 fn vesiclePits(position: vec3f) -> f32 {
@@ -185,12 +198,14 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
   let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
   let lobes = ropeMask(domain);
-  let rough = turbulence3(domain * 4.2, 6u) * 0.2;
-  let fine = turbulence3(domain * 9.5 + vec3f(2.0, 12.0, 6.0), 5u) * 0.08;
+  let rough = turbulence3(domain * 4.2, 6u) * 0.14;
   let ropes = ropeFolds(domain) * lobes * 0.38;
-  let rubble = turbulence3(position * 13.0, 5u) * (1.0 - lobes) * 0.22;
+  // Scaly skin: two registers of flat-topped flakes over the soft lobes.
+  let flakeCoarse = flakes(position + domain * 0.3, 6.5);
+  let flakeFine = flakes(position.zxy + vec3f(13.0, 5.0, 31.0), 16.0);
+  let scabs = flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
   let pits = vesiclePits(position) * 0.08;
-  return clamp(dome * 0.45 + rough + fine + ropes + rubble - pits + 0.06, 0.0, 1.0);
+  return clamp(dome * 0.45 + rough + ropes + scabs - pits + 0.08, 0.0, 1.0);
 }
 
 // High-frequency surface detail, cheap enough to finite-difference at a
@@ -224,5 +239,9 @@ export fn crustSurface(position: vec3f, t: f32) -> vec4f {
   let oxide = smoothstep(0.55, 0.8, fbm3(domain * 1.7 + vec3f(13.0, 3.0, 8.0), 4u));
   // Fresh pahoehoe skin cools into volcanic glass; rubble stays matte.
   let glass = smoothstep(0.45, 0.72, fbm3(domain * 1.1 + vec3f(23.0, 15.0, 2.0), 3u)) * ropeMask(domain);
-  return vec4f(tone, oxide, glass, vesiclePits(position));
+  // Cavities: vesicle pits plus the crack seams between the flaky scabs
+  // (same flake register as crustHeight, so shading stays registered).
+  let seams = flakes(position + domain * 0.3, 6.5).y;
+  let cavities = max(vesiclePits(position), seams * 0.55);
+  return vec4f(tone, oxide, glass, cavities);
 }

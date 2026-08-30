@@ -42,13 +42,13 @@ export function createDemoCamera(aspect: number): THREE.PerspectiveCamera {
 export async function createDemoScene(options: DemoSceneOptions = {}): Promise<DemoScene> {
   const scene = new THREE.Scene();
 
-  // HDRI ambient (backdrop stays black) plus a moonlight key; the warm
-  // floor bounce fakes the glow lighting the crust back.
+  // HDRI ambient (backdrop stays black) plus a soft warm-neutral key; the
+  // warm floor bounce fakes the glow lighting the crust back.
   await applyNightEnvironment(scene);
-  const key = new THREE.DirectionalLight(0xcfd8e6, 2.2 * (options.lightScale ?? 1));
+  const key = new THREE.DirectionalLight(0xf2e4d2, 1.8 * (options.lightScale ?? 1));
   key.position.set(3, 2.2, 2);
   scene.add(key);
-  scene.add(new THREE.HemisphereLight(0x1a2030, 0xb33a10, 0.22));
+  scene.add(new THREE.HemisphereLight(0x3a3230, 0xb33a10, 0.25));
 
   const lava = createLavaMaterial({ timeNode: options.timeNode });
   if (options.glowIntensity !== undefined) lava.glowIntensity.value = options.glowIntensity;

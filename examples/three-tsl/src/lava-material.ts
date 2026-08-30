@@ -61,13 +61,13 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
 
   const material = new THREE.MeshPhysicalNodeMaterial({ metalness: 0 });
 
-  // Basalt skin: graphite grey with a cold blue cast, ridges catching more
-  // light than the fissured low ground, rust staining on older patches, and
-  // vesicle pits going almost black.
-  const graphite = mix(vec3(0.03, 0.03, 0.036), vec3(0.17, 0.17, 0.19), tone);
+  // Basalt skin: warm dusty grey-brown, ridges catching more light than the
+  // fissured low ground, rust staining on older patches, and pits plus
+  // flake seams going almost black.
+  const ash = mix(vec3(0.045, 0.04, 0.036), vec3(0.19, 0.17, 0.15), tone);
   const ridgeLight = height.mul(height).mul(0.6).add(0.6);
-  const stained = mix(graphite.mul(ridgeLight), vec3(0.20, 0.085, 0.05), oxide.mul(0.5));
-  const basalt = mix(stained, stained.mul(0.45), pits);
+  const stained = mix(ash.mul(ridgeLight), vec3(0.20, 0.085, 0.05), oxide.mul(0.5));
+  const basalt = mix(stained, stained.mul(0.4), pits);
   material.colorNode = mix(basalt, vec3(0.012, 0.01, 0.009), molten);
 
   // Incandescence: blackbody ramp over the composed heat field, crushed
@@ -78,14 +78,14 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   // Roughness map, not a constant: rubble is matte with sharp grain breakup,
   // the glassy skin is polished but streaked by flow lines, vesicle pits and
   // dusty valleys scatter more, and molten rock is a glossy liquid.
-  const crustRoughness = mix(float(0.86), float(0.26), glass)
-    .add(grain.sub(0.5).mul(0.22))
-    .add(streaks.sub(0.5).mul(0.2).mul(glass))
-    .add(pits.mul(0.1))
-    .add(height.oneMinus().mul(0.06));
+  const crustRoughness = mix(float(0.94), float(0.55), glass)
+    .add(grain.sub(0.5).mul(0.14))
+    .add(streaks.sub(0.5).mul(0.12).mul(glass))
+    .add(pits.mul(0.08))
+    .add(height.oneMinus().mul(0.05));
   const moltenRoughness = float(0.32).add(streaks.sub(0.5).mul(0.1));
   material.roughnessNode = mix(crustRoughness, moltenRoughness, molten).clamp(0.05, 1);
-  material.clearcoatNode = glass.mul(0.75).mul(molten.oneMinus());
+  material.clearcoatNode = glass.mul(0.25).mul(molten.oneMinus());
   material.clearcoatRoughnessNode = float(0.22).add(grain.sub(0.5).mul(0.15)).clamp(0.05, 1);
 
   // PBR refinement, all from WGSL: cavity occlusion keeps crevices dark
@@ -99,8 +99,8 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const facets = pbr.w;
   material.aoNode = cavity;
   material.specularIntensityNode = mix(specMottle, float(1), molten);
-  material.metalnessNode = facets.mul(glass.mul(0.4).add(0.1)).mul(molten.oneMinus());
-  material.iridescenceNode = irid.mul(glass).mul(0.3);
+  material.metalnessNode = facets.mul(glass.mul(0.25).add(0.05)).mul(molten.oneMinus());
+  material.iridescenceNode = irid.mul(glass).mul(0.15);
   material.iridescenceIORNode = float(2.0);
   material.iridescenceThicknessNode = irid.mul(250).add(150);
 
