@@ -1,6 +1,6 @@
-// Type-only: the runtime import has to happen after the headless globals are
-// installed (see below), but the types are free to come in statically.
-import type * as THREE from "three/webgpu";
+import * as THREE from "three/webgpu";
+import { float } from "three/tsl";
+import { EXRLoader } from "three/addons/loaders/EXRLoader.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { effect, sampler, type Gpu, type Target } from "vgpu";
@@ -45,7 +45,7 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
  * (which we never start), and `VideoFrame` is an `instanceof` target in the
  * texture size probe.
  */
-function installHeadlessGlobals(adapter: unknown): void {
+function installHeadlessGlobals(): void {
   const globals = globalThis as Record<string, unknown>;
   globals.self ??= globalThis;
   globals.requestAnimationFrame ??= () => 0;
@@ -55,7 +55,12 @@ function installHeadlessGlobals(adapter: unknown): void {
     Object.defineProperty(globalThis.navigator, "gpu", {
       value: {
         getPreferredCanvasFormat: () => "bgra8unorm",
-        requestAdapter: async () => adapter,
+        // The renderer is always constructed with an explicit `device`, so
+        // three never requests an adapter on this path; vgpu's Node adapter
+        // descriptor is not a GPUAdapter, so there is nothing truthful to
+        // return here. null makes three report "WebGPU is not available"
+        // instead of crashing on a wrong-shaped object if that ever changes.
+        requestAdapter: async () => null,
       },
       configurable: true,
     });
@@ -85,14 +90,19 @@ function headlessCanvas(width: number, height: number): unknown {
 /**
  * The HDRI is a static asset rather than a baked-in fixture, so the thumbnail
  * reads the same file the browser fetches. `thumbs`, `thumbs:check` and
- * `render:proof` all run with the docs package as cwd; the `import.meta.url`
- * fallback covers being invoked from elsewhere.
+ * `render:proof` all run with the docs package as cwd, which the first
+ * candidate covers. The `import.meta.url` candidates cover a non-docs cwd for
+ * both places this module can execute from: the harness's esbuild bundle at
+ * apps/docs/.thumbs-cache/renderers.mjs (one level below the docs root) and
+ * this source file itself (two levels below it).
  */
 async function readHdri(): Promise<ArrayBuffer> {
   const relative = path.join("public", "examples", "three-tsl", "sunset.exr");
+  const moduleDir = fileURLToDir(import.meta.url);
   const candidates = [
     path.resolve(process.cwd(), relative),
-    path.resolve(fileURLToDir(import.meta.url), "..", relative),
+    path.resolve(moduleDir, "..", relative),
+    path.resolve(moduleDir, "..", "..", relative),
   ];
   let lastError: unknown;
   for (const candidate of candidates) {
@@ -127,13 +137,11 @@ export async function renderThumbnail(
   opts: ThumbnailOptions = {}
 ): Promise<void> {
   const device = gpu.gpu as GPUDevice;
-  installHeadlessGlobals((gpu as { adapter?: unknown }).adapter);
-
-  // Imported here, not at module scope: the import has to land after the
-  // globals above exist, or three picks the WebGL2 backend at module init.
-  const THREE = await import("three/webgpu");
-  const { float } = await import("three/tsl");
-  const { EXRLoader } = await import("three/addons/loaders/EXRLoader.js");
+  // three/webgpu is already evaluated at module load (scenes.ts imports it
+  // statically), which is safe in r180 — nothing gpu- or DOM-touching runs at
+  // its module scope. What actually needs the globals below in place is
+  // WebGPURenderer *construction*, which happens after this call.
+  installHeadlessGlobals();
 
   const [width, height] = output.color.size as readonly [number, number];
 
@@ -230,14 +238,15 @@ export async function renderThumbnail(
   );
   let cleanupError = rejected?.reason;
   let cleanupFailed = rejected !== undefined;
-  try {
-    post?.dispose();
-    renderTarget?.dispose();
-    scene?.dispose();
-    renderer?.dispose();
-  } catch (error) {
-    if (!cleanupFailed) cleanupError = error;
-    cleanupFailed = true;
+  // One dispose throwing (e.g. against dead backend state after a device
+  // error) must not strand the ones after it; the first failure is reported.
+  for (const step of [post, renderTarget, scene, renderer]) {
+    try {
+      step?.dispose();
+    } catch (error) {
+      if (!cleanupFailed) cleanupError = error;
+      cleanupFailed = true;
+    }
   }
 
   if (failed) throw primaryError;
