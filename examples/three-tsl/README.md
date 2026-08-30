@@ -24,6 +24,7 @@ src/lava-material.ts   physical material: emissive cracks, bump normals, and
                        vertex relief all driven by lava.wgsl
 src/scenes.ts          shared scene/lights/mesh builders
 src/main.ts            lava scene (sphere by default, lil-gui mesh picker), WebGPURenderer
+src/bake-lava.ts       one-time bake of the procedural fields into slice-atlas volumes
 src/harness.ts         offscreen render smoke check (also runs headless)
 scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
 scripts/field-viz.ts          renders lava.wgsl fields to PNGs with pure vgpu

@@ -32,6 +32,7 @@ async function run(): Promise<unknown> {
   await renderer.init();
 
   const { scene } = await createDemoScene({
+    renderer,
     mesh: meshKind,
     timeNode: float(frameTime),
     lightScale: Number(params.get("light") ?? "1"),

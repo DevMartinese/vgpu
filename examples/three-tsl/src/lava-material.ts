@@ -1,23 +1,36 @@
 import * as THREE from "three/webgpu";
-import { float, fwidth, mix, normalLocal, positionLocal, smoothstep, time, transformNormalToView, uniform, vec3 } from "three/tsl";
+import {
+  float,
+  fwidth,
+  mix,
+  normalLocal,
+  positionLocal,
+  smoothstep,
+  time,
+  transformNormalToView,
+  uniform,
+  vec3,
+} from "three/tsl";
+import type { ShaderNodeObject } from "three/tsl";
 import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
+import {
+  sampleDisplacementVolume,
+  sampleFieldVolume,
+  type LavaFieldVolumes,
+} from "./bake-lava.ts";
 
-const { lavaGlow, blackbody, crustHeight, crustRelief, crustSurface, crustPbr, lavaSink, microDetail, meltSkin } = tslExports(lavaModule, [
-  "lavaGlow",
+const { blackbody, microDetail, perlin3 } = tslExports(lavaModule, [
   "blackbody",
-  "crustHeight",
-  "crustRelief",
-  "crustSurface",
-  "crustPbr",
-  "lavaSink",
   "microDetail",
-  "meltSkin",
+  "perlin3",
 ]);
 
 export interface LavaMaterialOptions {
-  /** Drives the flow animation; defaults to the TSL `time` node. */
+  /** Pre-baked field volumes from `bakeLavaVolumes`. */
+  readonly volumes: LavaFieldVolumes;
+  /** Drives the breathing pulse; defaults to the TSL `time` node. */
   readonly timeNode?: Node;
 }
 
@@ -30,32 +43,49 @@ export interface LavaMaterial {
 }
 
 /**
- * Cooling basalt crust over an incandescent molten interior. The heat field,
- * crust relief, and blackbody ramp all come from lava.wgsl through the vgpu
- * loader; three only sees TSL nodes.
+ * Cooling basalt crust over an incandescent molten interior — same
+ * composition as before, but the heavy procedural fields now come out of the
+ * pre-baked volumes instead of being recomputed per fragment. Per fragment
+ * the material pays six volume taps (three base fields plus three
+ * finite-difference taps for the bump gradients) and a small live register:
+ * the mineral micro grain, the facet glints, the blackbody ramp, and the
+ * breathing pulse, whose phase is baked but whose motion must stay live.
  */
-export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMaterial {
+export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
+  const { volumes } = options;
   const glowIntensity = uniform(1.6);
   const scale = uniform(1.0);
-  const t = options.timeNode ?? time;
+  // Every caller hands in a TSL-built node (float(...) or the time node);
+  // the option keeps the broader Node type for API symmetry with the scene.
+  const t = (options.timeNode ?? time) as ShaderNodeObject<Node>;
 
   const p = positionLocal.mul(scale);
-  // The whole glow composition (laminar melt with striations and contact
-  // rims, plus the grain-seeped ember fringe) lives in lava.wgsl: x = heat,
-  // y = continuous-melt mask.
-  const glow = lavaGlow({ position: p, t });
-  const heat = glow.x;
-  const molten = glow.y;
-  const height = crustHeight({ position: p, t });
-  const surface = crustSurface({ position: p, t });
-  const tone = surface.x;
-  const oxide = surface.y;
-  const glass = surface.z;
-  const pits = surface.w;
 
-  // High-frequency surface detail: mineral grain plus flow-line streaks
-  // frozen into the glassy skin. Shared by the roughness map and the micro
-  // normal pass below.
+  // Baked registers. Glow: x = sqrt(heat/1.6), y = melt mask, z = pulse
+  // phase, w = specular mottling. SurfaceA: x = crust height, y = cooling
+  // skin, z = glass mask, w = cavities. SurfaceB: x = tone, y = oxide,
+  // z = cavity occlusion, w = iridescence.
+  const glow = sampleFieldVolume(volumes.glow, p);
+  const surfaceA = sampleFieldVolume(volumes.surfaceA, p);
+  const surfaceB = sampleFieldVolume(volumes.surfaceB, p);
+
+  // Slow breathing so the melt looks alive: the only part of the glow that
+  // stays live. Same formula lavaGlow applied, with the baked phase.
+  const pulse = t.mul(0.7).add(glow.z.mul(6.2831853)).sin().mul(0.1).add(0.9);
+  const heat = glow.x.mul(glow.x).mul(1.6).mul(pulse).clamp(0, 1);
+  const molten = glow.y;
+  const specMottle = glow.w;
+
+  const height = surfaceA.x;
+  const glass = surfaceA.z;
+  const pits = surfaceA.w;
+  const tone = surfaceB.x;
+  const oxide = surfaceB.y;
+  const cavity = surfaceB.z;
+  const irid = surfaceB.w;
+
+  // High-frequency surface detail stays live: at 19-24 cycles per unit it is
+  // far past what a 128^3 volume can hold, and at three octaves it is cheap.
   const micro = microDetail({ position: p });
   const grain = micro.x;
   const streaks = micro.y;
@@ -78,7 +108,7 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   const basalt = mix(stained, stained.mul(0.4), pits);
   material.colorNode = mix(basalt, vec3(0.012, 0.01, 0.009), molten);
 
-  // Incandescence: blackbody ramp over the composed heat field, crushed
+  // Incandescence: blackbody ramp over the baked heat field, crushed
   // slightly so contact rims go yellow-white while striation crests cool
   // through deep red.
   material.emissiveNode = blackbody({ t: heat.pow(1.35) }).mul(glowIntensity);
@@ -96,15 +126,13 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   material.clearcoatNode = glass.mul(0.25).mul(molten.oneMinus());
   material.clearcoatRoughnessNode = float(0.22).add(grain.sub(0.5).mul(0.15)).clamp(0.05, 1);
 
-  // PBR refinement, all from WGSL: cavity occlusion keeps crevices dark
-  // under the environment light, specular mottling breaks up the sheen,
-  // glinting mineral facets read as tiny metallic flakes, and the glassy
-  // skin gets a faint thin-film iridescence.
-  const pbr = crustPbr({ position: p, t });
-  const cavity = pbr.x;
-  const irid = pbr.y;
-  const specMottle = pbr.z;
-  const facets = pbr.w;
+  // PBR refinement from the baked registers; only the facet glints stay
+  // live, being a single high-frequency perlin tap.
+  const facets = smoothstep(
+    0.72,
+    0.92,
+    perlin3({ position: p.mul(21).add(vec3(11, 3, 29)) })
+  );
   material.aoNode = cavity;
   material.specularIntensityNode = mix(specMottle, float(1), molten);
   material.metalnessNode = facets.mul(glass.mul(0.25).add(0.05)).mul(molten.oneMinus());
@@ -112,24 +140,38 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   material.iridescenceIORNode = float(2.0);
   material.iridescenceThicknessNode = irid.mul(250).add(150);
 
-  // Plates bulge up, molten channels sink. Vertices only see smooth fields:
-  // crustRelief has no per-cell flake plateaus (those would stair-step on
-  // the mesh grid) and the sink mask is wide and low-frequency.
-  const sink = lavaSink({ position: p, t });
-  const relief = crustRelief({ position: p, t }).mul(0.5).sub(sink.mul(0.4)).mul(0.12);
+  // Vertex displacement is one small-volume tap: the bake already combined
+  // plate bulge minus channel sink into a single encoded scalar.
+  const relief = sampleDisplacementVolume(volumes.displacement, p)
+    .x.mul(0.9)
+    .sub(0.4)
+    .mul(0.12);
   material.positionNode = positionLocal.add(normalLocal.mul(relief));
 
-  // Bump normals in two registers, both by finite differences projected onto
-  // the surface: the crust height field at a coarse epsilon for plates and
-  // ropes, and the micro grain at a fine epsilon for crisp mineral detail.
-  const eps = 0.03;
+  // Bump normals by finite differences of the baked volume, projected onto
+  // the surface. Three offset taps serve both gradients at once: crust
+  // height (plates and ropes) from x, the cooled melt-skin bands from y.
+  const eps = 0.024;
+  const offsetX = sampleFieldVolume(volumes.surfaceA, p.add(vec3(eps, 0, 0)));
+  const offsetY = sampleFieldVolume(volumes.surfaceA, p.add(vec3(0, eps, 0)));
+  const offsetZ = sampleFieldVolume(volumes.surfaceA, p.add(vec3(0, 0, eps)));
   const grad = vec3(
-    crustHeight({ position: p.add(vec3(eps, 0, 0)), t }).sub(height),
-    crustHeight({ position: p.add(vec3(0, eps, 0)), t }).sub(height),
-    crustHeight({ position: p.add(vec3(0, 0, eps)), t }).sub(height),
+    offsetX.x.sub(height),
+    offsetY.x.sub(height),
+    offsetZ.x.sub(height)
   ).div(eps);
   const tangentGrad = grad.sub(normalLocal.mul(grad.dot(normalLocal)));
 
+  const skin = surfaceA.y;
+  const skinGrad = vec3(
+    offsetX.y.sub(skin),
+    offsetY.y.sub(skin),
+    offsetZ.y.sub(skin)
+  ).div(eps);
+  const skinTangent = skinGrad.sub(normalLocal.mul(skinGrad.dot(normalLocal)));
+
+  // The mineral micro grain still finite-differences live noise: its detail
+  // sits well past the volume's resolution, and three octaves keep it cheap.
   const microEps = 0.005;
   const microGrad = vec3(
     microDetail({ position: p.add(vec3(microEps, 0, 0)) }).x.sub(grain),
@@ -138,20 +180,11 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   ).div(microEps);
   const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
 
-  // The cooled skin bands are physical ridges on the melt: finite-difference
-  // the skin field so they emboss the surface — molten areas only, the rock
-  // never carries these lines.
-  const skinEps = 0.006;
-  const skinBase = meltSkin({ position: p, t });
-  const skinGrad = vec3(
-    meltSkin({ position: p.add(vec3(skinEps, 0, 0)), t }).sub(skinBase),
-    meltSkin({ position: p.add(vec3(0, skinEps, 0)), t }).sub(skinBase),
-    meltSkin({ position: p.add(vec3(0, 0, skinEps)), t }).sub(skinBase),
-  ).div(skinEps);
-  const skinTangent = skinGrad.sub(normalLocal.mul(skinGrad.dot(normalLocal)));
-
+  // 0.2 vs the procedural version's 0.16: the volume's trilinear filtering
+  // softens the height gradient, so the plates need a touch more strength to
+  // read as sharply as before.
   const bumped = normalLocal
-    .sub(tangentGrad.mul(mix(float(0.16), float(0.04), molten)))
+    .sub(tangentGrad.mul(mix(float(0.2), float(0.05), molten)))
     .sub(microTangent.mul(mix(float(0.022), float(0.008), molten).mul(microFade)))
     .sub(skinTangent.mul(molten.mul(0.014).mul(striaeFade)))
     .normalize();

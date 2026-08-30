@@ -59,6 +59,15 @@ export fn meltSkin(position: vec3f, t: f32) -> f32 {
 // on top. Where the cooled skin fills in, the liquid mask carves out so the
 // material shades those bands as rock again.
 export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
+  let parts = glowParts(position, t);
+  let pulse = 0.9 + 0.1 * sin(t * 0.7 + parts.z * 6.2831853);
+  return vec2f(clamp(parts.x * pulse, 0.0, 1.0), parts.y);
+}
+
+// The spatial composition of lavaGlow, with the time pulse factored out:
+// x = unpulsed heat (0..~1.6), y = continuous-melt mask, z = pulse phase.
+// This is what the bake captures; the live shader re-applies the pulse.
+fn glowParts(position: vec3f, t: f32) -> vec3f {
   let domain = lavaDomain(position, t);
   // Fine wiggle so voronoi boundaries stop looking ruler-straight.
   let wiggle = domain + (vec3f(
@@ -118,10 +127,49 @@ export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let glowBase = warmFalloff * 0.15;
   let fringeHeat = (glowBase + (fine + halo + embers) * seep) * (1.0 - meltMask);
 
-  // Slow breathing so the melt looks alive.
-  let pulse = 0.9 + 0.1 * sin(t * 0.7 + fbm3(domain, 2u) * 6.2831853);
-  let heat = clamp((meltHeat + fringeHeat) * pulse, 0.0, 1.0);
-  return vec2f(heat, clamp(meltMask - skinned + rim * 0.5, 0.0, 1.0));
+  let phase = fbm3(domain, 2u);
+  return vec3f(meltHeat + fringeHeat, clamp(meltMask - skinned + rim * 0.5, 0.0, 1.0), phase);
+}
+
+// ---------------------------------------------------------------------------
+// Bake compositors: one texel of the pre-baked field volumes. Everything the
+// live material needs per fragment/vertex, packed for rgba8 storage. The live
+// shader then costs a handful of texture taps instead of re-walking the whole
+// noise stack (lavaDomain alone is nine fbm octaves, and the old material
+// evaluated it dozens of times per fragment).
+
+// Heat is stored sqrt-encoded over 0..HEAT_RANGE so 8 bits spend their
+// precision on the dim end, where banding through the blackbody ramp shows.
+const HEAT_RANGE: f32 = 1.6;
+
+// x = sqrt(heat/HEAT_RANGE), y = melt mask, z = pulse phase,
+// w = specular-intensity mottling.
+export fn bakeGlow(position: vec3f, t: f32) -> vec4f {
+  let parts = glowParts(position, t);
+  let domain = lavaDomain(position, t);
+  let spec = 0.55 + 0.45 * fbm3(domain * 3.0 + vec3f(9.0, 1.0, 25.0), 3u);
+  return vec4f(sqrt(clamp(parts.x / HEAT_RANGE, 0.0, 1.0)), parts.y, parts.z, spec);
+}
+
+// x = crust height, y = cooling skin, z = glassy-sheen mask, w = cavities.
+export fn bakeSurfaceA(position: vec3f, t: f32) -> vec4f {
+  let surface = crustSurface(position, t);
+  return vec4f(crustHeight(position, t), meltSkin(position, t), surface.z, surface.w);
+}
+
+// x = tone mottling, y = oxide staining, z = cavity occlusion, w = iridescence.
+export fn bakeSurfaceB(position: vec3f, t: f32) -> vec4f {
+  let surface = crustSurface(position, t);
+  let pbr = crustPbr(position, t);
+  return vec4f(surface.x, surface.y, pbr.x, pbr.y);
+}
+
+// Vertex displacement, already combined the way the material applied it
+// (relief bulge minus channel sink), biased into 0..1 for rgba8 storage.
+// The live decode is (x * 0.9 - 0.4) * 0.12.
+export fn bakeDisplacement(position: vec3f, t: f32) -> vec4f {
+  let raw = crustRelief(position, t) * 0.5 - lavaSink(position, t) * 0.4;
+  return vec4f(clamp((raw + 0.4) / 0.9, 0.0, 1.0), 0.0, 0.0, 1.0);
 }
 
 // Wide, smooth channel mask for vertex displacement: 1 inside molten
@@ -206,8 +254,11 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
 // High-frequency surface detail, cheap enough to finite-difference at a
 // small epsilon for micro normals:
 // x = sharp mineral grain, y = flow-line streaks frozen into the glassy skin.
+// Four octaves, not five: this register stays live in the baked material
+// (its wavelength sits past the volume resolution), and the finest octave
+// was already fading under the band-limit before it cost anything.
 export fn microDetail(position: vec3f) -> vec2f {
-  let grain = turbulence3(position * 19.0, 5u);
+  let grain = turbulence3(position * 19.0, 4u);
   let streaks = perlin3(position * vec3f(24.0, 7.0, 24.0) + vec3f(4.0, 8.0, 15.0));
   return vec2f(grain, streaks);
 }
