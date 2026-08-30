@@ -29,21 +29,43 @@ fn plateEdge(position: vec3f) -> f32 {
   return sample.f2 - sample.f1;
 }
 
-// Laminar flow striations in the melt skin: dozens of thin cords sweeping
-// in arcs, like the wrinkled surface of an advancing pahoehoe lobe. The
-// crests are slightly cooled skin, so callers *subtract* heat with it.
+// Laminar flow striations in the melt skin: thin cooled cords that follow
+// the flow, and — like the real wrinkling skin — merge, bifurcate, and
+// break into segments instead of running forever.
+//
+// The cords are level sets of a smooth flow potential, so their direction
+// IS the local flow direction; a spatially varying gain changes how many
+// level sets fit, which forces merges and bifurcations; and a break field
+// stretched along the flow frame (from the potential's gradient) interrupts
+// each cord independently of its neighbors.
 export fn flowStriations(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
-  // The arc term dominates the phase, so the cords follow the swirling
-  // contours of a smooth fbm — fans and whorls — instead of one direction;
-  // its high gain packs ~50 cords per lobe like the reference photos.
-  let arc = fbm3(domain * 0.55 + vec3f(4.7, 9.2, 1.3), 3u);
+  let arcOffset = vec3f(4.7, 9.2, 1.3);
+  let arc = fbm3(domain * 0.55 + arcOffset, 3u);
+
+  // Flow frame: "across" points across the cords (gradient of the potential).
+  let eps = 0.05;
+  let grad = vec3f(
+    fbm3((domain + vec3f(eps, 0.0, 0.0)) * 0.55 + arcOffset, 3u) - arc,
+    fbm3((domain + vec3f(0.0, eps, 0.0)) * 0.55 + arcOffset, 3u) - arc,
+    fbm3((domain + vec3f(0.0, 0.0, eps)) * 0.55 + arcOffset, 3u) - arc,
+  );
+  let across = normalize(grad + vec3f(1e-4, 0.0, 0.0));
+
+  // Variable gain: cord count changes across the field, so level sets must
+  // appear, vanish, and split.
+  let gain = 260.0 + 80.0 * fbm3(domain * 0.9 + vec3f(14.0, 6.0, 3.0), 2u);
   let jitter = fbm3(domain * 3.4 + vec3f(8.0, 3.0, 21.0), 3u);
-  let phase = dot(domain, vec3f(1.3, 0.4, 1.0)) * 110.0 + arc * 260.0 + jitter * 8.0;
-  let band = 0.5 + 0.5 * sin(phase);
-  // Narrow crests over wide bright gaps: the cords read as thin cooled
-  // lines, not a soft sinusoid.
-  return band * band * band * band;
+  let band = 0.5 + 0.5 * sin(dot(domain, vec3f(1.3, 0.4, 1.0)) * 75.0 + arc * gain + jitter * 5.0);
+  // Very narrow crests: thin lines over wide bright gaps.
+  let band2 = band * band;
+  let crest = band2 * band2 * band2;
+
+  // Anisotropic breaks: slow variation along the cord, fast across it, so
+  // segments are elongated dashes and neighboring cords break differently.
+  let breakField = fbm3(domain * 5.0 + across * dot(domain, across) * 20.0, 3u);
+  let continuity = smoothstep(0.34, 0.52, breakField);
+  return crest * continuity;
 }
 
 // Final glow composition: x = heat 0..1 (feed the blackbody ramp),
@@ -87,8 +109,8 @@ export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   // while the troughs stay orange. Crack cores are freshly torn and stay
   // nearly uniform white-hot.
   let striae = flowStriations(position, t);
-  let coreHeat = core * (0.4 + 0.6 * activity) * (1.0 - striae * 0.18);
-  let washHeat = wash * (1.0 - islands * 0.92) * (1.0 - striae * 0.55);
+  let coreHeat = core * (0.4 + 0.6 * activity) * (1.0 - striae * 0.2);
+  let washHeat = wash * (1.0 - islands * 0.92) * (1.0 - striae * 0.6);
   let meltHeat = clamp(coreHeat + washHeat, 0.0, 1.0) * (0.72 + 0.28 * activity) + rim * 0.55;
 
   // --- fringe over solid crust: halo + embers, seeped through the grain ---

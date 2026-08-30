@@ -4,7 +4,7 @@ import type { Node } from "three/webgpu";
 import lavaModule from "./lava.wgsl";
 import { tslExports } from "./wgsl-tsl.ts";
 
-const { lavaGlow, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, microDetail } = tslExports(lavaModule, [
+const { lavaGlow, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, microDetail, flowStriations } = tslExports(lavaModule, [
   "lavaGlow",
   "blackbody",
   "crustHeight",
@@ -12,6 +12,7 @@ const { lavaGlow, blackbody, crustHeight, crustSurface, crustPbr, lavaSink, micr
   "crustPbr",
   "lavaSink",
   "microDetail",
+  "flowStriations",
 ]);
 
 export interface LavaMaterialOptions {
@@ -128,9 +129,21 @@ export function createLavaMaterial(options: LavaMaterialOptions = {}): LavaMater
   ).div(microEps);
   const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
 
+  // The flow cords are physical wrinkles in the melt skin: finite-difference
+  // the striation field so each cord raises a small ridge, molten areas only.
+  const striaeEps = 0.004;
+  const striaeBase = flowStriations({ position: p, t });
+  const striaeGrad = vec3(
+    flowStriations({ position: p.add(vec3(striaeEps, 0, 0)), t }).sub(striaeBase),
+    flowStriations({ position: p.add(vec3(0, striaeEps, 0)), t }).sub(striaeBase),
+    flowStriations({ position: p.add(vec3(0, 0, striaeEps)), t }).sub(striaeBase),
+  ).div(striaeEps);
+  const striaeTangent = striaeGrad.sub(normalLocal.mul(striaeGrad.dot(normalLocal)));
+
   const bumped = normalLocal
     .sub(tangentGrad.mul(mix(float(0.22), float(0.04), molten)))
     .sub(microTangent.mul(mix(float(0.045), float(0.008), molten)))
+    .sub(striaeTangent.mul(molten.mul(0.012)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
 
