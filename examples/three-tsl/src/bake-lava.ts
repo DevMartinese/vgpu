@@ -26,7 +26,13 @@ import { tslExports } from "./wgsl-tsl.ts";
  * atlas taps lerped across Z.
  */
 
-/** Field-space cube the volumes cover; every demo mesh fits inside. */
+/**
+ * Field-space cube the volumes cover; every demo mesh fits inside at the
+ * default field scale of 1. Unlike the old fully-procedural material, samples
+ * outside the cube clamp to its edge — so the material's `scale` uniform is
+ * only faithful while `|position| * scale` stays within 2.4 (about 1.09 for
+ * the 4.4-unit plane, the largest mesh).
+ */
 const VOLUME_MIN = -2.4;
 const VOLUME_SPAN = 4.8;
 
@@ -40,18 +46,20 @@ const DISP_SIZE = 64;
 const DISP_COLS = 8;
 const DISP_ROWS = 8;
 
-const { bakeGlow, bakeSurfaceA, bakeSurfaceB, bakeDisplacement } = tslExports(
+const { bakeGlow, bakeSurfaceA, bakeSurfaceB, bakeWarp, bakeDisplacement } = tslExports(
   lavaModule,
-  ["bakeGlow", "bakeSurfaceA", "bakeSurfaceB", "bakeDisplacement"]
+  ["bakeGlow", "bakeSurfaceA", "bakeSurfaceB", "bakeWarp", "bakeDisplacement"]
 );
 
 export interface LavaFieldVolumes {
-  /** x = sqrt(heat/1.6), y = melt mask, z = pulse phase, w = spec mottle. */
+  /** x = sqrt(heat/1.6) sans seep, y = melt mask, z = pulse phase, w = sqrt(fringe/1.4). */
   readonly glow: THREE.Texture;
-  /** x = crust height, y = cooling skin, z = glass mask, w = cavities. */
+  /** x = smooth crust height, y = cooling skin, z = glass mask, w = spec mottle. */
   readonly surfaceA: THREE.Texture;
-  /** x = tone, y = oxide, z = cavity occlusion, w = iridescence. */
+  /** x = tone, y = oxide, z = fine crevice mask, w = iridescence. */
   readonly surfaceB: THREE.Texture;
+  /** xyz = lavaDomain warp offset, biased (offset/0.9 + 0.5). */
+  readonly warp: THREE.Texture;
   /** x = combined vertex displacement, encoded (raw + 0.4) / 0.9. */
   readonly displacement: THREE.Texture;
   dispose(): void;
@@ -113,13 +121,21 @@ function makeVolumeSampler(atlas: THREE.Texture, shape: AtlasShape): VolumeSampl
   return (p) => fn(p) as TslNode;
 }
 
-const samplerCache = new WeakMap<THREE.Texture, VolumeSampler>();
+// Keyed by texture AND shape: the same texture routed through samplers of
+// different shapes must never silently reuse the other shape's atlas math.
+const samplerCache = new WeakMap<THREE.Texture, Map<string, VolumeSampler>>();
 
 function cachedSampler(atlas: THREE.Texture, shape: AtlasShape): VolumeSampler {
-  let sampler = samplerCache.get(atlas);
+  let byShape = samplerCache.get(atlas);
+  if (!byShape) {
+    byShape = new Map();
+    samplerCache.set(atlas, byShape);
+  }
+  const key = `${shape.size}/${shape.cols}x${shape.rows}`;
+  let sampler = byShape.get(key);
   if (!sampler) {
     sampler = makeVolumeSampler(atlas, shape);
-    samplerCache.set(atlas, sampler);
+    byShape.set(key, sampler);
   }
   return sampler;
 }
@@ -176,7 +192,13 @@ async function bakeAtlas(
   target.texture.wrapT = THREE.ClampToEdgeWrapping;
 
   const material = new THREE.MeshBasicNodeMaterial();
-  material.colorNode = field(bakePosition(shape));
+  // The alpha channel carries data, so the bake must write the raw vec4.
+  // Neither a vec4 colorNode nor opacityNode reaches the target's alpha
+  // untouched (verified: every baked .w channel read back as exactly 1.0);
+  // fragmentNode bypasses the material's color/opacity pipeline entirely and
+  // emits the value verbatim.
+  material.fragmentNode = field(bakePosition(shape));
+  material.blending = THREE.NoBlending;
   const scene = new THREE.Scene();
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
   scene.add(quad);
@@ -186,12 +208,19 @@ async function bakeAtlas(
   const previousToneMapping = renderer.toneMapping;
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.setRenderTarget(target);
-  await renderer.renderAsync(scene, camera);
-  renderer.setRenderTarget(previousTarget);
-  renderer.toneMapping = previousToneMapping;
-
-  quad.geometry.dispose();
-  material.dispose();
+  try {
+    await renderer.renderAsync(scene, camera);
+  } catch (error) {
+    // A failed bake must not strand the renderer pointed at a half-written
+    // atlas, nor leak the target.
+    target.dispose();
+    throw error;
+  } finally {
+    renderer.setRenderTarget(previousTarget);
+    renderer.toneMapping = previousToneMapping;
+    quad.geometry.dispose();
+    material.dispose();
+  }
   return { target, texture: target.texture };
 }
 
@@ -208,36 +237,32 @@ export async function bakeLavaVolumes(
   // The fields drift extremely slowly with t; freezing them at the start (or
   // at the caller's fixed still time) is visually indistinguishable.
   const t = timeNode ?? float(0);
-  const glow = await bakeAtlas(
-    renderer,
-    FRAGMENT_SHAPE,
-    (p) => bakeGlow({ position: p, t }),
-    "lava-bake-glow"
-  );
-  const surfaceA = await bakeAtlas(
-    renderer,
-    FRAGMENT_SHAPE,
-    (p) => bakeSurfaceA({ position: p, t }),
-    "lava-bake-surface-a"
-  );
-  const surfaceB = await bakeAtlas(
-    renderer,
-    FRAGMENT_SHAPE,
-    (p) => bakeSurfaceB({ position: p, t }),
-    "lava-bake-surface-b"
-  );
-  const displacement = await bakeAtlas(
-    renderer,
-    DISP_SHAPE,
-    (p) => bakeDisplacement({ position: p, t }),
-    "lava-bake-displacement"
-  );
+  const passes = [
+    { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeGlow({ position: p, t }), label: "lava-bake-glow" },
+    { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeSurfaceA({ position: p, t }), label: "lava-bake-surface-a" },
+    { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeSurfaceB({ position: p, t }), label: "lava-bake-surface-b" },
+    { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeWarp({ position: p, t }), label: "lava-bake-warp" },
+    { shape: DISP_SHAPE, field: (p: TslNode) => bakeDisplacement({ position: p, t }), label: "lava-bake-displacement" },
+  ] as const;
 
-  const targets = [glow.target, surfaceA.target, surfaceB.target, displacement.target];
+  const targets: THREE.RenderTarget[] = [];
+  try {
+    for (const pass of passes) {
+      const baked = await bakeAtlas(renderer, pass.shape, pass.field, pass.label);
+      targets.push(baked.target);
+    }
+  } catch (error) {
+    // A later bake failing must not leak the earlier atlases.
+    for (const target of targets) target.dispose();
+    throw error;
+  }
+
+  const [glow, surfaceA, surfaceB, warp, displacement] = targets;
   return {
     glow: glow.texture,
     surfaceA: surfaceA.texture,
     surfaceB: surfaceB.texture,
+    warp: warp.texture,
     displacement: displacement.texture,
     dispose() {
       for (const target of targets) target.dispose();

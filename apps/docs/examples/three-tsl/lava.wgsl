@@ -60,14 +60,22 @@ export fn meltSkin(position: vec3f, t: f32) -> f32 {
 // material shades those bands as rock again.
 export fn lavaGlow(position: vec3f, t: f32) -> vec2f {
   let parts = glowParts(position, t);
+  // Recombine exactly as the original single-function form did: the seeped
+  // fringe joins the seep-independent heat, then the pulse, then the clamp.
+  let grain = turbulence3(position * 19.0, 5u);
+  let seep = smoothstep(0.62, 0.25, grain);
   let pulse = 0.9 + 0.1 * sin(t * 0.7 + parts.z * 6.2831853);
-  return vec2f(clamp(parts.x * pulse, 0.0, 1.0), parts.y);
+  return vec2f(clamp((parts.x + parts.w * seep) * pulse, 0.0, 1.0), parts.y);
 }
 
-// The spatial composition of lavaGlow, with the time pulse factored out:
-// x = unpulsed heat (0..~1.6), y = continuous-melt mask, z = pulse phase.
-// This is what the bake captures; the live shader re-applies the pulse.
-fn glowParts(position: vec3f, t: f32) -> vec3f {
+// The spatial composition of lavaGlow, factored for baking:
+// x = seep-independent heat (melt + wide glow base, 0..~1.6),
+// y = continuous-melt mask, z = pulse phase,
+// w = seepable fringe magnitude (fine cracks + halo + embers, pre-seep).
+// The ember seep gates w through the micro grain; keeping it OUT of the bake
+// lets the live shader apply it with the same live grain that drives the
+// micro normals, so the speckle stays registered with the crevices you see.
+fn glowParts(position: vec3f, t: f32) -> vec4f {
   let domain = lavaDomain(position, t);
   // Fine wiggle so voronoi boundaries stop looking ruler-straight.
   let wiggle = domain + (vec3f(
@@ -122,13 +130,12 @@ fn glowParts(position: vec3f, t: f32) -> vec3f {
   let embers = crevice * warmWide * (0.25 + 0.75 * activity) * 0.7;
   // Same grain register as microDetail, so the seep sits in the crevices of
   // the micro normals you actually see.
-  let grain = turbulence3(position * 19.0, 5u);
-  let seep = smoothstep(0.62, 0.25, grain);
   let glowBase = warmFalloff * 0.15;
-  let fringeHeat = (glowBase + (fine + halo + embers) * seep) * (1.0 - meltMask);
+  let heatSansSeep = meltHeat + glowBase * (1.0 - meltMask);
+  let fringeSeepable = (fine + halo + embers) * (1.0 - meltMask);
 
   let phase = fbm3(domain, 2u);
-  return vec3f(meltHeat + fringeHeat, clamp(meltMask - skinned + rim * 0.5, 0.0, 1.0), phase);
+  return vec4f(heatSansSeep, clamp(meltMask - skinned + rim * 0.5, 0.0, 1.0), phase, fringeSeepable);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,26 +149,45 @@ fn glowParts(position: vec3f, t: f32) -> vec3f {
 // precision on the dim end, where banding through the blackbody ramp shows.
 const HEAT_RANGE: f32 = 1.6;
 
-// x = sqrt(heat/HEAT_RANGE), y = melt mask, z = pulse phase,
-// w = specular-intensity mottling.
+// The seepable fringe never exceeds fine + halo + embers at full activity.
+const FRINGE_RANGE: f32 = 1.4;
+
+// x = sqrt(seep-independent heat / HEAT_RANGE), y = melt mask,
+// z = pulse phase, w = sqrt(seepable fringe / FRINGE_RANGE).
 export fn bakeGlow(position: vec3f, t: f32) -> vec4f {
   let parts = glowParts(position, t);
-  let domain = lavaDomain(position, t);
-  let spec = 0.55 + 0.45 * fbm3(domain * 3.0 + vec3f(9.0, 1.0, 25.0), 3u);
-  return vec4f(sqrt(clamp(parts.x / HEAT_RANGE, 0.0, 1.0)), parts.y, parts.z, spec);
+  return vec4f(
+    sqrt(clamp(parts.x / HEAT_RANGE, 0.0, 1.0)),
+    parts.y,
+    parts.z,
+    sqrt(clamp(parts.w / FRINGE_RANGE, 0.0, 1.0)),
+  );
 }
 
-// x = crust height, y = cooling skin, z = glassy-sheen mask, w = cavities.
+// x = smooth crust height (scabs and pits re-added live), y = cooling skin,
+// z = glassy-sheen mask, w = specular-intensity mottling.
 export fn bakeSurfaceA(position: vec3f, t: f32) -> vec4f {
   let surface = crustSurface(position, t);
-  return vec4f(crustHeight(position, t), meltSkin(position, t), surface.z, surface.w);
+  let domain = lavaDomain(position, t);
+  let spec = 0.55 + 0.45 * fbm3(domain * 3.0 + vec3f(9.0, 1.0, 25.0), 3u);
+  return vec4f(crustHeightSmooth(position, t), meltSkin(position, t), surface.z, spec);
 }
 
-// x = tone mottling, y = oxide staining, z = cavity occlusion, w = iridescence.
+// x = tone mottling, y = oxide staining, z = fine crevice mask (the live
+// shader rebuilds cavity occlusion from it plus the live pits), w = iridescence.
 export fn bakeSurfaceB(position: vec3f, t: f32) -> vec4f {
   let surface = crustSurface(position, t);
-  let pbr = crustPbr(position, t);
-  return vec4f(surface.x, surface.y, pbr.x, pbr.y);
+  let crevice = smoothstep(0.52, 0.24, fbm3(position * 13.0, 4u));
+  return vec4f(surface.x, surface.y, crevice, crustPbr(position, t).y);
+}
+
+// xyz = the lavaDomain warp offset, biased into 0..1 (offset spans +-0.45).
+// Low-frequency by construction (fbm at 1.1 cycles/unit), so it bakes
+// losslessly — this is what lets the live sharp registers skip the nine fbm
+// evaluations the warp used to cost.
+export fn bakeWarp(position: vec3f, t: f32) -> vec4f {
+  let offset = lavaDomain(position, t) - position;
+  return vec4f(offset / 0.9 + vec3f(0.5), 1.0);
 }
 
 // Vertex displacement, already combined the way the material applied it
@@ -233,6 +259,46 @@ export fn crustRelief(position: vec3f, t: f32) -> f32 {
   let rough = turbulence3(domain * 4.2, 4u) * 0.14;
   let ropes = ropeFolds(domain) * lobes * 0.38;
   return clamp(dome * 0.45 + rough + ropes + 0.12, 0.0, 1.0);
+}
+
+// The smooth half of crustHeight: domes, rubble and ropes, but no flaky
+// scabs and no vesicle pits. This is what the bake stores — the scabs and
+// pits are far too fine for the volume (seam masks are fractions of a texel)
+// and are re-added live by sharpScabs/sharpDetail.
+export fn crustHeightSmooth(position: vec3f, t: f32) -> f32 {
+  let domain = lavaDomain(position, t);
+  let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
+  let lobes = ropeMask(domain);
+  let rough = turbulence3(domain * 4.2, 6u) * 0.14;
+  let ropes = ropeFolds(domain) * lobes * 0.38;
+  return clamp(dome * 0.45 + rough + ropes + 0.08, 0.0, 1.0);
+}
+
+// Live sharp registers over the baked smooth fields. Their only expensive
+// dependency was the lavaDomain warp, which is low-frequency and comes in
+// pre-baked as an offset; everything else is a handful of voronoi/hash
+// evaluations — cheap next to the hundreds of noise taps the old material
+// paid, and impossible to store in a 128^3 volume without aliasing away.
+//
+// The flake plateau field for bump finite-differences (2 voronoi).
+export fn sharpScabs(position: vec3f, warpOffset: vec3f) -> f32 {
+  let domain = position + warpOffset;
+  let flakeCoarse = flakes(position + domain * 0.3, 6.5);
+  let flakeFine = flakes(position.zxy + vec3f(13.0, 5.0, 31.0), 16.0);
+  return flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
+}
+
+// Base-tap sharp registers: x = scab height (same as sharpScabs), y = the
+// cavity mask (vesicle pits + flake seams) that darkens color and roughness,
+// z = vesicle pits alone (for occlusion and the height dent).
+export fn sharpDetail(position: vec3f, warpOffset: vec3f) -> vec3f {
+  let domain = position + warpOffset;
+  let flakeCoarse = flakes(position + domain * 0.3, 6.5);
+  let flakeFine = flakes(position.zxy + vec3f(13.0, 5.0, 31.0), 16.0);
+  let scabs = flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
+  let pits = vesiclePits(position);
+  let cavities = max(pits, flakeCoarse.y * 0.55);
+  return vec3f(scabs, cavities, pits);
 }
 
 // Crust relief height, 0..1: domed plates that sink toward the cracks,
