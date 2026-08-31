@@ -178,11 +178,12 @@ export function createPrismAutoQualityController(
   };
 }
 
-/** Only benchmark-backed low tiers and the library blocklist are authoritative. */
+/** Mobile devices, benchmark-backed low tiers, and the blocklist use Low. */
 export function gpuTierRequestsLow(
-  result: Pick<TierResult, "tier" | "type">
+  result: Pick<TierResult, "tier" | "type" | "isMobile">
 ): boolean {
   return (
+    result.isMobile === true ||
     result.type === "BLOCKLISTED" ||
     (result.type === "BENCHMARK" && result.tier <= 1)
   );

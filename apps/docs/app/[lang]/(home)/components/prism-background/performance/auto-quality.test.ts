@@ -7,9 +7,14 @@ import {
   gpuTierRequestsLow,
 } from "./auto-quality";
 
-const tier = (type: TierResult["type"], value: number): TierResult => ({
+const tier = (
+  type: TierResult["type"],
+  value: number,
+  isMobile = false
+): TierResult => ({
   type,
   tier: value,
+  isMobile,
 });
 const silentLogger = () => ({ info: vi.fn() });
 
@@ -27,8 +32,39 @@ test.each([
   expect(gpuTierRequestsLow(tier(type, value))).toBe(expected);
 });
 
-test("an unknown/new FALLBACK tier 1 GPU remains High", () => {
+test("an unknown/new desktop FALLBACK tier 1 GPU remains High", () => {
   expect(gpuTierRequestsLow(tier("FALLBACK", 1))).toBe(false);
+});
+
+test.each([
+  ["BENCHMARK", 3],
+  ["FALLBACK", 1],
+] as const)("mobile %s tier %d always requests Low", (type, value) => {
+  expect(gpuTierRequestsLow(tier(type, value, true))).toBe(true);
+});
+
+test("a mobile tier 3 detector result downgrades", async () => {
+  const onDowngrade = vi.fn();
+  const logger = silentLogger();
+  const controller = createPrismAutoQualityController({
+    navigator: {},
+    loadGpuTier: async () => tier("BENCHMARK", 3, true),
+    logger,
+    onDowngrade,
+  });
+  await vi.waitFor(() =>
+    expect(onDowngrade).toHaveBeenCalledWith("gpu-tier")
+  );
+  expect(logger.info).toHaveBeenCalledWith(
+    "[Prism quality] GPU detected.",
+    expect.objectContaining({
+      type: "BENCHMARK",
+      tier: 3,
+      isMobile: true,
+      decision: "request-low",
+    })
+  );
+  controller.dispose();
 });
 
 test("logs the complete GPU result and resulting policy decision", async () => {
