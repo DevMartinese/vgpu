@@ -30,7 +30,12 @@ export async function generateMetadata({
   return {
     title: example.meta.title,
     description: example.meta.description,
-    alternates: { canonical: siteUrl(`/examples/${example.meta.slug}`) },
+    alternates: {
+      canonical: siteUrl(`/examples/${example.meta.slug}`),
+      types: {
+        "text/markdown": siteUrl(`/examples/${example.meta.slug}.md`),
+      },
+    },
     openGraph: {
       type: "article",
       title: example.meta.title,

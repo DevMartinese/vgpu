@@ -5,6 +5,7 @@ import {
 import { precompute } from "flags/next";
 import { NextResponse } from "next/server";
 import { homepageFlags } from "@/flags";
+import { exampleSlugs } from "@/lib/example-slugs";
 import { config as geistdocsConfig } from "@/lib/geistdocs/config";
 import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
 import { createUnmatchedMarkdownNotFoundResponse } from "@/lib/geistdocs/markdown-not-found";
@@ -53,6 +54,10 @@ const proxy = createProxy({
   markdownRoutes: [
     { from: "/", to: "/[lang]/index.md" },
     { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
+    ...exampleSlugs.map((slug) => ({
+      from: `/examples/${slug}` as const,
+      to: `/[lang]/examples.md/${slug}` as const,
+    })),
   ],
 });
 
