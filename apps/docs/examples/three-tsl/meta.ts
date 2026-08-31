@@ -18,6 +18,7 @@ export const meta = {
   files: [
     "index.tsx",
     "renderer.ts",
+    "object-orbit-controls.ts",
     "scenes.ts",
     "lava-material.ts",
     "bake-lava.ts",

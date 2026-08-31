@@ -27,6 +27,8 @@ export interface DemoSceneOptions {
 export interface DemoScene {
   readonly scene: THREE.Scene;
   readonly mesh: THREE.Mesh;
+  /** Parent transformed by automatic spin and pointer orbit. */
+  readonly rotationRoot: THREE.Group;
   /** Swap the demo geometry in place; the material and spin state carry over. */
   setMesh(kind: DemoMeshKind): void;
   dispose(): void;
@@ -95,14 +97,17 @@ export async function createDemoScene(
   const volumes = await bakeLavaVolumes(options.renderer, options.timeNode);
   const lava = createLavaMaterial({ volumes, timeNode: options.timeNode });
   const mesh = buildDemoMesh(options.mesh ?? "sphere", lava.material);
-  scene.add(mesh);
+  const rotationRoot = new THREE.Group();
+  rotationRoot.add(mesh);
+  scene.add(rotationRoot);
 
   return {
     scene,
     mesh,
+    rotationRoot,
     setMesh(kind) {
-      // Same Mesh object throughout, so the render loop's accumulated spin and
-      // the material stay put; only the geometry and the framing tilt change.
+      // Same Mesh and rotation root throughout, so the material and accumulated
+      // object orientation stay put; only geometry and framing tilt change.
       const { geometry, tiltX } = demoGeometry(kind);
       mesh.geometry.dispose();
       mesh.geometry = geometry;

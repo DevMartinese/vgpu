@@ -24,6 +24,7 @@ src/wgsl-tsl.ts        tslExports(): loader output -> callable wgslFn TSL nodes
 src/lava-material.ts   physical material: emissive cracks, bump normals, and
                        vertex relief all driven by lava.wgsl
 src/scenes.ts          shared scene/lights/mesh builders
+src/object-orbit-controls.ts  damped object rotation with a fixed render camera
 src/main.ts            lava scene (sphere by default, lil-gui mesh picker), WebGPURenderer
 src/bake-lava.ts       one-time field-volume + seamless micro-detail texture bake
 src/harness.ts         offscreen render smoke check (also runs headless)
@@ -85,7 +86,10 @@ drives `scene.environment` and the backdrop, plus a cool moonlight key and a
 faint warm floor bounce standing in for the glow lighting the crust back.
 The interactive lava scene renders directly to the WebGPU canvas, without a
 bloom or fullscreen post-processing pass. ACES tone mapping still runs as the
-renderer output transform.
+renderer output transform. The render camera stays fixed: a proxy camera keeps
+OrbitControls' familiar damping while transferring its inverse angular deltas
+to the lava object. Automatic rotation is time-based, so its speed is stable
+across different frame rates.
 
 Note on the harness: rendering straight into a `RenderTarget` skips tone
 mapping and sRGB encoding (three treats targets as linear intermediates),

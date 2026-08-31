@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GUI } from "three/addons/libs/lil-gui.module.min.js";
+import { createObjectOrbitControls } from "./object-orbit-controls";
 import {
   createDemoCamera,
   createDemoScene,
@@ -69,8 +69,11 @@ export function createRenderer({
     const camera = createDemoCamera(
       Math.max(canvas.clientWidth, 1) / Math.max(canvas.clientHeight, 1)
     );
-    const controls = new OrbitControls(camera, canvas);
-    controls.enableDamping = true;
+    const controls = createObjectOrbitControls(
+      camera,
+      scene.rotationRoot,
+      canvas
+    );
     cleanups.push(() => controls.dispose());
 
     // lil-gui, mounted inside the example card rather than lil-gui's default
@@ -96,9 +99,8 @@ export function createRenderer({
     resize.observe(canvas);
     cleanups.push(() => resize.disconnect());
 
-    renderer.setAnimationLoop(() => {
-      scene.mesh.rotation.y += 0.0012;
-      controls.update();
+    renderer.setAnimationLoop((time) => {
+      controls.update(time);
       renderer.render(scene.scene, camera);
     });
     cleanups.push(() => renderer.setAnimationLoop(null));
