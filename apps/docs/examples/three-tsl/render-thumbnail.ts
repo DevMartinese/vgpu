@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { effect, sampler, type Gpu, type Target } from "vgpu";
 import { createDemoCamera, createDemoScene } from "./scenes";
-import { createBloomPipeline } from "./post";
+import { createOutputPipeline } from "./post";
 
 /**
  * Thumbnails for this example are the one place the two renderers have to meet.
@@ -148,7 +148,7 @@ export async function renderThumbnail(
   let renderer: THREE.WebGPURenderer | undefined;
   let scene: Awaited<ReturnType<typeof createDemoScene>> | undefined;
   let renderTarget: THREE.RenderTarget<THREE.Texture> | undefined;
-  let post: ReturnType<typeof createBloomPipeline> | undefined;
+  let post: ReturnType<typeof createOutputPipeline> | undefined;
   let primaryError: unknown;
   let failed = false;
 
@@ -199,14 +199,13 @@ export async function renderThumbnail(
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
     });
-    // No MSAA on the still: the scene pass renders to RGBA16Float for HDR
-    // bloom, and the CPU/SwiftShader adapters these snapshots run on do not
-    // support multisampling on that format. A static frame loses nothing by it.
-    post = createBloomPipeline(renderer, scene.scene, camera, { samples: 0 });
+    // No MSAA on the still: the CPU/SwiftShader adapters these snapshots run
+    // on do not consistently support multisampling on intermediate formats.
+    post = createOutputPipeline(renderer, scene.scene, camera, { samples: 0 });
 
     // PostProcessing renders its fullscreen quad into whatever target the
     // renderer currently has bound, so setting it here is what redirects the
-    // whole chain — scene pass, bloom and output transform — offscreen.
+    // scene pass and output transform offscreen.
     renderer.setRenderTarget(renderTarget);
     await post.renderAsync();
     await device.queue.onSubmittedWorkDone();

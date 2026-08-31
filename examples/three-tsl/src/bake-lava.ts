@@ -16,9 +16,11 @@ import { tslExports } from "./wgsl-tsl.ts";
  * used to re-walk the whole noise stack per fragment (lavaDomain alone is
  * nine fbm evaluations, and crustHeight was finite-differenced four times).
  * That is hundreds of noise evaluations per pixel, which is what melted
- * phones. Instead, the fields are evaluated ONCE into three fragment volumes
- * plus a small vertex-displacement volume, and the live shader pays a few
- * filtered texture taps.
+ * phones. Instead, the smooth fields are evaluated ONCE into three fragment
+ * volumes plus a small vertex-displacement volume, while the high-frequency
+ * mineral and sharp-crust registers are baked into seamless mipmapped 2D
+ * tiles. The live shader pays filtered texture taps instead of repeated
+ * noise walks.
  *
  * Storage is a 2D atlas of Z slices rather than a 3D texture: a single
  * fullscreen pass bakes a whole volume, plain 2D sampling reads it back, and
@@ -46,9 +48,9 @@ const DISP_SIZE = 64;
 const DISP_COLS = 8;
 const DISP_ROWS = 8;
 
-const { bakeGlow, bakeSurfaceA, bakeSurfaceB, bakeWarp, bakeDisplacement } = tslExports(
+const { bakeGlow, bakeSurfaceA, bakeSurfaceB, bakeDisplacement, bakeMicroDetail, bakeSharpDetail } = tslExports(
   lavaModule,
-  ["bakeGlow", "bakeSurfaceA", "bakeSurfaceB", "bakeWarp", "bakeDisplacement"]
+  ["bakeGlow", "bakeSurfaceA", "bakeSurfaceB", "bakeDisplacement", "bakeMicroDetail", "bakeSharpDetail"]
 );
 
 export interface LavaFieldVolumes {
@@ -58,10 +60,12 @@ export interface LavaFieldVolumes {
   readonly surfaceA: THREE.Texture;
   /** x = tone, y = oxide, z = fine crevice mask, w = iridescence. */
   readonly surfaceB: THREE.Texture;
-  /** xyz = lavaDomain warp offset, biased (offset/0.9 + 0.5). */
-  readonly warp: THREE.Texture;
   /** x = combined vertex displacement, encoded (raw + 0.4) / 0.9. */
   readonly displacement: THREE.Texture;
+  /** Seamless RGBA16F tile: grain, d/du, d/dv, and frozen-flow streaks. */
+  readonly microDetail: THREE.Texture;
+  /** Seamless RGBA16F tile: scabs, d/du, d/dv, and sharp cavities. */
+  readonly sharpDetail: THREE.Texture;
   dispose(): void;
 }
 
@@ -225,10 +229,63 @@ async function bakeAtlas(
 }
 
 /**
- * Bake all four field volumes. One-time cost roughly comparable to a couple
- * of frames of the old per-fragment material; every frame after is texture
- * taps. `timeNode` freezes the fields at its current value — the slow domain
- * drift is baked in, the breathing pulse stays live in the material.
+ * Bake a high-frequency periodic register into one mipmapped 2D tile.
+ * RGBA16F plus the full mip chain occupies approximately 10.7 MiB.
+ */
+async function bakePeriodicDetailTile(
+  renderer: THREE.WebGPURenderer,
+  field: (tileUv: TslNode) => TslNode,
+  label: string
+): Promise<{ target: THREE.RenderTarget; texture: THREE.Texture }> {
+  const target = new THREE.RenderTarget(1024, 1024, {
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    depthBuffer: false,
+    generateMipmaps: true,
+  });
+  target.texture.name = label;
+  target.texture.colorSpace = THREE.NoColorSpace;
+  target.texture.minFilter = THREE.LinearMipmapLinearFilter;
+  target.texture.magFilter = THREE.LinearFilter;
+  target.texture.wrapS = THREE.RepeatWrapping;
+  target.texture.wrapT = THREE.RepeatWrapping;
+
+  const material = new THREE.MeshBasicNodeMaterial();
+  // Render-target rows run opposite the authored texture-v direction. Bake
+  // with the same explicit flip as the volume atlas so derivatives retain
+  // their authored signs when the texture is sampled later.
+  const bakeUv = vec2(uv().x, uv().y.oneMinus());
+  material.fragmentNode = field(bakeUv);
+  material.blending = THREE.NoBlending;
+  const scene = new THREE.Scene();
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  scene.add(quad);
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  const previousTarget = renderer.getRenderTarget();
+  const previousToneMapping = renderer.toneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.setRenderTarget(target);
+  try {
+    await renderer.renderAsync(scene, camera);
+  } catch (error) {
+    target.dispose();
+    throw error;
+  } finally {
+    renderer.setRenderTarget(previousTarget);
+    renderer.toneMapping = previousToneMapping;
+    quad.geometry.dispose();
+    material.dispose();
+  }
+  return { target, texture: target.texture };
+}
+
+/**
+ * Bake all field volumes and the seamless detail tiles. One-time cost
+ * roughly comparable to a couple of frames of the old per-fragment material;
+ * every frame after is texture taps. `timeNode` freezes the fields at its
+ * current value — the slow domain drift is baked in, the breathing pulse stays
+ * live in the material.
  */
 export async function bakeLavaVolumes(
   renderer: THREE.WebGPURenderer,
@@ -241,7 +298,6 @@ export async function bakeLavaVolumes(
     { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeGlow({ position: p, t }), label: "lava-bake-glow" },
     { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeSurfaceA({ position: p, t }), label: "lava-bake-surface-a" },
     { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeSurfaceB({ position: p, t }), label: "lava-bake-surface-b" },
-    { shape: FRAGMENT_SHAPE, field: (p: TslNode) => bakeWarp({ position: p, t }), label: "lava-bake-warp" },
     { shape: DISP_SHAPE, field: (p: TslNode) => bakeDisplacement({ position: p, t }), label: "lava-bake-displacement" },
   ] as const;
 
@@ -251,19 +307,32 @@ export async function bakeLavaVolumes(
       const baked = await bakeAtlas(renderer, pass.shape, pass.field, pass.label);
       targets.push(baked.target);
     }
+    const microDetail = await bakePeriodicDetailTile(
+      renderer,
+      (tileUv) => bakeMicroDetail({ tileUv }),
+      "lava-bake-micro-detail"
+    );
+    targets.push(microDetail.target);
+    const sharpDetail = await bakePeriodicDetailTile(
+      renderer,
+      (tileUv) => bakeSharpDetail({ tileUv }),
+      "lava-bake-sharp-detail"
+    );
+    targets.push(sharpDetail.target);
   } catch (error) {
     // A later bake failing must not leak the earlier atlases.
     for (const target of targets) target.dispose();
     throw error;
   }
 
-  const [glow, surfaceA, surfaceB, warp, displacement] = targets;
+  const [glow, surfaceA, surfaceB, displacement, microDetail, sharpDetail] = targets;
   return {
     glow: glow.texture,
     surfaceA: surfaceA.texture,
     surfaceB: surfaceB.texture,
-    warp: warp.texture,
     displacement: displacement.texture,
+    microDetail: microDetail.texture,
+    sharpDetail: sharpDetail.texture,
     dispose() {
       for (const target of targets) target.dispose();
     },

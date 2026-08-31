@@ -27,6 +27,8 @@ export interface DemoSceneOptions {
 export interface DemoScene {
   readonly scene: THREE.Scene;
   readonly mesh: THREE.Mesh;
+  /** Parent transformed by automatic spin and pointer orbit. */
+  readonly rotationRoot: THREE.Group;
   /** Swap the demo geometry in place; the material and spin state carry over. */
   setMesh(kind: DemoMeshKind): void;
 }
@@ -45,7 +47,7 @@ function demoGeometry(kind: DemoMeshKind): {
   // that no longer runs.
   if (kind === "knot")
     return {
-      geometry: new THREE.TorusKnotGeometry(1, 0.38, 300, 48),
+      geometry: new THREE.TorusKnotGeometry(0.74, 0.28, 300, 48),
       tiltX: 0,
     };
   if (kind === "plane")
@@ -53,7 +55,7 @@ function demoGeometry(kind: DemoMeshKind): {
       geometry: new THREE.PlaneGeometry(4.4, 4.4, 192, 192),
       tiltX: -1.05,
     };
-  return { geometry: new THREE.IcosahedronGeometry(1.45, 64), tiltX: 0 };
+  return { geometry: new THREE.IcosahedronGeometry(1.45, 32), tiltX: 0 };
 }
 
 export function buildDemoMesh(kind: DemoMeshKind, material: THREE.Material): THREE.Mesh {
@@ -88,13 +90,16 @@ export async function createDemoScene(options: DemoSceneOptions): Promise<DemoSc
   if (options.glowIntensity !== undefined) lava.glowIntensity.value = options.glowIntensity;
 
   const mesh = buildDemoMesh(options.mesh ?? "sphere", lava.material);
-  scene.add(mesh);
+  const rotationRoot = new THREE.Group();
+  rotationRoot.add(mesh);
+  scene.add(rotationRoot);
   return {
     scene,
     mesh,
+    rotationRoot,
     setMesh(kind) {
-      // Same Mesh object throughout, so the render loop's accumulated spin and
-      // the material stay put; only the geometry and the framing tilt change.
+      // Same Mesh and rotation root throughout, so the material and accumulated
+      // object orientation stay put; only geometry and framing tilt change.
       const { geometry, tiltX } = demoGeometry(kind);
       mesh.geometry.dispose();
       mesh.geometry = geometry;

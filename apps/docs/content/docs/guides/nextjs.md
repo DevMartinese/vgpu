@@ -200,6 +200,7 @@ Then prove the pixels in Node instead of squinting at a browser tab: [Getting st
 
 ## See also
 
+- [Using vgpu WGSL modules with three.js](/guides/threejs) — connect loader-resolved pure WGSL functions to three.js TSL node materials with the example reference helper
 - `npx vgpu docs cat /@vgpu/wgsl/loader-webpack/index.docs.md` — every loader option
 - `npx vgpu docs cat /@vgpu/wgsl/loader-vite/index.docs.md` — the Vite plugin
 - `npx vgpu docs cat /@vgpu/wgsl/runtime/resolve-shader.docs.md` — resolving import graphs without a bundler

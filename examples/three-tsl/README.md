@@ -10,21 +10,23 @@ The preview is rendered headless in Node by `pnpm previews`
 (`scripts/generate-previews.ts`): `vgpu/node` creates the Dawn-backed WebGPU
 device, three's `WebGPURenderer` receives that same `GPUDevice` (plus stub
 canvas/context and a handful of browser-global shims), and the frame is read
-back from a `RenderTarget` through the post chain — no browser involved.
+back from a `RenderTarget` through an output-transform-only chain — no browser
+involved.
 The environment needs a Vulkan ICD for Dawn (see `@vgpu/adapter-node`'s
 system requirements: `VK_ICD_FILENAMES`, `XDG_RUNTIME_DIR`,
 `VGPU_DAWN_FLAGS=backend=vulkan`).
 
 ```
-src/noise.wgsl         shared value noise / fbm / ridged noise module
+src/noise.wgsl         shared value/fbm noise plus bake-only periodic 2D noise
 src/lava.wgsl          heat, crust, sink, and blackbody fields; uses
                        @vgpu/wgsl-std voronoi3d + noise.wgsl
 src/wgsl-tsl.ts        tslExports(): loader output -> callable wgslFn TSL nodes
 src/lava-material.ts   physical material: emissive cracks, bump normals, and
                        vertex relief all driven by lava.wgsl
 src/scenes.ts          shared scene/lights/mesh builders
+src/object-drag-controls.ts  damped object rotation with a fixed render camera
 src/main.ts            lava scene (sphere by default, lil-gui mesh picker), WebGPURenderer
-src/bake-lava.ts       one-time bake of the procedural fields into slice-atlas volumes
+src/bake-lava.ts       one-time field-volume + seamless detail texture bakes
 src/harness.ts         offscreen render smoke check (also runs headless)
 scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
 scripts/field-viz.ts          renders lava.wgsl fields to PNGs with pure vgpu
@@ -58,9 +60,11 @@ TSL nodes:
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
-  clinkery rubble elsewhere, and clustered vesicle pits; sampled once for
-  shading and three more times by finite differences in TSL to build
-  `normalNode` bump detail.
+  clinkery rubble elsewhere, and clustered vesicle pits. Its smooth register
+  comes from the field volumes; sharp scabs, seams, vesicle pits, mineral
+  grain, flow streaks, and their gradients come from two seamless mipmapped
+  `RGBA16F` tiles sampled triplanarly. This replaces the live sharp register's
+  nine Voronoi evaluations and clustered fBm with three filtered texture taps.
 - `crustSurface` — one `vec4f` of shading masks (tone mottling, oxide
   staining, glassy-skin mask, vesicle pits) driving albedo, roughness
   variation, and a clearcoat "volcanic glass" sheen.
@@ -81,14 +85,17 @@ TSL nodes:
 Lighting is image-based: a CC0 Poly Haven night HDRI (via `@pmndrs/assets`)
 drives `scene.environment` and the backdrop, plus a cool moonlight key and a
 faint warm floor bounce standing in for the glow lighting the crust back.
-The lava scene renders through `THREE.PostProcessing` with an HDR bloom
-(`three/addons/tsl/display/BloomNode.js`) thresholded above anything the
-crust can reflect, so only the incandescent melt blooms.
+The interactive lava scene renders directly to the WebGPU canvas, without a
+bloom or fullscreen post-processing pass. ACES tone mapping still runs as the
+renderer output transform. The render camera stays fixed. Three's object-native
+DragControls supplies stable mouse/touch rotation, while the displayed
+quaternion eases toward the dragged target. Automatic rotation is time-based,
+so its speed is stable across different frame rates.
 
 Note on the harness: rendering straight into a `RenderTarget` skips tone
 mapping and sRGB encoding (three treats targets as linear intermediates),
-while the `PostProcessing` chain bakes the full output transform — so
-harness screenshots match the on-screen image only on the post path
+while the offscreen `PostProcessing` helper bakes the full output transform —
+so harness screenshots match the on-screen image only on the post path
 (`?post=0` reads back linear and darker).
 
 ## How the bridge works

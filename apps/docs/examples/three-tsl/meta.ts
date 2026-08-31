@@ -3,7 +3,7 @@ export const meta = {
   title: "WGSL in three.js",
   description:
     "Author a procedural lava material as plain WGSL modules and wire them into a three.js node material — twelve surface slots, all driven from shader source.",
-  tags: ["3d", "shader", "lighting", "hdr", "bloom", "post-processing"],
+  tags: ["3d", "shader", "lighting", "hdr"],
   capabilities: [
     "webgpu",
     "pointer-orbit",
@@ -18,12 +18,12 @@ export const meta = {
   files: [
     "index.tsx",
     "renderer.ts",
+    "object-drag-controls.ts",
     "scenes.ts",
     "lava-material.ts",
     "bake-lava.ts",
     "wgsl-tsl.ts",
     "environment.ts",
-    "post.ts",
     "lava.wgsl",
     "noise.wgsl",
   ],

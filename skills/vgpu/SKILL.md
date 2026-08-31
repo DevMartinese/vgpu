@@ -6,8 +6,8 @@ description: >-
   and /perf only as slim tooling subpaths. Bundles performance guides and the API
   reference; load one doc at a time.
 vgpuVersion: 0.3.1
-gitSha: b667512ade13b3dd946be11cf68e93b381d3b4cf
-generatedAt: 2026-08-28T17:34:48.547Z
+gitSha: 93ba1195f9ed2c6aa09baff0b1e9e82608b5935e
+generatedAt: 2026-08-31T17:31:34.289Z
 ---
 
 # vgpu
@@ -66,6 +66,7 @@ Writing or optimizing a shader? Read **performance-model** first, then the rest 
 - **Shader diagnostics and fix-its** — Use these messages as the self-correction map for generated shader code.  `references/guides/shader-fix-its.docs.md`
 - **The default workflow for developing shaders with vgpu** — Follow these eight steps in order every time you write or change a shader.  `references/guides/shader-workflow.docs.md`
 - **Practical texture-format matrix** — Choose a target format from the operations it must support, not just its channel precision.  `references/guides/texture-formats.docs.md`
+- **Using vgpu WGSL modules with three.js** — vgpu's WGSL loader can flatten a reusable WGSL module graph into ordinary WGSL, while three.js TSL can call a WGSL function from a node material.  `references/guides/threejs.docs.md`
 - **Two-pass rendering: offscreen depth target composited to the canvas** — Surfaces and canvases have no depth buffer, and Draws need one for any real 3D scene.  `references/guides/two-pass-rendering.docs.md`
 
 ## API reference

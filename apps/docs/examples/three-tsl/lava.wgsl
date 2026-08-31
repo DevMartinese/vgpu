@@ -1,4 +1,4 @@
-import { fbm3, perlin3, turbulence3, valueNoise3 } from "./noise.wgsl";
+import { fbm3, periodicFbm2, periodicPerlin2, periodicTurbulence2, periodicVoronoi2, perlin3, turbulence3, valueNoise3 } from "./noise.wgsl";
 import { voronoi3d } from "@vgpu/wgsl-std/noise";
 import { pcg3d, unitFloat } from "@vgpu/wgsl-std/hash";
 
@@ -181,21 +181,133 @@ export fn bakeSurfaceB(position: vec3f, t: f32) -> vec4f {
   return vec4f(surface.x, surface.y, crevice, crustPbr(position, t).y);
 }
 
-// xyz = the lavaDomain warp offset, biased into 0..1 (offset spans +-0.45).
-// Low-frequency by construction (fbm at 1.1 cycles/unit), so it bakes
-// losslessly — this is what lets the live sharp registers skip the nine fbm
-// evaluations the warp used to cost.
-export fn bakeWarp(position: vec3f, t: f32) -> vec4f {
-  let offset = lavaDomain(position, t) - position;
-  return vec4f(offset / 0.9 + vec3f(0.5), 1.0);
-}
-
 // Vertex displacement, already combined the way the material applied it
 // (relief bulge minus channel sink), biased into 0..1 for rgba8 storage.
 // The live decode is (x * 0.9 - 0.4) * 0.12.
 export fn bakeDisplacement(position: vec3f, t: f32) -> vec4f {
   let raw = crustRelief(position, t) * 0.5 - lavaSink(position, t) * 0.4;
   return vec4f(clamp((raw + 0.4) / 0.9, 0.0, 1.0), 0.0, 0.0, 1.0);
+}
+
+// Seamless 2D micro-detail tile. R is the four-octave mineral grain, GB are
+// its derivatives with respect to normalized tile UV, and A is a single
+// Perlin register sampled separately with the live streak anisotropy. The
+// expensive central differences happen once here instead of per fragment.
+const MICRO_TILE_SIZE: f32 = 1024.0;
+const MICRO_GRAIN_PERIOD: i32 = 48;
+const MICRO_STREAK_PERIOD: i32 = 64;
+// Fixed from a 512^2 field-stat comparison against the former live 3D
+// register: value mean/std and streak contrast land within 5%, while the raw
+// derivative already matches the former bump RMS within 2%.
+const MICRO_GRAIN_VALUE_SCALE: f32 = 0.8827;
+const MICRO_GRAIN_VALUE_BIAS: f32 = -0.0093;
+const MICRO_STREAK_CONTRAST: f32 = 0.83;
+
+fn bakedMicroGrain(tileUv: vec2f) -> f32 {
+  let period = vec2i(MICRO_GRAIN_PERIOD);
+  return periodicTurbulence2(tileUv * f32(MICRO_GRAIN_PERIOD), period, 4u);
+}
+
+fn bakedMicroStreak(tileUv: vec2f) -> f32 {
+  let period = vec2i(MICRO_STREAK_PERIOD);
+  let raw = periodicPerlin2(tileUv * f32(MICRO_STREAK_PERIOD), period);
+  return clamp(raw * 0.5 + 0.5, 0.0, 1.0);
+}
+
+export fn bakeMicroDetail(tileUv: vec2f) -> vec4f {
+  let epsilon = 1.0 / MICRO_TILE_SIZE;
+  let dx = vec2f(epsilon, 0.0);
+  let dy = vec2f(0.0, epsilon);
+  let grain = bakedMicroGrain(tileUv);
+  let derivative = vec2f(
+    bakedMicroGrain(tileUv + dx) - bakedMicroGrain(tileUv - dx),
+    bakedMicroGrain(tileUv + dy) - bakedMicroGrain(tileUv - dy),
+  ) / (2.0 * epsilon);
+  let calibratedGrain = clamp(grain * MICRO_GRAIN_VALUE_SCALE + MICRO_GRAIN_VALUE_BIAS, 0.0, 1.0);
+  let calibratedStreak = clamp((bakedMicroStreak(tileUv) - 0.5) * MICRO_STREAK_CONTRAST + 0.5, 0.0, 1.0);
+  return vec4f(calibratedGrain, derivative, calibratedStreak);
+}
+
+// Seamless sharp-crust tile over a four-unit object-space period. R stores
+// the combined scab height, GB its derivatives with respect to normalized
+// tile UV, and A the union of vesicle pits and coarse flake seams. The
+// 34-cell coarse register preserves the former warped field's effective
+// frequency (6.5 * 1.3), while 64 and 104 cells preserve the fine flakes and
+// vesicles exactly over the four-unit tile.
+const SHARP_TILE_SIZE: f32 = 1024.0;
+const SHARP_COARSE_PERIOD: i32 = 34;
+const SHARP_FINE_PERIOD: i32 = 64;
+const SHARP_PIT_PERIOD: i32 = 104;
+const SHARP_CLUSTER_PERIOD: i32 = 6;
+const SHARP_WARP_PERIOD: i32 = 5;
+
+fn periodicFlakes2(position: vec2f, period: i32) -> vec2f {
+  let sample = periodicVoronoi2(position, vec2i(period));
+  let crack = smoothstep(0.14, 0.02, sample.y - sample.x);
+  return vec2f(sample.z * (1.0 - crack * 0.75), crack);
+}
+
+fn bakedSharpWarp(tileUv: vec2f) -> vec2f {
+  let period = vec2i(SHARP_WARP_PERIOD);
+  let position = tileUv * f32(SHARP_WARP_PERIOD);
+  return vec2f(
+    periodicFbm2(position + vec2f(2.3, 7.1), period, 3u),
+    periodicFbm2(position.yx + vec2f(9.7, 1.9), period.yx, 3u),
+  );
+}
+
+fn bakedSharpFields(tileUv: vec2f) -> vec2f {
+  // A sub-cell periodic warp keeps the coarsest Voronoi from looking like a
+  // regular 2D diagram without changing the exact tile boundary.
+  let coarsePosition = tileUv * f32(SHARP_COARSE_PERIOD)
+    + (bakedSharpWarp(tileUv) - 0.5) * 1.7;
+  let coarse = periodicFlakes2(coarsePosition, SHARP_COARSE_PERIOD);
+  let fine = periodicFlakes2(
+    tileUv * f32(SHARP_FINE_PERIOD) + vec2f(13.0, 5.0),
+    SHARP_FINE_PERIOD,
+  );
+  let scabs = coarse.x * 0.16 + fine.x * 0.08;
+
+  // A 2D Voronoi disk covers more area than a random plane through the old
+  // 3D vesicle field, so the radius is reduced to preserve its sparse look.
+  let pitSample = periodicVoronoi2(
+    tileUv * f32(SHARP_PIT_PERIOD) + vec2f(9.0, 27.0),
+    vec2i(SHARP_PIT_PERIOD),
+  );
+  let cluster = smoothstep(
+    0.52,
+    0.68,
+    periodicFbm2(
+      tileUv * f32(SHARP_CLUSTER_PERIOD) + vec2f(9.0, 27.0),
+      vec2i(SHARP_CLUSTER_PERIOD),
+      3u,
+    ),
+  );
+  let pits = smoothstep(0.065, 0.018, pitSample.x) * cluster;
+  return vec2f(scabs, max(pits, coarse.y * 0.55));
+}
+
+fn bakedSharpScabs(tileUv: vec2f) -> f32 {
+  let coarsePosition = tileUv * f32(SHARP_COARSE_PERIOD)
+    + (bakedSharpWarp(tileUv) - 0.5) * 1.7;
+  let coarse = periodicFlakes2(coarsePosition, SHARP_COARSE_PERIOD);
+  let fine = periodicFlakes2(
+    tileUv * f32(SHARP_FINE_PERIOD) + vec2f(13.0, 5.0),
+    SHARP_FINE_PERIOD,
+  );
+  return coarse.x * 0.16 + fine.x * 0.08;
+}
+
+export fn bakeSharpDetail(tileUv: vec2f) -> vec4f {
+  let epsilon = 1.0 / SHARP_TILE_SIZE;
+  let dx = vec2f(epsilon, 0.0);
+  let dy = vec2f(0.0, epsilon);
+  let fields = bakedSharpFields(tileUv);
+  let derivative = vec2f(
+    bakedSharpScabs(tileUv + dx) - bakedSharpScabs(tileUv - dx),
+    bakedSharpScabs(tileUv + dy) - bakedSharpScabs(tileUv - dy),
+  ) / (2.0 * epsilon);
+  return vec4f(fields.x, derivative, fields.y);
 }
 
 // Wide, smooth channel mask for vertex displacement: 1 inside molten
@@ -264,7 +376,7 @@ export fn crustRelief(position: vec3f, t: f32) -> f32 {
 // The smooth half of crustHeight: domes, rubble and ropes, but no flaky
 // scabs and no vesicle pits. This is what the bake stores — the scabs and
 // pits are far too fine for the volume (seam masks are fractions of a texel)
-// and are re-added live by sharpScabs/sharpDetail.
+// and are re-added from the seamless sharp-detail tile.
 export fn crustHeightSmooth(position: vec3f, t: f32) -> f32 {
   let domain = lavaDomain(position, t);
   let dome = smoothstep(0.0, 0.45, plateEdge(domain * 0.75));
@@ -272,33 +384,6 @@ export fn crustHeightSmooth(position: vec3f, t: f32) -> f32 {
   let rough = turbulence3(domain * 4.2, 6u) * 0.14;
   let ropes = ropeFolds(domain) * lobes * 0.38;
   return clamp(dome * 0.45 + rough + ropes + 0.08, 0.0, 1.0);
-}
-
-// Live sharp registers over the baked smooth fields. Their only expensive
-// dependency was the lavaDomain warp, which is low-frequency and comes in
-// pre-baked as an offset; everything else is a handful of voronoi/hash
-// evaluations — cheap next to the hundreds of noise taps the old material
-// paid, and impossible to store in a 128^3 volume without aliasing away.
-//
-// The flake plateau field for bump finite-differences (2 voronoi).
-export fn sharpScabs(position: vec3f, warpOffset: vec3f) -> f32 {
-  let domain = position + warpOffset;
-  let flakeCoarse = flakes(position + domain * 0.3, 6.5);
-  let flakeFine = flakes(position.zxy + vec3f(13.0, 5.0, 31.0), 16.0);
-  return flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
-}
-
-// Base-tap sharp registers: x = scab height (same as sharpScabs), y = the
-// cavity mask (vesicle pits + flake seams) that darkens color and roughness,
-// z = vesicle pits alone (for occlusion and the height dent).
-export fn sharpDetail(position: vec3f, warpOffset: vec3f) -> vec3f {
-  let domain = position + warpOffset;
-  let flakeCoarse = flakes(position + domain * 0.3, 6.5);
-  let flakeFine = flakes(position.zxy + vec3f(13.0, 5.0, 31.0), 16.0);
-  let scabs = flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
-  let pits = vesiclePits(position);
-  let cavities = max(pits, flakeCoarse.y * 0.55);
-  return vec3f(scabs, cavities, pits);
 }
 
 // Crust relief height, 0..1: domed plates that sink toward the cracks,
@@ -315,18 +400,6 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let scabs = flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
   let pits = vesiclePits(position) * 0.08;
   return clamp(dome * 0.45 + rough + ropes + scabs - pits + 0.08, 0.0, 1.0);
-}
-
-// High-frequency surface detail, cheap enough to finite-difference at a
-// small epsilon for micro normals:
-// x = sharp mineral grain, y = flow-line streaks frozen into the glassy skin.
-// Four octaves, not five: this register stays live in the baked material
-// (its wavelength sits past the volume resolution), and the finest octave
-// was already fading under the band-limit before it cost anything.
-export fn microDetail(position: vec3f) -> vec2f {
-  let grain = turbulence3(position * 19.0, 4u);
-  let streaks = perlin3(position * vec3f(24.0, 7.0, 24.0) + vec3f(4.0, 8.0, 15.0));
-  return vec2f(grain, streaks);
 }
 
 // PBR refinement masks:

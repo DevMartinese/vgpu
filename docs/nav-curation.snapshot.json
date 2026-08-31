@@ -92,6 +92,13 @@
         ]
       },
       {
+        "title": "Integrations",
+        "slugs": [
+          "threejs",
+          "nextjs"
+        ]
+      },
+      {
         "title": "Performance",
         "slugs": [
           "performance-model",
@@ -131,6 +138,7 @@
       "  ",
       "    Overview @ /guides",
       "  General",
+      "  Integrations",
       "  Performance",
       "  Testing",
       "  ...",

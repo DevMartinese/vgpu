@@ -1,8 +1,7 @@
 import * as THREE from "three/webgpu";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GUI } from "three/addons/libs/lil-gui.module.min.js";
+import { createObjectDragControls } from "./object-drag-controls.ts";
 import { createDemoCamera, createDemoScene, DEMO_MESH_KINDS, type DemoMeshKind } from "./scenes.ts";
-import { createBloomPipeline } from "./post.ts";
 
 async function main(): Promise<void> {
   if (navigator.gpu === undefined) {
@@ -11,14 +10,14 @@ async function main(): Promise<void> {
   }
 
   const renderer = new THREE.WebGPURenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio, 1), 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.querySelector("#app")!.append(renderer.domElement);
   await renderer.init();
 
   const demo = await createDemoScene({ renderer });
-  const { scene, mesh } = demo;
+  const { scene } = demo;
   const camera = createDemoCamera(window.innerWidth / window.innerHeight);
 
   const gui = new GUI({ title: "lava" });
@@ -27,10 +26,11 @@ async function main(): Promise<void> {
     .add(settings, "mesh", [...DEMO_MESH_KINDS])
     .onChange((kind: DemoMeshKind) => demo.setMesh(kind));
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-
-  const postProcessing = createBloomPipeline(renderer, scene, camera);
+  const controls = createObjectDragControls(
+    camera,
+    demo.rotationRoot,
+    renderer.domElement
+  );
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -38,10 +38,9 @@ async function main(): Promise<void> {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  renderer.setAnimationLoop(() => {
-    mesh.rotation.y += 0.0012;
-    controls.update();
-    postProcessing.render();
+  renderer.setAnimationLoop((time) => {
+    controls.update(time);
+    renderer.render(scene, camera);
   });
 }
 

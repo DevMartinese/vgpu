@@ -5,11 +5,11 @@
 // Query params: ?mesh=sphere|knot|plane  &t=<seconds, fixed frame time>
 //               &size=<pixels>  &dist=<camera distance>
 //               &glow=<emissive intensity>  &light=<key light multiplier>
-//               &post=0 (linear readback, no bloom)
+//               &post=0 (linear readback, no output transform)
 import * as THREE from "three/webgpu";
 import { float } from "three/tsl";
 import { createDemoCamera, createDemoScene, type DemoMeshKind } from "./scenes.ts";
-import { createBloomPipeline } from "./post.ts";
+import { createOutputPipeline } from "./post.ts";
 
 declare global {
   interface Window { __result?: unknown }
@@ -44,13 +44,13 @@ async function run(): Promise<unknown> {
   camera.position.set(0, (1.2 * dist) / 4.2, dist);
   camera.lookAt(0, 0, 0);
 
-  // With the bloom chain, MSAA lives on the scene pass; the final quad
-  // composite needs no samples of its own.
+  // With the output chain, MSAA lives on the scene pass; the final output
+  // transform needs no samples of its own.
   const withPost = params.get("post") !== "0";
   const target = new THREE.RenderTarget(size, size, { samples: withPost ? 1 : 4 });
   renderer.setRenderTarget(target);
   if (withPost) {
-    const postProcessing = createBloomPipeline(renderer, scene, camera);
+    const postProcessing = createOutputPipeline(renderer, scene, camera);
     await postProcessing.renderAsync();
   } else {
     await renderer.renderAsync(scene, camera);
