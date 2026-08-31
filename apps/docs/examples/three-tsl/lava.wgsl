@@ -1,4 +1,4 @@
-import { fbm3, perlin3, turbulence3, valueNoise3 } from "./noise.wgsl";
+import { fbm3, periodicPerlin2, periodicTurbulence2, perlin3, turbulence3, valueNoise3 } from "./noise.wgsl";
 import { voronoi3d } from "@vgpu/wgsl-std/noise";
 import { pcg3d, unitFloat } from "@vgpu/wgsl-std/hash";
 
@@ -198,6 +198,45 @@ export fn bakeDisplacement(position: vec3f, t: f32) -> vec4f {
   return vec4f(clamp((raw + 0.4) / 0.9, 0.0, 1.0), 0.0, 0.0, 1.0);
 }
 
+// Seamless 2D micro-detail tile. R is the four-octave mineral grain, GB are
+// its derivatives with respect to normalized tile UV, and A is a single
+// Perlin register sampled separately with the live streak anisotropy. The
+// expensive central differences happen once here instead of per fragment.
+const MICRO_TILE_SIZE: f32 = 1024.0;
+const MICRO_GRAIN_PERIOD: i32 = 48;
+const MICRO_STREAK_PERIOD: i32 = 64;
+// Fixed from a 512^2 field-stat comparison against the former live 3D
+// register: value mean/std and streak contrast land within 5%, while the raw
+// derivative already matches the former bump RMS within 2%.
+const MICRO_GRAIN_VALUE_SCALE: f32 = 0.8827;
+const MICRO_GRAIN_VALUE_BIAS: f32 = -0.0093;
+const MICRO_STREAK_CONTRAST: f32 = 0.83;
+
+fn bakedMicroGrain(tileUv: vec2f) -> f32 {
+  let period = vec2i(MICRO_GRAIN_PERIOD);
+  return periodicTurbulence2(tileUv * f32(MICRO_GRAIN_PERIOD), period, 4u);
+}
+
+fn bakedMicroStreak(tileUv: vec2f) -> f32 {
+  let period = vec2i(MICRO_STREAK_PERIOD);
+  let raw = periodicPerlin2(tileUv * f32(MICRO_STREAK_PERIOD), period);
+  return clamp(raw * 0.5 + 0.5, 0.0, 1.0);
+}
+
+export fn bakeMicroDetail(tileUv: vec2f) -> vec4f {
+  let epsilon = 1.0 / MICRO_TILE_SIZE;
+  let dx = vec2f(epsilon, 0.0);
+  let dy = vec2f(0.0, epsilon);
+  let grain = bakedMicroGrain(tileUv);
+  let derivative = vec2f(
+    bakedMicroGrain(tileUv + dx) - bakedMicroGrain(tileUv - dx),
+    bakedMicroGrain(tileUv + dy) - bakedMicroGrain(tileUv - dy),
+  ) / (2.0 * epsilon);
+  let calibratedGrain = clamp(grain * MICRO_GRAIN_VALUE_SCALE + MICRO_GRAIN_VALUE_BIAS, 0.0, 1.0);
+  let calibratedStreak = clamp((bakedMicroStreak(tileUv) - 0.5) * MICRO_STREAK_CONTRAST + 0.5, 0.0, 1.0);
+  return vec4f(calibratedGrain, derivative, calibratedStreak);
+}
+
 // Wide, smooth channel mask for vertex displacement: 1 inside molten
 // channels and pools, 0 on plate interiors. Kept low-frequency so coarse
 // meshes sample it without stippling.
@@ -315,18 +354,6 @@ export fn crustHeight(position: vec3f, t: f32) -> f32 {
   let scabs = flakeCoarse.x * 0.16 + flakeFine.x * 0.08;
   let pits = vesiclePits(position) * 0.08;
   return clamp(dome * 0.45 + rough + ropes + scabs - pits + 0.08, 0.0, 1.0);
-}
-
-// High-frequency surface detail, cheap enough to finite-difference at a
-// small epsilon for micro normals:
-// x = sharp mineral grain, y = flow-line streaks frozen into the glassy skin.
-// Four octaves, not five: this register stays live in the baked material
-// (its wavelength sits past the volume resolution), and the finest octave
-// was already fading under the band-limit before it cost anything.
-export fn microDetail(position: vec3f) -> vec2f {
-  let grain = turbulence3(position * 19.0, 4u);
-  let streaks = perlin3(position * vec3f(24.0, 7.0, 24.0) + vec3f(4.0, 8.0, 15.0));
-  return vec2f(grain, streaks);
 }
 
 // PBR refinement masks:

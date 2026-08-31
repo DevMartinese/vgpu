@@ -6,9 +6,11 @@ import {
   normalLocal,
   positionLocal,
   smoothstep,
+  texture,
   time,
   transformNormalToView,
   uniform,
+  vec2,
   vec3,
 } from "three/tsl";
 import type { ShaderNodeObject } from "three/tsl";
@@ -21,9 +23,8 @@ import {
   type LavaFieldVolumes,
 } from "./bake-lava.ts";
 
-const { blackbody, microDetail, perlin3, sharpDetail, sharpScabs } = tslExports(lavaModule, [
+const { blackbody, perlin3, sharpDetail, sharpScabs } = tslExports(lavaModule, [
   "blackbody",
-  "microDetail",
   "perlin3",
   "sharpDetail",
   "sharpScabs",
@@ -89,12 +90,57 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   const crevice = surfaceB.z;
   const irid = surfaceB.w;
 
-  // High-frequency surface detail stays live — mineral grain and streaks at
-  // 19-24 cycles/unit, and the sharp crust structure (flaky scabs, seams,
-  // vesicle pits) whose seam masks are fractions of a volume texel.
-  const micro = microDetail({ position: p });
-  const grain = micro.x;
-  const streaks = micro.y;
+  // High-frequency mineral grain is a seamless, mipmapped 2D bake sampled
+  // triplanarly. RGB is sampled at the original 19-cycle grain frequency;
+  // alpha is sampled separately so the streak register retains its authored
+  // 24/7/24 anisotropy. Six filtered taps replace the live four-octave noise
+  // plus its three finite-difference evaluations.
+  const weightsRaw = normalLocal.abs().pow(8).toVar();
+  const weights = weightsRaw.div(weightsRaw.x.add(weightsRaw.y).add(weightsRaw.z));
+  const phaseX = vec2(0.17, 0.53);
+  const phaseY = vec2(0.61, 0.11);
+  const phaseZ = vec2(0.37, 0.79);
+  const grainScale = 19 / 48;
+  const grainX = texture(volumes.microDetail, p.yz.mul(grainScale).add(phaseX));
+  const grainY = texture(volumes.microDetail, p.xz.mul(grainScale).add(phaseY));
+  const grainZ = texture(volumes.microDetail, p.xy.mul(grainScale).add(phaseZ));
+  const grain = grainX.x.mul(weights.x)
+    .add(grainY.x.mul(weights.y))
+    .add(grainZ.x.mul(weights.z));
+
+  const streakPeriod = 64;
+  const streakX = texture(
+    volumes.microDetail,
+    p.yz.mul(vec2(7 / streakPeriod, 24 / streakPeriod))
+      .add(vec2(8 / streakPeriod, 15 / streakPeriod))
+      .add(phaseX)
+  ).w;
+  const streakY = texture(
+    volumes.microDetail,
+    p.xz.mul(vec2(24 / streakPeriod, 24 / streakPeriod))
+      .add(vec2(4 / streakPeriod, 15 / streakPeriod))
+      .add(phaseY)
+  ).w;
+  const streakZ = texture(
+    volumes.microDetail,
+    p.xy.mul(vec2(24 / streakPeriod, 7 / streakPeriod))
+      .add(vec2(4 / streakPeriod, 8 / streakPeriod))
+      .add(phaseZ)
+  ).w;
+  const streaks = streakX.mul(weights.x)
+    .add(streakY.mul(weights.y))
+    .add(streakZ.mul(weights.z));
+
+  // GB stores d(grain)/d(tile uv). Apply the coordinate chain rule for the
+  // object-space grain coordinates, then blend the projection gradients.
+  const microGrad = vec3(0, grainX.y, grainX.z).mul(weights.x)
+    .add(vec3(grainY.y, 0, grainY.z).mul(weights.y))
+    .add(vec3(grainZ.y, grainZ.z, 0).mul(weights.z))
+    .mul(grainScale);
+  const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
+
+  // Sharp crust structure (flaky scabs, seams, vesicle pits) stays live: its
+  // masks are fractions of a volume texel and are outside this first bake.
   const sharp = sharpDetail({ position: p, warpOffset });
   const scabs = sharp.x;
   const pits = sharp.y;
@@ -201,16 +247,6 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
     offsetZ.y.sub(skin)
   ).div(eps);
   const skinTangent = skinGrad.sub(normalLocal.mul(skinGrad.dot(normalLocal)));
-
-  // The mineral micro grain still finite-differences live noise: its detail
-  // sits well past the volume's resolution, and three octaves keep it cheap.
-  const microEps = 0.005;
-  const microGrad = vec3(
-    microDetail({ position: p.add(vec3(microEps, 0, 0)) }).x.sub(grain),
-    microDetail({ position: p.add(vec3(0, microEps, 0)) }).x.sub(grain),
-    microDetail({ position: p.add(vec3(0, 0, microEps)) }).x.sub(grain),
-  ).div(microEps);
-  const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
 
   const bumped = normalLocal
     .sub(tangentGrad.mul(mix(float(0.16), float(0.04), molten)))

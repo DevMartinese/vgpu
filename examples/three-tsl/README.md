@@ -16,7 +16,7 @@ system requirements: `VK_ICD_FILENAMES`, `XDG_RUNTIME_DIR`,
 `VGPU_DAWN_FLAGS=backend=vulkan`).
 
 ```
-src/noise.wgsl         shared value noise / fbm / ridged noise module
+src/noise.wgsl         shared value/fbm noise plus bake-only periodic 2D noise
 src/lava.wgsl          heat, crust, sink, and blackbody fields; uses
                        @vgpu/wgsl-std voronoi3d + noise.wgsl
 src/wgsl-tsl.ts        tslExports(): loader output -> callable wgslFn TSL nodes
@@ -24,7 +24,7 @@ src/lava-material.ts   physical material: emissive cracks, bump normals, and
                        vertex relief all driven by lava.wgsl
 src/scenes.ts          shared scene/lights/mesh builders
 src/main.ts            lava scene (sphere by default, lil-gui mesh picker), WebGPURenderer
-src/bake-lava.ts       one-time bake of the procedural fields into slice-atlas volumes
+src/bake-lava.ts       one-time field-volume + seamless micro-detail texture bake
 src/harness.ts         offscreen render smoke check (also runs headless)
 scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
 scripts/field-viz.ts          renders lava.wgsl fields to PNGs with pure vgpu
@@ -58,9 +58,10 @@ TSL nodes:
 - `blackbody` — incandescence ramp (black → deep red → orange → yellow-white)
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
-  clinkery rubble elsewhere, and clustered vesicle pits; sampled once for
-  shading and three more times by finite differences in TSL to build
-  `normalNode` bump detail.
+  clinkery rubble elsewhere, and clustered vesicle pits. Its smooth register
+  comes from the field volumes; sharp scabs stay live, while mineral grain,
+  flow streaks, and the grain gradient come from one seamless mipmapped
+  `RGBA16F` tile sampled triplanarly.
 - `crustSurface` — one `vec4f` of shading masks (tone mottling, oxide
   staining, glassy-skin mask, vesicle pits) driving albedo, roughness
   variation, and a clearcoat "volcanic glass" sheen.

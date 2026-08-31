@@ -1,4 +1,58 @@
-import { hash3 } from "@vgpu/wgsl-std/hash";
+import { hash3, pcg2d } from "@vgpu/wgsl-std/hash";
+
+// ---------------------------------------------------------------------------
+// Bake-only periodic 2D noise. Unlike the live 3D fields below, these helpers
+// deliberately wrap the integer lattice before hashing, so both the value and
+// its derivatives meet continuously across a repeating texture boundary.
+
+fn wrapPeriodicCell2(cell: vec2i, period: vec2i) -> vec2i {
+  let safePeriod = max(period, vec2i(1));
+  return ((cell % safePeriod) + safePeriod) % safePeriod;
+}
+
+fn periodicGradientDot2(cell: vec2i, offset: vec2f, period: vec2i) -> f32 {
+  let wrapped = wrapPeriodicCell2(cell, period);
+  let index = pcg2d(bitcast<vec2u>(wrapped)).x & 7u;
+  let axis = select(offset.x, offset.y, (index & 2u) != 0u);
+  let axisDot = select(axis, -axis, (index & 1u) != 0u);
+  let sx = select(offset.x, -offset.x, (index & 1u) != 0u);
+  let sy = select(offset.y, -offset.y, (index & 2u) != 0u);
+  let diagonal = 0.7071067811865476 * (sx + sy);
+  return select(axisDot, diagonal, index >= 4u);
+}
+
+/** Quintic-faded Perlin noise with an exact integer-cell period. */
+export fn periodicPerlin2(position: vec2f, period: vec2i) -> f32 {
+  let base = floor(position);
+  let cell = vec2i(base);
+  let local = position - base;
+  let fade = local * local * local * (local * (local * 6.0 - 15.0) + 10.0);
+  let d00 = periodicGradientDot2(cell, local, period);
+  let d10 = periodicGradientDot2(cell + vec2i(1, 0), local - vec2f(1.0, 0.0), period);
+  let d01 = periodicGradientDot2(cell + vec2i(0, 1), local - vec2f(0.0, 1.0), period);
+  let d11 = periodicGradientDot2(cell + vec2i(1, 1), local - vec2f(1.0, 1.0), period);
+  return 1.4142 * mix(mix(d00, d10, fade.x), mix(d01, d11, fade.x), fade.y);
+}
+
+/** Four-octave tileable turbulence used only while baking micro detail. */
+export fn periodicTurbulence2(position: vec2f, period: vec2i, octaves: u32) -> f32 {
+  let count = clamp(octaves, 1u, 16u);
+  var total = 0.0;
+  var amplitude = 0.5;
+  var normalization = 0.0;
+  var sample = position;
+  var samplePeriod = period;
+  for (var i = 0u; i < count; i = i + 1u) {
+    total += abs(periodicPerlin2(sample, samplePeriod)) * amplitude;
+    normalization += amplitude;
+    amplitude *= 0.55;
+    // An integer lacunarity and an axis permutation preserve exact tiling;
+    // the live field's arbitrary rotation and 2.13 multiplier would not.
+    sample = sample.yx * 2.0 + vec2f(11.0, 7.0);
+    samplePeriod = samplePeriod.yx * 2;
+  }
+  return total / max(normalization, 1e-5);
+}
 
 // Trilinear value noise over a lattice hashed with @vgpu/wgsl-std's hash3.
 export fn valueNoise3(position: vec3f) -> f32 {
