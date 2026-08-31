@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const repo = process.cwd();
-const list = spawnSync("git", ["ls-files", "*.docs.md", ":!:skills/**"], { cwd: repo, encoding: "utf8" });
+const list = spawnSync(
+  "git",
+  ["ls-files", "--cached", "--others", "--exclude-standard", "*.docs.md", ":!:skills/**"],
+  { cwd: repo, encoding: "utf8" },
+);
 if (list.status !== 0) {
   process.stderr.write(list.stderr);
   process.exit(list.status ?? 1);

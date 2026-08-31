@@ -92,6 +92,10 @@
       "slugs": ["getting-started"]
     },
     {
+      "title": "Integrations",
+      "slugs": ["threejs", "nextjs"]
+    },
+    {
       "title": "Performance",
       "slugs": [
         "performance-model",
@@ -154,6 +158,10 @@
         {
           "title": "General",
           "slugs": ["getting-started"]
+        },
+        {
+          "title": "Integrations",
+          "slugs": ["threejs", "nextjs"]
         },
         {
           "title": "Performance",
