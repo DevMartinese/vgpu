@@ -89,4 +89,29 @@ describe("createObjectOrbitControls", () => {
       1e-7
     );
   });
+
+  it("keeps automatic rotation on world Y after the object is flipped", () => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.z = 4;
+    camera.lookAt(0, 0, 0);
+    const object = new THREE.Group();
+    const flipped = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0),
+      Math.PI
+    );
+    object.quaternion.copy(flipped);
+    const objectControls = createObjectOrbitControls(
+      camera,
+      object,
+      {} as HTMLElement
+    );
+
+    objectControls.update(0);
+    objectControls.update(1_000 / 60);
+
+    const expected = new THREE.Quaternion()
+      .setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.0012)
+      .multiply(flipped);
+    expect(object.quaternion.angleTo(expected)).toBeLessThan(1e-7);
+  });
 });

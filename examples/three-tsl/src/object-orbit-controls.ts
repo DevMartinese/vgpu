@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const AUTO_ROTATION_RADIANS_PER_SECOND = 0.072;
 const MAX_FRAME_DELTA_SECONDS = 0.1;
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 /**
  * Reuses OrbitControls' pointer handling and damping without ever moving the
@@ -46,7 +47,10 @@ export function createObjectOrbitControls(
         .multiply(inversePreviousCameraQuaternion)
         .invert();
       object.quaternion.premultiply(objectDelta).normalize();
-      object.rotateY(AUTO_ROTATION_RADIANS_PER_SECOND * deltaSeconds);
+      object.rotateOnWorldAxis(
+        WORLD_UP,
+        AUTO_ROTATION_RADIANS_PER_SECOND * deltaSeconds
+      );
       previousCameraQuaternion.copy(orbitCamera.quaternion);
     },
     dispose: () => controls.dispose(),
