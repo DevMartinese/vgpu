@@ -56,7 +56,7 @@ function demoGeometry(kind: DemoMeshKind): {
       geometry: new THREE.PlaneGeometry(4.4, 4.4, 192, 192),
       tiltX: -1.05,
     };
-  return { geometry: new THREE.IcosahedronGeometry(1.45, 64), tiltX: 0 };
+  return { geometry: new THREE.IcosahedronGeometry(1.45, 32), tiltX: 0 };
 }
 
 export function buildDemoMesh(
