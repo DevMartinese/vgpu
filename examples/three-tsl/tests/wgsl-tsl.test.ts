@@ -61,7 +61,7 @@ describe("tslExports over a vgpu-resolved module", () => {
     const entry = fileURLToPath(new URL("../src/lava.wgsl", import.meta.url));
     const resolved = await resolveShader({ entry });
 
-    const names = ["lavaGlow", "meltSkin", "blackbody", "crustHeight", "crustSurface", "crustPbr", "lavaSink", "bakeMicroDetail"] as const;
+    const names = ["lavaGlow", "meltSkin", "blackbody", "crustHeight", "crustSurface", "crustPbr", "lavaSink", "bakeMicroDetail", "bakeSharpDetail"] as const;
     const nodes = tslExports(resolved.wgsl, names);
     for (const name of names) expect(typeof nodes[name]).toBe("function");
 
@@ -73,6 +73,12 @@ describe("tslExports over a vgpu-resolved module", () => {
     const microBake = parseFunctionHeader(resolved.wgsl, "bakeMicroDetail");
     expect(microBake.paramNames).toEqual(["tileUv"]);
     expect(microBake.returnType).toBe("vec4f");
+
+    const sharpBake = parseFunctionHeader(resolved.wgsl, "bakeSharpDetail");
+    expect(sharpBake.paramNames).toEqual(["tileUv"]);
+    expect(sharpBake.returnType).toBe("vec4f");
+    expect(() => parseFunctionHeader(resolved.wgsl, "sharpDetail")).toThrow(/no function named sharpDetail/);
+    expect(() => parseFunctionHeader(resolved.wgsl, "sharpScabs")).toThrow(/no function named sharpScabs/);
   });
 
   it("wraps the flattened module graph by authored names", async () => {
@@ -170,12 +176,111 @@ function periodicTurbulence2Ref(
   return total / normalization;
 }
 
-describe("periodic micro-detail contract", () => {
-  it("resolves both periodic WGSL helpers", async () => {
+function periodicFbm2Ref(
+  position: readonly [number, number],
+  period: readonly [number, number],
+  octaves = 3,
+): number {
+  let sample: [number, number] = [...position];
+  let samplePeriod: [number, number] = [...period];
+  let amplitude = 0.5;
+  let total = 0;
+  let normalization = 0;
+  for (let octave = 0; octave < octaves; octave++) {
+    total += periodicPerlin2Ref(sample, samplePeriod) * amplitude;
+    normalization += amplitude;
+    amplitude *= 0.5;
+    sample = [sample[1] * 2 + 11, sample[0] * 2 + 7];
+    samplePeriod = [samplePeriod[1] * 2, samplePeriod[0] * 2];
+  }
+  return Math.min(1, Math.max(0, total / normalization * 0.5 + 0.5));
+}
+
+function unitFloatRef(value: number): number {
+  return (value >>> 0) / 0xffffffff;
+}
+
+function periodicVoronoi2Ref(
+  position: readonly [number, number],
+  period: readonly [number, number],
+): readonly [number, number, number] {
+  const baseX = Math.floor(position[0]);
+  const baseY = Math.floor(position[1]);
+  const localX = position[0] - baseX;
+  const localY = position[1] - baseY;
+  let nearest = Number.POSITIVE_INFINITY;
+  let secondNearest = Number.POSITIVE_INFINITY;
+  let cellValue = 0;
+
+  for (let y = -1; y <= 1; y++) {
+    for (let x = -1; x <= 1; x++) {
+      const wrappedX = wrapCell(baseX + x, period[0]);
+      const wrappedY = wrapCell(baseY + y, period[1]);
+      const hashed = pcg2dRef(wrappedX, wrappedY);
+      const dx = x + unitFloatRef(hashed[0]) - localX;
+      const dy = y + unitFloatRef(hashed[1]) - localY;
+      const distance = Math.hypot(dx, dy);
+      if (distance < nearest) {
+        secondNearest = nearest;
+        nearest = distance;
+        cellValue = unitFloatRef(pcg2dRef(hashed[0], hashed[1])[0]);
+      } else if (distance < secondNearest) {
+        secondNearest = distance;
+      }
+    }
+  }
+
+  return [nearest, secondNearest, cellValue];
+}
+
+describe("periodic detail-bake contract", () => {
+  it("resolves the periodic WGSL helpers", async () => {
     const entry = fileURLToPath(new URL("../src/noise.wgsl", import.meta.url));
     const resolved = await resolveShader({ entry });
     expect(parseFunctionHeader(resolved.wgsl, "periodicPerlin2").returnType).toBe("f32");
     expect(parseFunctionHeader(resolved.wgsl, "periodicTurbulence2").returnType).toBe("f32");
+    expect(parseFunctionHeader(resolved.wgsl, "periodicFbm2").returnType).toBe("f32");
+    expect(parseFunctionHeader(resolved.wgsl, "periodicVoronoi2").returnType).toBe("vec3f");
+  });
+
+  it("keeps Voronoi values and gradients continuous across either tile axis", () => {
+    const period: readonly [number, number] = [34, 34];
+    const epsilon = 1 / 1024;
+    const points = [[0.125, 0.875], [-3.75, 11.125], [33.999, -0.001]] as const;
+    const component = (p: readonly [number, number], index: 0 | 1 | 2) =>
+      periodicVoronoi2Ref(p, period)[index];
+    const derivative = (p: readonly [number, number], componentIndex: 0 | 1, axis: 0 | 1) => {
+      const before: [number, number] = [...p];
+      const after: [number, number] = [...p];
+      before[axis] -= epsilon;
+      after[axis] += epsilon;
+      return (component(after, componentIndex) - component(before, componentIndex)) / (2 * epsilon);
+    };
+
+    for (const point of points) {
+      for (const translated of [
+        [point[0] + period[0], point[1]],
+        [point[0], point[1] - period[1]],
+      ] as const) {
+        for (const componentIndex of [0, 1, 2] as const) {
+          expect(component(translated, componentIndex)).toBeCloseTo(component(point, componentIndex), 10);
+        }
+        for (const componentIndex of [0, 1] as const) {
+          expect(derivative(translated, componentIndex, 0)).toBeCloseTo(derivative(point, componentIndex, 0), 8);
+          expect(derivative(translated, componentIndex, 1)).toBeCloseTo(derivative(point, componentIndex, 1), 8);
+        }
+      }
+    }
+  });
+
+  it("keeps the low-frequency sharp-detail warp periodic for negative UVs", () => {
+    const period: readonly [number, number] = [5, 5];
+    const points = [[0.17, 0.83], [-2.4, 7.1], [4.999, -0.001]] as const;
+    for (const point of points) {
+      const value = periodicFbm2Ref(point, period);
+      expect(periodicFbm2Ref([point[0] + 5, point[1]], period)).toBeCloseTo(value, 10);
+      expect(periodicFbm2Ref([point[0], point[1] - 5], period)).toBeCloseTo(value, 10);
+    }
   });
 
   it("repeats values and finite-difference gradients across positive and negative tiles", () => {

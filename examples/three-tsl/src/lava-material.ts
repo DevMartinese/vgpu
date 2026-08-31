@@ -23,12 +23,7 @@ import {
   type LavaFieldVolumes,
 } from "./bake-lava.ts";
 
-const { blackbody, perlin3, sharpDetail, sharpScabs } = tslExports(lavaModule, [
-  "blackbody",
-  "perlin3",
-  "sharpDetail",
-  "sharpScabs",
-]);
+const { blackbody, perlin3 } = tslExports(lavaModule, ["blackbody", "perlin3"]);
 
 export interface LavaMaterialOptions {
   /** Pre-baked field volumes from `bakeLavaVolumes`. */
@@ -47,16 +42,14 @@ export interface LavaMaterial {
 
 /**
  * Cooling basalt crust over an incandescent molten interior — same
- * composition as before, split between the pre-baked volumes and a live
- * sharp register. Smooth fields (domes, melt, glow, masks) come out of the
- * volumes; the crust's signature fine structure — flaky scabs, seams,
- * vesicle pits, mineral grain — is far below what a 128^3 volume can hold
- * (flake seams are fractions of a texel), so it is evaluated live. That
- * stays cheap because the one expensive dependency those registers had, the
- * lavaDomain warp, is low-frequency and comes pre-baked as an offset volume.
- * The breathing pulse also stays live (its phase is a baked channel), and
- * the ember seep gates the baked fringe through the same live grain that
- * drives the micro normals, so the speckle stays registered with them.
+ * composition as before, split between pre-baked volumes and seamless
+ * triplanar detail tiles. Smooth fields (domes, melt, glow, masks) come out
+ * of the volumes; the crust's signature fine structure — flaky scabs,
+ * seams, vesicle pits, mineral grain — is stored in mipmapped 2D bakes so it
+ * remains sharp without evaluating noise per fragment. The breathing pulse
+ * stays live (its phase is a baked channel), and the ember seep gates the
+ * baked fringe through the same grain that drives the micro normals, so the
+ * speckle stays registered with them.
  */
 export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   const { volumes } = options;
@@ -75,13 +68,6 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   const glow = sampleFieldVolume(volumes.glow, p);
   const surfaceA = sampleFieldVolume(volumes.surfaceA, p);
   const surfaceB = sampleFieldVolume(volumes.surfaceB, p);
-  // The lavaDomain warp, decoded; effectively constant across the bump
-  // epsilon (it is 1.1 cycles/unit), so one tap serves every sharp-register
-  // evaluation below.
-  const warpOffset = sampleFieldVolume(volumes.warp, p)
-    .xyz.sub(0.5)
-    .mul(0.9);
-
   const molten = glow.y;
   const specMottle = surfaceA.w;
   const glass = surfaceA.z;
@@ -139,12 +125,36 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
     .mul(grainScale);
   const microTangent = microGrad.sub(normalLocal.mul(microGrad.dot(normalLocal)));
 
-  // Sharp crust structure (flaky scabs, seams, vesicle pits) stays live: its
-  // masks are fractions of a volume texel and are outside this first bake.
-  const sharp = sharpDetail({ position: p, warpOffset });
-  const scabs = sharp.x;
-  const pits = sharp.y;
-  const pitsOnly = sharp.z;
+  // Flaky scabs, seams and vesicle pits come from a second seamless tile over
+  // a four-unit object-space period. Three triplanar taps replace the live
+  // base field plus three finite-difference calls (nine Voronoi evaluations
+  // and a clustered fBm in total), while implicit mips band-limit the detail.
+  const sharpTileScale = 1 / 4;
+  const sharpX = texture(
+    volumes.sharpDetail,
+    p.yz.mul(sharpTileScale).add(vec2(0.13, 0.47))
+  );
+  const sharpY = texture(
+    volumes.sharpDetail,
+    p.xz.mul(sharpTileScale).add(vec2(0.59, 0.07))
+  );
+  const sharpZ = texture(
+    volumes.sharpDetail,
+    p.xy.mul(sharpTileScale).add(vec2(0.31, 0.83))
+  );
+  const scabs = sharpX.x.mul(weights.x)
+    .add(sharpY.x.mul(weights.y))
+    .add(sharpZ.x.mul(weights.z));
+  const pits = sharpX.w.mul(weights.x)
+    .add(sharpY.w.mul(weights.y))
+    .add(sharpZ.w.mul(weights.z));
+  // Flake seams are capped at 0.55 in A. Values above that threshold can
+  // only be vesicle cores, which are the portion that dents height and AO.
+  const pitsOnly = smoothstep(0.58, 0.82, pits);
+  const sharpGrad = vec3(0, sharpX.y, sharpX.z).mul(weights.x)
+    .add(vec3(sharpY.y, 0, sharpY.z).mul(weights.y))
+    .add(vec3(sharpZ.y, sharpZ.z, 0).mul(weights.z))
+    .mul(sharpTileScale);
   const height = surfaceA.x.add(scabs).sub(pitsOnly.mul(0.08)).clamp(0, 1);
 
   // Slow breathing so the melt looks alive, and the ember seep gating the
@@ -218,27 +228,19 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   material.positionNode = positionLocal.add(normalLocal.mul(relief));
 
   // Bump normals: the smooth plate/rope gradient finite-differences the
-  // baked volume, and the flaky scab plateaus — the cracked-plate skin that
-  // defines the crust, far too fine for the volume — finite-difference the
-  // live field at the same taps, sharing the one baked warp offset.
+  // baked volume, then combines with the sharp tile's pre-baked derivatives.
   const eps = 0.024;
   const smoothHeight = surfaceA.x;
   const offsetX = sampleFieldVolume(volumes.surfaceA, p.add(vec3(eps, 0, 0)));
   const offsetY = sampleFieldVolume(volumes.surfaceA, p.add(vec3(0, eps, 0)));
   const offsetZ = sampleFieldVolume(volumes.surfaceA, p.add(vec3(0, 0, eps)));
-  const scabEps = 0.006;
-  const scabGrad = vec3(
-    sharpScabs({ position: p.add(vec3(scabEps, 0, 0)), warpOffset }).sub(scabs),
-    sharpScabs({ position: p.add(vec3(0, scabEps, 0)), warpOffset }).sub(scabs),
-    sharpScabs({ position: p.add(vec3(0, 0, scabEps)), warpOffset }).sub(scabs)
-  ).div(scabEps);
   const grad = vec3(
     offsetX.x.sub(smoothHeight),
     offsetY.x.sub(smoothHeight),
     offsetZ.x.sub(smoothHeight)
   )
     .div(eps)
-    .add(scabGrad);
+    .add(sharpGrad);
   const tangentGrad = grad.sub(normalLocal.mul(grad.dot(normalLocal)));
 
   const skin = surfaceA.y;

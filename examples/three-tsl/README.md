@@ -26,7 +26,7 @@ src/lava-material.ts   physical material: emissive cracks, bump normals, and
 src/scenes.ts          shared scene/lights/mesh builders
 src/object-drag-controls.ts  damped object rotation with a fixed render camera
 src/main.ts            lava scene (sphere by default, lil-gui mesh picker), WebGPURenderer
-src/bake-lava.ts       one-time field-volume + seamless micro-detail texture bake
+src/bake-lava.ts       one-time field-volume + seamless detail texture bakes
 src/harness.ts         offscreen render smoke check (also runs headless)
 scripts/generate-previews.ts  headless preview renders on vgpu/node (Dawn)
 scripts/field-viz.ts          renders lava.wgsl fields to PNGs with pure vgpu
@@ -61,9 +61,10 @@ TSL nodes:
   feeding `emissiveNode` with HDR intensity under ACES tone mapping.
 - `crustHeight` — plate relief plus pahoehoe rope folds on lobe patches,
   clinkery rubble elsewhere, and clustered vesicle pits. Its smooth register
-  comes from the field volumes; sharp scabs stay live, while mineral grain,
-  flow streaks, and the grain gradient come from one seamless mipmapped
-  `RGBA16F` tile sampled triplanarly.
+  comes from the field volumes; sharp scabs, seams, vesicle pits, mineral
+  grain, flow streaks, and their gradients come from two seamless mipmapped
+  `RGBA16F` tiles sampled triplanarly. This replaces the live sharp register's
+  nine Voronoi evaluations and clustered fBm with three filtered texture taps.
 - `crustSurface` — one `vec4f` of shading masks (tone mottling, oxide
   staining, glassy-skin mask, vesicle pits) driving albedo, roughness
   variation, and a clearcoat "volcanic glass" sheen.

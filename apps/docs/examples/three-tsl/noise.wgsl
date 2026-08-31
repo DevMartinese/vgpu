@@ -1,4 +1,4 @@
-import { hash3, pcg2d } from "@vgpu/wgsl-std/hash";
+import { hash3, pcg2d, unitFloat } from "@vgpu/wgsl-std/hash";
 
 // ---------------------------------------------------------------------------
 // Bake-only periodic 2D noise. Unlike the live 3D fields below, these helpers
@@ -52,6 +52,58 @@ export fn periodicTurbulence2(position: vec2f, period: vec2i, octaves: u32) -> f
     samplePeriod = samplePeriod.yx * 2;
   }
   return total / max(normalization, 1e-5);
+}
+
+/** Periodic 0..1 fBm used to cluster features in baked detail tiles. */
+export fn periodicFbm2(position: vec2f, period: vec2i, octaves: u32) -> f32 {
+  let count = clamp(octaves, 1u, 16u);
+  var total = 0.0;
+  var amplitude = 0.5;
+  var normalization = 0.0;
+  var sample = position;
+  var samplePeriod = period;
+  for (var i = 0u; i < count; i = i + 1u) {
+    total += periodicPerlin2(sample, samplePeriod) * amplitude;
+    normalization += amplitude;
+    amplitude *= 0.5;
+    sample = sample.yx * 2.0 + vec2f(11.0, 7.0);
+    samplePeriod = samplePeriod.yx * 2;
+  }
+  return clamp(total / max(normalization, 1e-5) * 0.5 + 0.5, 0.0, 1.0);
+}
+
+/**
+ * Tileable 2D Voronoi. x/y are the nearest and second-nearest distances;
+ * z is a stable random value for the nearest cell. Candidate cells keep
+ * their unwrapped offsets for distance, but wrap before hashing, so features
+ * and their derivatives meet at either side of the tile.
+ */
+export fn periodicVoronoi2(position: vec2f, period: vec2i) -> vec3f {
+  let base = floor(position);
+  let cell = vec2i(base);
+  let local = position - base;
+  var nearest = 1e10;
+  var secondNearest = 1e10;
+  var cellValue = 0.0;
+
+  for (var y: i32 = -1; y <= 1; y = y + 1) {
+    for (var x: i32 = -1; x <= 1; x = x + 1) {
+      let offset = vec2i(x, y);
+      let wrapped = wrapPeriodicCell2(cell + offset, period);
+      let hashed = pcg2d(bitcast<vec2u>(wrapped));
+      let feature = vec2f(unitFloat(hashed.x), unitFloat(hashed.y));
+      let distance = length(vec2f(offset) + feature - local);
+      if (distance < nearest) {
+        secondNearest = nearest;
+        nearest = distance;
+        cellValue = unitFloat(pcg2d(hashed).x);
+      } else if (distance < secondNearest) {
+        secondNearest = distance;
+      }
+    }
+  }
+
+  return vec3f(nearest, secondNearest, cellValue);
 }
 
 // Trilinear value noise over a lattice hashed with @vgpu/wgsl-std's hash3.
