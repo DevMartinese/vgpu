@@ -1,4 +1,5 @@
 import type { ExampleRecord } from "./examples-registry";
+import { portableExampleSource } from "./example-export";
 import { siteUrl } from "./site";
 
 function backtickFence(value: string, minimumLength: number): string {
@@ -54,7 +55,7 @@ export function buildExampleSourceMarkdown(example: ExampleRecord): string {
   const files = example.sources
     .map(
       ({ code, lang, name }) =>
-        `## ${inlineCode(name)}\n\n${fencedSource(code, lang)}`,
+        `## ${inlineCode(name)}\n\n${fencedSource(portableExampleSource(code), lang)}`,
     )
     .join("\n\n");
 

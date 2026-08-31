@@ -5,6 +5,33 @@ import { examples, getExample } from "./examples-registry";
 const gradient = getExample("gradient");
 if (!gradient) throw new Error("Missing gradient example fixture");
 
+const publicAssetExamples = [
+  {
+    slug: "three-tsl",
+    sourcePath: "/examples/three-tsl/sunset.exr",
+  },
+  {
+    slug: "glass-fractal",
+    sourcePath: "/examples/glass-fractal/rounded-tetrahedron.mesh?v=bevel-4",
+  },
+  {
+    slug: "depth-estimation",
+    sourcePath: "/models/depth/fastdepth-320x256.onnx",
+  },
+  {
+    slug: "depth-estimation",
+    sourcePath: "/ort/",
+  },
+  {
+    slug: "air-painting",
+    sourcePath: "/models/mediapipe-hands/palm-detector.onnx",
+  },
+  {
+    slug: "mnist-classifier",
+    sourcePath: "/models/mnist/mnist-12.onnx",
+  },
+] as const;
+
 describe("example actions", () => {
   it("builds an agent prompt with the verified pull command and integration instructions", () => {
     const prompt = buildExamplePrompt(gradient);
@@ -61,6 +88,37 @@ describe("example actions", () => {
       const entry = example.sources.find(({ name }) => name === "index.tsx");
 
       expect(entry?.code, `${example.meta.slug}/index.tsx`).toContain("export default Example;");
+    }
+  });
+
+  it.each(publicAssetExamples)(
+    "points $slug public assets at vgpu.sh in the v0 registry only",
+    ({ slug, sourcePath }) => {
+      const example = getExample(slug);
+      if (!example) throw new Error(`Missing ${slug} example fixture`);
+
+      const source = example.sources.find(({ code }) => code.includes(sourcePath));
+      expect(source?.code).toContain(sourcePath);
+
+      const item = buildExampleV0RegistryItem(example);
+      const v0Source = item.files.find(
+        ({ path }) => path === `examples/${slug}/${source?.name}`,
+      )?.content;
+
+      expect(v0Source).toContain(`https://vgpu.sh${sourcePath}`);
+      expect(source?.code).not.toContain(`https://vgpu.sh${sourcePath}`);
+    },
+  );
+
+  it("does not publish root-relative public asset URLs to v0", () => {
+    const rootRelativePublicAsset = /(["'`])\/(?:examples|models|ort)\//u;
+
+    for (const example of examples) {
+      const item = buildExampleV0RegistryItem(example);
+
+      for (const file of item.files) {
+        expect(file.content, file.path).not.toMatch(rootRelativePublicAsset);
+      }
     }
   });
 

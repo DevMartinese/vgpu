@@ -40,6 +40,21 @@ describe("example source Markdown", () => {
     expect(params).toContainEqual({ lang: "cn", slug: "three-tsl" });
   });
 
+  it("makes public asset URLs portable", async () => {
+    const response = await GET(
+      new Request("https://vgpu.sh/examples/three-tsl/source.md"),
+      { params: Promise.resolve({ lang: "en", slug: "three-tsl" }) },
+    );
+    const body = await response.text();
+
+    expect(body).toContain(
+      'HDRI_URL = "https://vgpu.sh/examples/three-tsl/sunset.exr"',
+    );
+    expect(body).not.toContain(
+      'HDRI_URL = "/examples/three-tsl/sunset.exr"',
+    );
+  });
+
   it("returns a useful Markdown 404 for an unknown internal slug", async () => {
     const response = await GET(
       new Request("https://vgpu.sh/examples/unknown/source.md"),

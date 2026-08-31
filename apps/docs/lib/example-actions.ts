@@ -1,4 +1,5 @@
 import type { ExampleRecord } from "./examples-registry";
+import { portableExampleSource } from "./example-export";
 import { siteUrl } from "./site";
 
 const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["']([^"']+)["']/gu;
@@ -109,7 +110,7 @@ export default function Page() {
       },
       ...example.sources.map(({ code, name }) => ({
         path: `examples/${slug}/${name}`,
-        content: code,
+        content: portableExampleSource(code),
         type: name === "index.tsx" ? "registry:component" : "registry:file",
         target: `~/examples/${slug}/${name}`,
       })),
