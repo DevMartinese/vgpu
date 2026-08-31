@@ -17,6 +17,7 @@ import {
   type PrismControls,
   type PrismTheme,
 } from "../../types";
+import type { PrismPipelineQuality } from "../../pipelines/types";
 import type { DebugControlGroup, DebugRangeControl } from "./control-types";
 import {
   withAbsorption,
@@ -424,9 +425,16 @@ const BLOOM_CONTROLS: readonly DebugControlGroup[] = [
   },
 ];
 
+const LOW_QUALITY_BLOOM_CONTROLS: readonly DebugControlGroup[] =
+  BLOOM_CONTROLS.map((group) => ({
+    ...group,
+    controls: group.controls.filter(({ id }) => id !== "bloom-strength"),
+  }));
+
 export function controlGroupsForSource(
   sourceId: string,
-  mode: PrismTheme
+  mode: PrismTheme,
+  quality: PrismPipelineQuality = "high"
 ): readonly DebugControlGroup[] {
   switch (sourceId) {
     case "scene-hdr":
@@ -458,7 +466,11 @@ export function controlGroupsForSource(
     case "dark-front-glass":
       return [...TRANSMISSION_CONTROLS, ...REFLECTION_CONTROLS];
     case "dark-bloom-composite":
-      return mode === "dark" ? BLOOM_CONTROLS : [];
+      return mode !== "dark"
+        ? []
+        : quality === "low"
+          ? LOW_QUALITY_BLOOM_CONTROLS
+          : BLOOM_CONTROLS;
     case "final-output":
       return OUTPUT_CONTROLS;
     default:

@@ -630,6 +630,7 @@ test("renders the deterministic light once and idles until something changes", a
     expect.objectContaining({
       sceneTexture: live.targets[1],
       bloomTexture: live.targets[2],
+      params: { bloomStrength: 0.7 },
     })
   );
   expect(live.effects[12]!.compile).toHaveBeenCalledWith(live.targets[10]);
@@ -951,7 +952,7 @@ test("uses the reduced shared GPU layout for low-quality light", async () => {
   expect(
     drawNamed(live, "prism-rainbow.light.wall").set
   ).toHaveBeenLastCalledWith(
-    expect.not.objectContaining({ wallMaterial: expect.anything() })
+    expect.objectContaining({ wallMaterial: expect.anything() })
   );
   expect(
     (
@@ -988,7 +989,8 @@ test("uses the reduced shared GPU layout for low-quality light", async () => {
     expect.arrayContaining([
       {
         label: "Material",
-        value: "flat albedo · no normal / roughness / specular",
+        value:
+          "flat albedo + large normal · no micro-normal / roughness / specular",
       },
     ])
   );
@@ -1012,6 +1014,9 @@ test("removes the far bloom and particle-light targets in low-quality dark", asy
   expect(
     live.targets.slice(0, 2).map(({ sampleCount }) => sampleCount)
   ).toEqual([1, 1]);
+  expect(live.effects[7]!.set).toHaveBeenLastCalledWith(
+    expect.objectContaining({ params: { bloomStrength: 0.15 } })
+  );
   const sourceIds = renderer.debugSources().map(({ id }) => id);
   expect(sourceIds).not.toContain("dark-bloom-2");
   expect(sourceIds).not.toContain("dark-particle-light");

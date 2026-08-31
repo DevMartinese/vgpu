@@ -77,8 +77,8 @@ export function PrismDebugGraph({
   theme,
 }: PrismDebugGraphProps) {
   const baseModel = useMemo(
-    () => createDebugGraphModel(sources, bridge, mode),
-    [bridge, mode, sources]
+    () => createDebugGraphModel(sources, bridge, mode, quality),
+    [bridge, mode, quality, sources]
   );
   const [model, setModel] = useState(baseModel);
   useEffect(() => {

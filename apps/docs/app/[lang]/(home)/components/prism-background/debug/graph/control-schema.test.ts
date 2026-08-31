@@ -6,6 +6,7 @@ import {
   type PrismControls,
   type PrismTheme,
 } from "../../types";
+import type { PrismPipelineQuality } from "../../pipelines/types";
 import { clampDebugRangeValue, controlGroupsForSource } from "./control-schema";
 import type {
   DebugControl,
@@ -64,6 +65,11 @@ describe("React Flow prism controls", () => {
         "bloom-strength",
       ])
     );
+    const lowDark = controlIds(DARK_CONTROL_NODES, "dark", "low");
+    expect(lowDark).toEqual(
+      expect.arrayContaining(["bloom-threshold", "bloom-radius"])
+    );
+    expect(lowDark).not.toContain("bloom-strength");
     expect([...light, ...dark]).not.toEqual(
       expect.arrayContaining([
         "view",
@@ -156,9 +162,13 @@ describe("React Flow prism controls", () => {
   });
 });
 
-function controlIds(nodes: readonly string[], mode: PrismTheme): string[] {
+function controlIds(
+  nodes: readonly string[],
+  mode: PrismTheme,
+  quality: PrismPipelineQuality = "high"
+): string[] {
   return nodes.flatMap((node) =>
-    controlGroupsForSource(node, mode).flatMap((group) =>
+    controlGroupsForSource(node, mode, quality).flatMap((group) =>
       group.controls.map(({ id }) => id)
     )
   );

@@ -14,6 +14,7 @@ import spectralWgsl from "../materials/shared/spectral.wgsl";
 import toneMappingWgsl from "../materials/shared/tone-mapping.wgsl";
 import wallCommonWgsl from "../materials/light/wall-common.wgsl";
 import wallDebugWgsl from "../materials/light/wall-debug.wgsl";
+import wallLowWgsl from "../materials/light/wall-low.wgsl";
 import wallNormalWgsl from "../materials/light/wall-normal.wgsl";
 import wallWgsl from "../materials/light/wall.wgsl";
 import { bakeLightAssetTextures } from "../assets/light/bake";
@@ -265,6 +266,19 @@ describe("light pipeline baked assets", () => {
     expect(wallCommonWgsl.wgsl).not.toContain(
       "textureSample(wallMaterial, materialSampler, screenUv)"
     );
+    expect(wallLowWgsl.wgsl).toContain("shadowContrastCurve");
+    expect(wallLowWgsl.wgsl).toContain("params.shadowContrast");
+    expect(wallLowWgsl.wgsl).toContain("params.shadowPivot");
+    expect(wallLowWgsl.wgsl).toContain("globalLightShaped");
+    expect(wallLowWgsl.wgsl).toContain("wallMaterial");
+    expect(wallLowWgsl.wgsl).toContain("material.gb");
+    expect(wallLowWgsl.wgsl).toContain("params.normalStrength");
+    expect(
+      wallLowWgsl.wgsl.match(/textureSample\(\s*wallMaterial/g)
+    ).toHaveLength(1);
+    expect(wallLowWgsl.wgsl).not.toContain("evaluateWallNormals");
+    expect(wallLowWgsl.wgsl).not.toContain("params.microNormalStrength");
+    expect(wallLowWgsl.wgsl).not.toContain("specular");
     expect(wallDebugWgsl.wgsl).toContain("tonemapAces(composed)");
     expect(wallDebugWgsl.wgsl).toContain("linearToSrgb3(");
   });

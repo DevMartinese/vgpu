@@ -12,6 +12,7 @@ import {
   PRISM_TRIANGLE,
 } from "../../types";
 import { presentationRevealUniforms } from "../presentation";
+import { darkBloomStrengthForQuality } from "../quality";
 import { ensureDarkWireframeDraws } from "./create-graph";
 import type { DarkPipelineGraph } from "./types";
 import { bloomBlurUniforms } from "./bloom-uniforms";
@@ -154,7 +155,10 @@ export function bindDarkGraph(
     params: {
       bloomStrength:
         runtime.controls.view === "glass"
-          ? runtime.controls.postprocess.bloomStrength
+          ? darkBloomStrengthForQuality(
+              graph.quality,
+              runtime.controls.postprocess.bloomStrength
+            )
           : 0,
     },
   });

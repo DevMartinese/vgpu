@@ -4,8 +4,9 @@ import { LightWall, wallPoint } from "./wall-common.wgsl";
 const GLOBAL_LIGHT_MASK_ASPECT = 1.5;
 
 @group(0) @binding(0) var<uniform> params: LightWall;
-@group(0) @binding(1) var wallLighting: texture_2d<f32>;
-@group(0) @binding(2) var materialSampler: sampler;
+@group(0) @binding(1) var wallMaterial: texture_2d<f32>;
+@group(0) @binding(2) var wallLighting: texture_2d<f32>;
+@group(0) @binding(3) var materialSampler: sampler;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
@@ -39,6 +40,32 @@ fn globalLightUv(screenUv: vec2f) -> vec2f {
   return clamp(uv, vec2f(0.001), vec2f(0.999));
 }
 
+fn shadowContrastCurve(value: f32, contrast: f32, pivot: f32) -> f32 {
+  let safePivot = clamp(pivot, 0.001, 0.999);
+  let safeContrast = max(contrast, 0.001);
+  if (value < safePivot) {
+    return safePivot * pow(value / safePivot, safeContrast);
+  }
+  return 1.0 - (1.0 - safePivot) * pow(
+    (1.0 - value) / (1.0 - safePivot),
+    safeContrast,
+  );
+}
+
+fn wallNormal(worldPosition: vec2f) -> vec3f {
+  let material = textureSample(
+    wallMaterial,
+    materialSampler,
+    worldPosition / max(params.materialWorldScale, 0.001),
+  );
+  let normalXy = (material.gb * 2.0 - 1.0) * params.normalStrength;
+  let limitedXy = normalXy / max(length(normalXy), 1.0);
+  return normalize(vec3f(
+    limitedXy,
+    sqrt(max(1.0 - dot(limitedXy, limitedXy), 0.0001)),
+  ));
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let globalLight = textureSample(
@@ -46,9 +73,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     materialSampler,
     globalLightUv(in.uv),
   ).r;
-  let shapedLight = pow(
+  let globalLightLinear = pow(
     clamp(globalLight, 0.0, 1.0),
     max(params.globalLightTransfer, 0.001),
+  );
+  let globalLightShaped = shadowContrastCurve(
+    globalLightLinear,
+    params.shadowContrast,
+    params.shadowPivot,
   );
   let groundingOffset = vec2f(
     in.worldPosition.x - params.prismCenter.x,
@@ -64,11 +96,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let exposure = mix(
     params.shadowFloor,
     params.highlightExposure,
-    shapedLight,
+    globalLightShaped,
   );
+  let normal = wallNormal(in.worldPosition);
+  let lightFacing = max(dot(normal, normalize(params.lightDirection)), 0.0);
+  let diffuse = mix(params.ambient, 1.0, lightFacing);
   let albedo = srgbToLinear3(params.wallColor) * 0.8;
+  let direct = albedo * diffuse;
+  let globalDiffuse = mix(0.25, 1.0, lightFacing);
   let illumination = vec3f(
-    shapedLight * params.ambientLightStrength * 0.8,
+    globalLightShaped * params.ambientLightStrength * 0.8 * globalDiffuse,
   );
-  return vec4f(max((albedo * exposure + illumination) * ao, vec3f(0.0)), 1.0);
+  return vec4f(max((direct * exposure + illumination) * ao, vec3f(0.0)), 1.0);
 }

@@ -8,7 +8,7 @@ import { PreviewCanvas } from "./preview-canvas";
 export const SourceNode = memo(function SourceNode({
   data,
 }: NodeProps<PrismDebugFlowNode>) {
-  const { bridge, mode, source } = data;
+  const { bridge, mode, quality, source } = data;
   return (
     <article className="prism-debug-node" data-kind={source.kind}>
       <Handle
@@ -34,7 +34,7 @@ export const SourceNode = memo(function SourceNode({
           ))}
         </dl>
       ) : null}
-      <NodeControls mode={mode} sourceId={source.id} />
+      <NodeControls mode={mode} quality={quality} sourceId={source.id} />
       {source.visualization === "none" ? null : (
         <footer>{source.visualization}</footer>
       )}

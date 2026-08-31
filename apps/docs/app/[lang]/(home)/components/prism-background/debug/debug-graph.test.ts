@@ -108,7 +108,7 @@ describe("prism debug graph descriptors", () => {
       light
         .find(({ id }) => id === "composed-wall")
         ?.inputs.map(({ source }) => source)
-    ).toEqual(["wall-lighting"]);
+    ).toEqual(["wall-material", "wall-lighting"]);
 
     const dark = createDarkDebugSources({
       quality: "low",
@@ -121,6 +121,9 @@ describe("prism debug graph descriptors", () => {
     const ids = dark.map(({ id }) => id);
     expect(ids).not.toContain("dark-bloom-2");
     expect(ids).not.toContain("dark-particle-light");
+    expect(
+      detailValue(dark, "dark-present-cache-pass", "Bloom strength")
+    ).toBe("0.15 · low-quality override");
     expect(dark.find(({ id }) => id === "dark-dust")?.inputs).toEqual([
       {
         source: "dark-bloom-1",

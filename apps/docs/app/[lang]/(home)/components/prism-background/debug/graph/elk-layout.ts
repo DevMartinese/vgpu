@@ -34,7 +34,11 @@ export async function layoutDebugGraphModel(
     children: model.nodes.map<ElkNode>((node) => ({
       id: node.id,
       width: NODE_WIDTH,
-      height: estimatedNodeHeight(node.data.source, node.data.mode),
+      height: estimatedNodeHeight(
+        node.data.source,
+        node.data.mode,
+        node.data.quality
+      ),
     })),
     edges: model.edges.map<ElkExtendedEdge>((edge) => ({
       id: edge.id,

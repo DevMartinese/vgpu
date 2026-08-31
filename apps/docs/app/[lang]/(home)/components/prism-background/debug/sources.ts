@@ -4,6 +4,7 @@ import type {
   PrismPipelineMode,
   PrismPipelineQuality,
 } from "../pipelines/types";
+import { LOW_DARK_BLOOM_STRENGTH } from "../pipelines/quality";
 
 export const PRISM_DEBUG_SOURCE_IDS = [
   "wall-material",
@@ -191,7 +192,10 @@ export function createLightDebugSources(
       "draw",
       "hdr",
       quality === "low"
-        ? [input("wall-lighting", "sample lighting + contact AO")]
+        ? [
+            input("wall-material", "sample GB normal"),
+            input("wall-lighting", "sample lighting + contact AO"),
+          ]
         : [
             input("wall-material", "sample material"),
             input("wall-lighting", "sample lighting mask"),
@@ -206,7 +210,7 @@ export function createLightDebugSources(
         detail(
           "Material",
           quality === "low"
-            ? "flat albedo · no normal / roughness / specular"
+            ? "flat albedo + large normal · no micro-normal / roughness / specular"
             : "albedo + dual-scale normals + roughness + specular"
         ),
         detail("Coverage", "full screen"),
@@ -633,6 +637,12 @@ export function createDarkDebugSources(
       [
         detail("GPU pass", "dark.present-cache"),
         detail("Draws", "1 · ACES + linear→sRGB"),
+        detail(
+          "Bloom strength",
+          lowQuality
+            ? `${LOW_DARK_BLOOM_STRENGTH} · low-quality override`
+            : "live postprocess control"
+        ),
       ]
     ),
     source(

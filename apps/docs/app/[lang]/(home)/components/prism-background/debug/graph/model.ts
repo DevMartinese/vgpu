@@ -3,6 +3,7 @@ import type { Edge, Node } from "@xyflow/react";
 import type {
   PrismDebugSource,
   PrismPipelineMode,
+  PrismPipelineQuality,
 } from "../../pipelines/types";
 import type { PrismDebugPreviewBridge } from "../preview-bridge";
 import { controlGroupsForSource } from "./control-schema";
@@ -10,6 +11,7 @@ import { controlGroupsForSource } from "./control-schema";
 export type PrismDebugNodeData = {
   readonly bridge: PrismDebugPreviewBridge;
   readonly mode: PrismPipelineMode;
+  readonly quality: PrismPipelineQuality;
   readonly source: PrismDebugSource;
 };
 
@@ -36,7 +38,8 @@ const DETAIL_BLOCK_PADDING = 14;
 export function createDebugGraphModel(
   sources: readonly PrismDebugSource[],
   bridge: PrismDebugPreviewBridge,
-  mode: PrismPipelineMode
+  mode: PrismPipelineMode,
+  quality: PrismPipelineQuality = "high"
 ): PrismDebugGraphModel {
   const knownIds = new Set(sources.map(({ id }) => id));
   const depthOf = createDepthResolver(sources);
@@ -45,12 +48,15 @@ export function createDebugGraphModel(
   const nodes = sources.map<PrismDebugFlowNode>((source) => {
     const depth = depthOf(source.id);
     const y = nextYByDepth.get(depth) ?? 0;
-    nextYByDepth.set(depth, y + estimatedNodeHeight(source, mode) + NODE_GAP);
+    nextYByDepth.set(
+      depth,
+      y + estimatedNodeHeight(source, mode, quality) + NODE_GAP
+    );
     return {
       id: source.id,
       type: "prismDebug",
       position: { x: depth * COLUMN_GAP, y },
-      data: { bridge, mode, source },
+      data: { bridge, mode, quality, source },
       draggable: false,
       selectable: false,
       // XYFlow disables pointer hit-testing when a node is neither draggable
@@ -84,9 +90,10 @@ export function createDebugGraphModel(
 
 export function estimatedNodeHeight(
   source: PrismDebugSource,
-  mode: PrismPipelineMode
+  mode: PrismPipelineMode,
+  quality: PrismPipelineQuality = "high"
 ): number {
-  const groups = controlGroupsForSource(source.id, mode);
+  const groups = controlGroupsForSource(source.id, mode, quality);
   const controlCount = groups.reduce(
     (count, group) => count + group.controls.length,
     0

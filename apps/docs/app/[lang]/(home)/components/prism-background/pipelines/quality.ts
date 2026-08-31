@@ -8,6 +8,7 @@ import type { PrismPipelineQuality } from "./types";
 
 export const LOW_LIGHT_SPECTRAL_SAMPLES = 64;
 export const LOW_LIGHT_BEAM_SLICES = 12;
+export const LOW_DARK_BLOOM_STRENGTH = 0.15;
 
 export const LOW_LIGHT_MESH_LAYOUT = lightMeshLayout(
   LOW_LIGHT_SPECTRAL_SAMPLES,
@@ -30,4 +31,13 @@ export function darkBloomLevelCountForQuality(
   quality: PrismPipelineQuality
 ): number {
   return quality === "low" ? 2 : BLOOM_LEVELS;
+}
+
+export function darkBloomStrengthForQuality(
+  quality: PrismPipelineQuality,
+  configuredStrength: number
+): number {
+  return quality === "low"
+    ? LOW_DARK_BLOOM_STRENGTH
+    : configuredStrength;
 }
