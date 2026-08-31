@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   }
 
   const renderer = new THREE.WebGPURenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio, 1), 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.querySelector("#app")!.append(renderer.domElement);

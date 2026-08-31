@@ -49,7 +49,7 @@ export function createRenderer({
       throw new Error("WebGPU is not available in this browser.");
     }
     const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio, 1), 1.5));
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     await renderer.init();
