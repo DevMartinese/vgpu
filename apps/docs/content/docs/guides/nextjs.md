@@ -7,6 +7,8 @@ description: "Wire the WGSL loader into Next.js (Turbopack or webpack) or Vite, 
 
 This guide is the bundler half of [Getting started](getting-started.docs.md): install, loader config, TypeScript types for `.wgsl` imports, and the client component that owns the canvas.
 
+New to shader imports? Read [WGSL modules](/concepts/wgsl-modules) first for the `import`/`export` syntax, pure-module rule, and what vgpu emits. This page focuses on wiring that model into a bundler.
+
 ## Install
 
 ```sh
@@ -198,6 +200,7 @@ Then prove the pixels in Node instead of squinting at a browser tab: [Getting st
 
 ## See also
 
+- [Using vgpu WGSL modules with three.js](/guides/threejs) — connect loader-resolved pure WGSL functions to three.js TSL node materials with the example reference helper
 - `npx vgpu docs cat /@vgpu/wgsl/loader-webpack/index.docs.md` — every loader option
 - `npx vgpu docs cat /@vgpu/wgsl/loader-vite/index.docs.md` — the Vite plugin
 - `npx vgpu docs cat /@vgpu/wgsl/runtime/resolve-shader.docs.md` — resolving import graphs without a bundler

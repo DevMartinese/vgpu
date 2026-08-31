@@ -3,6 +3,9 @@
   "pages": [
     "---General---",
     "getting-started",
+    "---Integrations---",
+    "threejs",
+    "nextjs",
     "---Performance---",
     "performance-model",
     "performance-patterns",

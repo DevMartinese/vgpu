@@ -6,8 +6,8 @@ description: >-
   and /perf only as slim tooling subpaths. Bundles performance guides and the API
   reference; load one doc at a time.
 vgpuVersion: 0.3.1
-gitSha: 61779b7d15cc40a0058e4ade0457b8dbf717319e
-generatedAt: 2026-08-26T05:40:09.518Z
+gitSha: 93ba1195f9ed2c6aa09baff0b1e9e82608b5935e
+generatedAt: 2026-08-31T17:31:34.289Z
 ---
 
 # vgpu
@@ -28,6 +28,7 @@ npx -y vgpu docs cat <symbol>    # print one doc, e.g. `cat Frame`, `cat perform
 ## Core concepts
 
 - **Context** — Everything in vgpu starts from one call.  `references/guides/concepts-context.docs.md`
+- **WGSL modules** — With the wgsl loader, you can create reusable shader modules:  `references/guides/concepts-wgsl-modules.docs.md`
 - **Draws** — A Draw renders geometry with custom vertex buffers: you write both the vertex and the fragment stage, and a geometry supplies the buffers.  `references/guides/concepts-draws.docs.md`
 - **Compilation** — Pipelines compile lazily: the first draw() against a new target pays the pipeline creation cost, and that cost lands inside your frame.  `references/guides/concepts-compilation.docs.md`
 - **Effects** — An Effect is a full-screen fragment shader created with effect(gpu, source).  `references/guides/concepts-effects.docs.md`
@@ -65,6 +66,7 @@ Writing or optimizing a shader? Read **performance-model** first, then the rest 
 - **Shader diagnostics and fix-its** — Use these messages as the self-correction map for generated shader code.  `references/guides/shader-fix-its.docs.md`
 - **The default workflow for developing shaders with vgpu** — Follow these eight steps in order every time you write or change a shader.  `references/guides/shader-workflow.docs.md`
 - **Practical texture-format matrix** — Choose a target format from the operations it must support, not just its channel precision.  `references/guides/texture-formats.docs.md`
+- **Using vgpu WGSL modules with three.js** — vgpu's WGSL loader can flatten a reusable WGSL module graph into ordinary WGSL, while three.js TSL can call a WGSL function from a node material.  `references/guides/threejs.docs.md`
 - **Two-pass rendering: offscreen depth target composited to the canvas** — Surfaces and canvases have no depth buffer, and Draws need one for any real 3D scene.  `references/guides/two-pass-rendering.docs.md`
 
 ## API reference

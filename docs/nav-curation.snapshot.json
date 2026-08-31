@@ -11,6 +11,10 @@
       "..."
     ],
     "topicOrder": {
+      "@vgpu/adapter-node": [
+        "create-node-adapter",
+        "..."
+      ],
       "@vgpu/render": [
         "wireframe-material",
         "normal-debug-material",
@@ -66,6 +70,10 @@
         "uniform-pool",
         "..."
       ],
+      "vgpu/mock": [
+        "create-mock-adapter",
+        "..."
+      ],
       "vgpu/scene": [
         "camera",
         "orthographic-camera",
@@ -81,6 +89,13 @@
         "title": "General",
         "slugs": [
           "getting-started"
+        ]
+      },
+      {
+        "title": "Integrations",
+        "slugs": [
+          "threejs",
+          "nextjs"
         ]
       },
       {
@@ -112,6 +127,7 @@
       "Concepts @ /concepts",
       "  ",
       "    Context @ /concepts/context",
+      "    WGSL modules @ /concepts/wgsl-modules",
       "    Draws @ /concepts/draws",
       "    Compilation @ /concepts/compilation",
       "    Effects @ /concepts/effects",
@@ -122,6 +138,7 @@
       "  ",
       "    Overview @ /guides",
       "  General",
+      "  Integrations",
       "  Performance",
       "  Testing",
       "  ...",

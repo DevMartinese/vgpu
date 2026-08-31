@@ -86,6 +86,10 @@ export const exampleThumbs: Record<string, ExampleThumbPresence> = {
     "card": "/examples/raymarched-fractal.card.png",
     "hero": "/examples/raymarched-fractal.hero.png"
   },
+  "three-tsl": {
+    "card": "/examples/three-tsl.card.png",
+    "hero": "/examples/three-tsl.hero.png"
+  },
   "transmission": {
     "card": "/examples/transmission.card.png",
     "hero": "/examples/transmission.hero.png"

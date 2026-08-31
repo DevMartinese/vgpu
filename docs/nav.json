@@ -76,12 +76,24 @@
       "perf",
       "edit",
       "..."
+    ],
+    "@vgpu/adapter-node": [
+      "create-node-adapter",
+      "..."
+    ],
+    "vgpu/mock": [
+      "create-mock-adapter",
+      "..."
     ]
   },
   "guideGroups": [
     {
       "title": "General",
       "slugs": ["getting-started"]
+    },
+    {
+      "title": "Integrations",
+      "slugs": ["threejs", "nextjs"]
     },
     {
       "title": "Performance",
@@ -124,6 +136,7 @@
           "title": "",
           "items": [
             { "title": "Context", "href": "/concepts/context" },
+            { "title": "WGSL modules", "href": "/concepts/wgsl-modules" },
             { "title": "Draws", "href": "/concepts/draws" },
             { "title": "Compilation", "href": "/concepts/compilation" },
             { "title": "Effects", "href": "/concepts/effects" },
@@ -145,6 +158,10 @@
         {
           "title": "General",
           "slugs": ["getting-started"]
+        },
+        {
+          "title": "Integrations",
+          "slugs": ["threejs", "nextjs"]
         },
         {
           "title": "Performance",

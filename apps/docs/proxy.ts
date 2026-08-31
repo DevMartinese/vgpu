@@ -5,6 +5,7 @@ import {
 import { precompute } from "flags/next";
 import { NextResponse } from "next/server";
 import { homepageFlags } from "@/flags";
+import { exampleSlugs } from "@/lib/example-slugs";
 import { config as geistdocsConfig } from "@/lib/geistdocs/config";
 import { trackMdRequest } from "@/lib/geistdocs/md-tracking";
 import { createUnmatchedMarkdownNotFoundResponse } from "@/lib/geistdocs/markdown-not-found";
@@ -53,6 +54,16 @@ const proxy = createProxy({
   markdownRoutes: [
     { from: "/", to: "/[lang]/index.md" },
     { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
+    ...exampleSlugs.flatMap((slug) => [
+      {
+        from: `/examples/${slug}` as const,
+        to: `/[lang]/examples.md/${slug}` as const,
+      },
+      {
+        from: `/examples/${slug}/source` as const,
+        to: `/[lang]/examples.md/${slug}/source` as const,
+      },
+    ]),
   ],
 });
 
@@ -100,8 +111,9 @@ const proxy = createProxy({
 // ANCHOR TGEIST-EXAMPLES-STATIC (5th instance of this exact class -- TGEIST-06, TGEIST-08 and
 // TGEIST-ML-ASSETS above are the first three): every media file committed under
 // `public/examples/**` -- the gallery/sidebar thumbnails (`public/examples/<slug>.card.png`,
-// `<slug>.hero.png`), videos, meshes, and `public/examples/depth-estimation/source.jpg` (the default input image
-// `example-canvas` fetches for that demo) -- is excluded from the proxy. None of them has a route
+// `<slug>.hero.png`), videos, meshes, `public/examples/depth-estimation/source.jpg` (the default input image
+// `example-canvas` fetches for that demo) and `public/examples/three-tsl/sunset.exr` (the HDRI that
+// example lights with) -- is excluded from the proxy. None of them has a route
 // under `app/[lang]/`, so while the proxy is active on them the i18n rewrite sends e.g.
 // `/examples/depth-estimation/source.jpg` to `/en/examples/depth-estimation/source.jpg`, which no
 // route matches. Verified empirically against `next start` on this build: 404 with
@@ -125,7 +137,7 @@ const proxy = createProxy({
 // one pinned detect-gpu vendor table from this prefix after the first production frame.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|openapi.json$|opengraph-image(?:/|$)|\\.well-known/api-catalog(?:/|$)|\\.well-known/vercel/flags(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|prism-gpu-benchmarks/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|openapi.json$|opengraph-image(?:/|$)|\\.well-known/api-catalog(?:/|$)|\\.well-known/vercel/flags(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|prism-gpu-benchmarks/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh|exr)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 
