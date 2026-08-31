@@ -47,7 +47,7 @@ function demoGeometry(kind: DemoMeshKind): {
   // that no longer runs.
   if (kind === "knot")
     return {
-      geometry: new THREE.TorusKnotGeometry(1, 0.38, 300, 48),
+      geometry: new THREE.TorusKnotGeometry(0.74, 0.28, 300, 48),
       tiltX: 0,
     };
   if (kind === "plane")
