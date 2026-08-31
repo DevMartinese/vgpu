@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
 import { GUI } from "three/addons/libs/lil-gui.module.min.js";
-import { createObjectOrbitControls } from "./object-orbit-controls";
+import { createObjectDragControls } from "./object-drag-controls";
 import {
   createDemoCamera,
   createDemoScene,
@@ -69,7 +69,7 @@ export function createRenderer({
     const camera = createDemoCamera(
       Math.max(canvas.clientWidth, 1) / Math.max(canvas.clientHeight, 1)
     );
-    const controls = createObjectOrbitControls(
+    const controls = createObjectDragControls(
       camera,
       scene.rotationRoot,
       canvas

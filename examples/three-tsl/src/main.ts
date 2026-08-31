@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
 import { GUI } from "three/addons/libs/lil-gui.module.min.js";
-import { createObjectOrbitControls } from "./object-orbit-controls.ts";
+import { createObjectDragControls } from "./object-drag-controls.ts";
 import { createDemoCamera, createDemoScene, DEMO_MESH_KINDS, type DemoMeshKind } from "./scenes.ts";
 
 async function main(): Promise<void> {
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
     .add(settings, "mesh", [...DEMO_MESH_KINDS])
     .onChange((kind: DemoMeshKind) => demo.setMesh(kind));
 
-  const controls = createObjectOrbitControls(
+  const controls = createObjectDragControls(
     camera,
     demo.rotationRoot,
     renderer.domElement
