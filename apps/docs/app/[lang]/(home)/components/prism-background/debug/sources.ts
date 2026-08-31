@@ -103,11 +103,7 @@ export function createLightDebugSources(
   const quality = facts.quality ?? "high";
   const mesh = facts.lightMeshLayout ?? HIGH_LIGHT_MESH_LAYOUT;
   const backdrop = facts.backdrop ?? DEFAULT_LIGHT_BACKDROP_TARGET;
-  const scene =
-    facts.scene ??
-    (quality === "low"
-      ? { format: "rgba16float", sampleCount: 1 }
-      : DEFAULT_LIGHT_SCENE_TARGET);
+  const scene = facts.scene ?? DEFAULT_LIGHT_SCENE_TARGET;
   return [
     source(
       "wall-material",
@@ -414,11 +410,7 @@ export function createDarkDebugSources(
   const lowQuality = quality === "low";
   const mesh = facts.lightMeshLayout ?? HIGH_LIGHT_MESH_LAYOUT;
   const backdrop = facts.backdrop ?? DEFAULT_DARK_BACKDROP_TARGET;
-  const scene =
-    facts.scene ??
-    (lowQuality
-      ? { format: "rgba16float", sampleCount: 1 }
-      : DEFAULT_DARK_SCENE_TARGET);
+  const scene = facts.scene ?? DEFAULT_DARK_SCENE_TARGET;
   const bloom =
     facts.bloom ??
     (lowQuality ? DEFAULT_BLOOM_TARGETS.slice(0, 2) : DEFAULT_BLOOM_TARGETS);

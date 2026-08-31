@@ -170,16 +170,16 @@ describe("light pipeline ownership", () => {
     }
   });
 
-  test("uses single-sample targets and the simplified wall in low quality", async () => {
+  test("keeps front-side MSAA and the simplified wall in low quality", async () => {
     const gpu = await init();
     const runtime = createPrismRuntime(gpu, [80, 45], "light-low-test");
     const graph = createLightGraph(runtime, "low");
     try {
-      ensureLightTargets(graph, runtime, runtime.outputSize, "low");
+      ensureLightTargets(graph, runtime, runtime.outputSize);
       expect(graph.simplifiedWall).toBe(true);
       expect(graph.lightMeshLayout).toBe(LOW_LIGHT_MESH_LAYOUT);
       expect(graph.backdropHDR?.sampleCount).toBe(1);
-      expect(graph.sceneHDR?.sampleCount).toBe(1);
+      expect(graph.sceneHDR?.sampleCount).toBe(4);
       await graph.wall.compile(graph.backdropHDR!);
     } finally {
       destroyLightTargets(graph);

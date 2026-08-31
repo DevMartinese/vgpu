@@ -2,7 +2,6 @@ import type { Target } from "vgpu";
 import { target } from "vgpu";
 
 import type { PrismRuntime } from "../../runtime/types";
-import type { PrismPipelineQuality } from "../types";
 import type { LightPipelineGraph } from "./types";
 
 export const LIGHT_TARGET_COUNT = 2;
@@ -10,16 +9,10 @@ export const LIGHT_TARGET_COUNT = 2;
 export function ensureLightTargets(
   graph: LightPipelineGraph,
   runtime: PrismRuntime,
-  size: readonly [number, number],
-  quality: PrismPipelineQuality = "high"
+  size: readonly [number, number]
 ): void {
   graph.backdropHDR ??= createTarget(runtime, size, "backdrop-hdr", false);
-  graph.sceneHDR ??= createTarget(
-    runtime,
-    size,
-    "scene-hdr",
-    quality === "high"
-  );
+  graph.sceneHDR ??= createTarget(runtime, size, "scene-hdr", true);
   resizeLightTargets(graph, size);
 }
 

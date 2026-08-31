@@ -100,7 +100,9 @@ describe("prism debug graph descriptors", () => {
       quality: "low",
       lightMeshLayout: LOW_LIGHT_MESH_LAYOUT,
     });
-    expect(detailValue(light, "scene-hdr", "Samples")).toBe("1×");
+    expect(detailValue(light, "scene-hdr", "Samples")).toBe(
+      "4× MSAA → resolve"
+    );
     expect(detailValue(light, "spectral-light-mesh", "Sampling")).toBe(
       "64 wavelengths × 12 beam slices"
     );
@@ -121,6 +123,9 @@ describe("prism debug graph descriptors", () => {
     const ids = dark.map(({ id }) => id);
     expect(ids).not.toContain("dark-bloom-2");
     expect(ids).not.toContain("dark-particle-light");
+    expect(detailValue(dark, "dark-scene-hdr", "Samples")).toBe(
+      "4× MSAA → resolve"
+    );
     expect(detailValue(dark, "dark-present-cache-pass", "Bloom strength")).toBe(
       "0.15 · low-quality override"
     );

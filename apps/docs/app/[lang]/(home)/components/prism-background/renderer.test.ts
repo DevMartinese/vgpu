@@ -1184,7 +1184,7 @@ test("uses the reduced shared GPU layout for low-quality light", async () => {
 
   expect(
     live.targets.slice(0, 2).map(({ sampleCount }) => sampleCount)
-  ).toEqual([1, 1]);
+  ).toEqual([1, 4]);
   expect(
     (live.lightBuffer.write.mock.calls[0]![0] as Float32Array).byteLength
   ).toBe(LOW_LIGHT_MESH_LAYOUT.vertexCount * LIGHT_VERTEX_STRIDE);
@@ -1252,7 +1252,7 @@ test("removes the far bloom and particle-light targets in low-quality dark", asy
   expect(live.effects).toHaveLength(11);
   expect(
     live.targets.slice(0, 2).map(({ sampleCount }) => sampleCount)
-  ).toEqual([1, 1]);
+  ).toEqual([1, 4]);
   expect(live.effects[7]!.set).toHaveBeenLastCalledWith(
     expect.objectContaining({ params: { bloomStrength: 0.15 } })
   );

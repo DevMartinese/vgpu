@@ -23,10 +23,7 @@ export function ensureDarkTargets(
   graph.sceneTarget ??= target(runtime.gpu, {
     size,
     format: "rgba16float",
-    msaa:
-      quality === "high" && !runtime.gpu.device.isCompatibilityMode
-        ? true
-        : undefined,
+    msaa: !runtime.gpu.device.isCompatibilityMode ? true : undefined,
     label: `${runtime.label}.pass-b-front-glass`,
   });
   graph.bloomTargets ??= Array.from(

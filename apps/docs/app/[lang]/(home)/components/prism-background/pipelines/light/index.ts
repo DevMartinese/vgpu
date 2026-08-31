@@ -68,7 +68,7 @@ export function createLightPipeline(
       if (destroyed)
         throw new Error("Cannot prepare a destroyed light pipeline.");
       resizeRuntime(runtime, output.size);
-      ensureLightTargets(graph, runtime, output.size, quality);
+      ensureLightTargets(graph, runtime, output.size);
       debugSources = createLightDebugSources({
         quality,
         lightMeshLayout: graph.lightMeshLayout,

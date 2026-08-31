@@ -54,7 +54,7 @@ describe("dark pipeline debug targets", () => {
       await pipeline.prepare(output);
       expect(pipeline.lightMeshLayout).toBe(LOW_LIGHT_MESH_LAYOUT);
       expect(pipeline.targets.backdropHDR?.sampleCount).toBe(1);
-      expect(pipeline.targets.sceneHDR?.sampleCount).toBe(1);
+      expect(pipeline.targets.sceneHDR?.sampleCount).toBe(4);
       expect(pipeline.debugTarget("dark-bloom-0")).toBeDefined();
       expect(pipeline.debugTarget("dark-bloom-1")).toBeDefined();
       expect(pipeline.debugTarget("dark-bloom-2")).toBeUndefined();
