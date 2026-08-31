@@ -99,6 +99,9 @@ importers:
       '@orama/tokenizers':
         specifier: ^3.1.16
         version: 3.1.18
+      '@pmndrs/detect-gpu':
+        specifier: 6.0.20
+        version: 6.0.20
       '@streamdown/cjk':
         specifier: ^1.0.1
         version: 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(react@19.2.8)(unified@11.0.5)
@@ -1584,6 +1587,9 @@ packages:
 
   '@pmndrs/assets@1.7.0':
     resolution: {integrity: sha512-zHmKNS+3Jvu9K3zJBQfYQKT9Pn9IQt8s0q/eJC3CXKpWpyg6IBa+ivN9NgDn+fDT2AVjUh2YRZ//GXUueuAdCg==}
+
+  '@pmndrs/detect-gpu@6.0.20':
+    resolution: {integrity: sha512-XavJbHaxPOMwSjxVUt0zpEzxxDQ2nPu1pqnyrHKqV3CZHFhkUSz9h86NcoyX7ImemqgayyKWyttU8/rMzxJ7Ig==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -7374,6 +7380,8 @@ snapshots:
   '@oxc-project/types@0.142.0': {}
 
   '@pmndrs/assets@1.7.0': {}
+
+  '@pmndrs/detect-gpu@6.0.20': {}
 
   '@protobufjs/aspromise@1.1.2': {}
 
