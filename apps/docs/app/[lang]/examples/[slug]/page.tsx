@@ -74,7 +74,7 @@ const ExampleDetailPage = async ({ params }: ExampleDetailPageProps) => {
               downloadUrl={`/examples/${example.meta.slug}/download`}
               prompt={prompt}
               source={source}
-              v0Url={buildV0OpenUrl(example.meta.slug)}
+              v0Url={buildV0OpenUrl(example)}
             />
           </div>
         </div>
