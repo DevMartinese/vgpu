@@ -154,6 +154,7 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   const seep = smoothstep(0.62, 0.25, grain);
   const fringe = glow.w.mul(glow.w).mul(1.4).mul(seep);
   const heat = glow.x.mul(glow.x).mul(1.6).add(fringe).mul(pulse).clamp(0, 1);
+  const incandescence = heat.pow(1.35);
 
   // Band-limiting: fade each detail register out as its wavelength drops
   // under the pixel footprint, so distant/minified areas stay clean instead
@@ -176,7 +177,7 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   // Incandescence: blackbody ramp over the baked heat field, crushed
   // slightly so contact rims go yellow-white while striation crests cool
   // through deep red.
-  material.emissiveNode = blackbody({ t: heat.pow(1.35) }).mul(glowIntensity);
+  material.emissiveNode = blackbody({ t: incandescence }).mul(glowIntensity);
 
   // Roughness map, not a constant: rubble is matte with sharp grain breakup,
   // the glassy skin is polished but streaked by flow lines, vesicle pits and
@@ -248,16 +249,28 @@ export function createLavaMaterial(options: LavaMaterialOptions): LavaMaterial {
   ).div(eps);
   const skinTangent = skinGrad.sub(normalLocal.mul(skinGrad.dot(normalLocal)));
 
+  // The broad red fringe is hot rock, even where the narrower liquid mask has
+  // not opened yet. Fade the large crust-plate normal against the exact signal
+  // that starts blackbody incandescence, so Voronoi slabs are gone by the time
+  // the surface reads visibly red instead of embossing a stone normal on lava.
+  const hotSurface = smoothstep(0.015, 0.09, incandescence);
+  const crustNormalFade = hotSurface.oneMinus();
   const bumped = normalLocal
-    .sub(tangentGrad.mul(mix(float(0.16), float(0.04), molten)))
-    .sub(microTangent.mul(mix(float(0.022), float(0.008), molten).mul(microFade)))
+    .sub(tangentGrad.mul(float(0.16).mul(crustNormalFade)))
+    .sub(
+      microTangent.mul(
+        mix(float(0.022), float(0.008), hotSurface).mul(microFade)
+      )
+    )
     .sub(skinTangent.mul(molten.mul(0.014).mul(striaeFade)))
     .normalize();
   material.normalNode = transformNormalToView(bumped);
 
   // The clearcoat is the frozen glass skin draped over the rock: it follows
   // the plates but not the mineral grain, so it gets its own smoother normal.
-  const skinNormal = normalLocal.sub(tangentGrad.mul(0.1)).normalize();
+  const skinNormal = normalLocal
+    .sub(tangentGrad.mul(float(0.1).mul(crustNormalFade)))
+    .normalize();
   material.clearcoatNormalNode = transformNormalToView(skinNormal);
 
   return { material, glowIntensity, scale };
