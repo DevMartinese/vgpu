@@ -220,6 +220,29 @@ async function checkMarkdown(baseUrl) {
     explicitExample.headers.get("link")?.includes("<https://vgpu.sh/examples/gradient>; rel=\"canonical\""),
     "explicit example Markdown: canonical Link is missing",
   );
+  assert(
+    explicitExampleBody.includes("https://vgpu.sh/examples/gradient/source.md"),
+    "explicit example Markdown: complete source link is missing",
+  );
+
+  const explicitExampleSource = await request(baseUrl, "/examples/gradient/source.md");
+  assertMarkdownResponse(explicitExampleSource, "explicit example source Markdown");
+  const explicitExampleSourceBody = await explicitExampleSource.text();
+  for (const expected of ["# Simple Gradient source", "## `index.tsx`", "## `renderer.ts`", "## `shader.wgsl`"]) {
+    assert(
+      explicitExampleSourceBody.includes(expected),
+      `explicit example source Markdown: missing ${expected}`,
+    );
+  }
+
+  const negotiatedExampleSource = await request(baseUrl, "/examples/gradient/source", {
+    headers: { Accept: "text/markdown" },
+  });
+  assertMarkdownResponse(negotiatedExampleSource, "negotiated example source Markdown");
+  assert(
+    await negotiatedExampleSource.text() === explicitExampleSourceBody,
+    "explicit and negotiated example source Markdown differ",
+  );
 
   const missingExample = await request(baseUrl, "/examples/not-a-real-example", {
     headers: { Accept: "text/markdown" },

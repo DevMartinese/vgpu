@@ -54,10 +54,16 @@ const proxy = createProxy({
   markdownRoutes: [
     { from: "/", to: "/[lang]/index.md" },
     { from: "/docs/*path", to: "/[lang]/llms.mdx/*path" },
-    ...exampleSlugs.map((slug) => ({
-      from: `/examples/${slug}` as const,
-      to: `/[lang]/examples.md/${slug}` as const,
-    })),
+    ...exampleSlugs.flatMap((slug) => [
+      {
+        from: `/examples/${slug}` as const,
+        to: `/[lang]/examples.md/${slug}` as const,
+      },
+      {
+        from: `/examples/${slug}/source` as const,
+        to: `/[lang]/examples.md/${slug}/source` as const,
+      },
+    ]),
   ],
 });
 
