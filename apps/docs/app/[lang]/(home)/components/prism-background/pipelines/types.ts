@@ -13,6 +13,24 @@ export type PrismThemePreference = "auto" | PrismPipelineMode;
 /** Render-budget tier selected independently from the visual theme. */
 export type PrismPipelineQuality = "high" | "low";
 
+/** User-facing quality choice; auto always begins at High for a new mount. */
+export type PrismQualityPreference = "auto" | PrismPipelineQuality;
+
+/** Why the currently effective quality tier was selected. */
+export type PrismQualityReason =
+  | "initial"
+  | "forced"
+  | "gpu-tier"
+  | "battery"
+  | "runtime";
+
+/** Separates the user's preference from the pipeline that is on screen. */
+export interface PrismQualityState {
+  readonly preference: PrismQualityPreference;
+  readonly effective: PrismPipelineQuality;
+  readonly reason: PrismQualityReason;
+}
+
 export interface PrismPipelineRenderOptions {
   /** Skip retained scene/postprocess passes when only an overlay animates. */
   readonly updateScene?: boolean;

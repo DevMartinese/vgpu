@@ -27,6 +27,9 @@ import type {
   PrismDebugSource,
   PrismPipelineMode,
   PrismPipelineQuality,
+  PrismQualityPreference,
+  PrismQualityReason,
+  PrismQualityState,
 } from "./pipelines/types";
 import {
   automaticPointerPosition,
@@ -47,6 +50,10 @@ import type {
   PrismPerformanceRunOptions,
 } from "./performance/types";
 import type { PrismPerformanceSampler } from "./performance/sampler";
+import type {
+  PrismAutoQualityController,
+  PrismAutoQualityControllerOptions,
+} from "./performance/auto-quality";
 
 export type { PrismThumbnailOptions } from "./thumbnail";
 
@@ -64,8 +71,10 @@ export interface PrismRenderer extends ExampleRenderer<PrismControls> {
   /** Stable bridge identity; GPU-backed previews can replace its internals. */
   readonly debugBridge: PrismDebugPreviewBridge;
   debugSources(): readonly PrismDebugSource[];
+  getQualityState(): PrismQualityState;
+  subscribeQuality(listener: (state: PrismQualityState) => void): () => void;
   setMode(mode: PrismPipelineMode): Promise<void>;
-  setQuality(quality: PrismPipelineQuality): Promise<void>;
+  setQualityPreference(preference: PrismQualityPreference): Promise<void>;
   /** Available only when the renderer was created for `?prism-perf`. */
   measurePerformance(
     options?: PrismPerformanceRunOptions
@@ -102,12 +111,18 @@ export interface PrismBrowserRendererOptions
   readonly framingElement?: HTMLElement;
   /** Explicit theme selected by the React integration layer. */
   readonly initialMode: PrismPipelineMode;
-  /** Explicit render-budget tier; defaults to the full-quality pipeline. */
-  readonly initialQuality?: PrismPipelineQuality;
+  /** User quality preference; Auto starts High and is the default. */
+  readonly initialQuality?: PrismQualityPreference;
   /** Loads preview-only WebGPU code; must only be enabled for `?debug`. */
   readonly debugPreviews?: boolean;
   /** Dynamically loads the deterministic sampler for `?prism-perf`. */
   readonly performanceSampling?: boolean;
+  /** Test seam for the post-first-frame dynamic import. */
+  loadAutoQuality?(): Promise<{
+    createPrismAutoQualityController(
+      options: PrismAutoQualityControllerOptions
+    ): PrismAutoQualityController;
+  }>;
 }
 
 export function createRenderer(
@@ -133,12 +148,25 @@ export function createRenderer(
   let debugHost: PrismDebugPreviewHost | undefined;
   let performanceSampler: PrismPerformanceSampler | undefined;
   let requestedMode = options.initialMode;
-  let requestedQuality = options.initialQuality ?? "high";
+  let qualityPreference = options.initialQuality ?? "auto";
+  let requestedQuality: PrismPipelineQuality =
+    qualityPreference === "low" ? "low" : "high";
+  let requestedQualityReason: PrismQualityReason =
+    qualityPreference === "auto" ? "initial" : "forced";
+  let effectiveQuality = requestedQuality;
+  let effectiveQualityReason: PrismQualityReason = requestedQualityReason;
+  const qualityListeners = new Set<(state: PrismQualityState) => void>();
+  let qualityTransition = 0;
+  let autoQualityGeneration = 0;
+  let autoQualityFrame = 0;
+  let autoQualityTask: ReturnType<typeof setTimeout> | undefined;
+  let autoQualityScheduled = false;
+  let autoQualityController: PrismAutoQualityController | undefined;
   let loop: { stop(): void } | undefined;
   let observer: ResizeObserver | undefined;
   let visibilityObserver: IntersectionObserver | undefined;
-  const pauseWhenInactive =
-    !options.debugPreviews && !options.performanceSampling;
+  const observeActivity = !options.performanceSampling;
+  const pauseWhenInactive = !options.debugPreviews && observeActivity;
   let schedulingReady = false;
   let documentVisible = true;
   let canvasNearViewport = true;
@@ -170,6 +198,31 @@ export function createRenderer(
   const onPointerMove = (event: PointerEvent) => {
     if (mobileAutoPointer?.matches) return;
     interaction.onPointerMove(event);
+  };
+
+  const qualityState = (): PrismQualityState => ({
+    preference: qualityPreference,
+    effective: effectiveQuality,
+    reason: effectiveQualityReason,
+  });
+
+  const emitQualityState = () => {
+    const state = qualityState();
+    for (const listener of qualityListeners) listener(state);
+  };
+
+  const setEffectiveQualityState = (
+    quality: PrismPipelineQuality,
+    reason: PrismQualityReason
+  ) => {
+    if (
+      effectiveQuality === quality &&
+      effectiveQualityReason === reason
+    )
+      return;
+    effectiveQuality = quality;
+    effectiveQualityReason = reason;
+    emitQualityState();
   };
 
   const handleFailure = (error: unknown) => {
@@ -220,6 +273,7 @@ export function createRenderer(
 
   const resize = (size: RenderSize) => {
     if (disposed || size.width <= 0 || size.height <= 0) return;
+    autoQualityController?.resetHealth();
     pendingSize = size;
     if (!resizeFrame) resizeFrame = requestAnimationFrame(applyResize);
   };
@@ -227,7 +281,10 @@ export function createRenderer(
   const currentQuality = (): PrismPipelineQuality =>
     pipelineController?.quality ?? requestedQuality;
 
-  const measure = () => {
+  const measureForQuality = (
+    quality: PrismPipelineQuality,
+    immediate = false
+  ) => {
     const rect = options.canvas.getBoundingClientRect();
     if (options.framingElement) {
       pendingFraming = viewportWithinCanvas(
@@ -240,12 +297,149 @@ export function createRenderer(
       width: rect.width,
       height: rect.height,
       dpr:
-        currentQuality() === "low"
+        quality === "low"
           ? LOW_QUALITY_DPR
           : performanceDpr ??
             Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
     });
+    if (immediate && resizeFrame) {
+      cancelAnimationFrame(resizeFrame);
+      applyResize();
+    }
   };
+
+  const measure = () => measureForQuality(requestedQuality);
+
+  const cancelAutoQuality = () => {
+    autoQualityGeneration += 1;
+    autoQualityController?.dispose();
+    autoQualityController = undefined;
+    autoQualityScheduled = false;
+    if (autoQualityFrame) cancelAnimationFrame(autoQualityFrame);
+    if (autoQualityTask !== undefined) clearTimeout(autoQualityTask);
+    autoQualityFrame = 0;
+    autoQualityTask = undefined;
+  };
+
+  const scheduleAutoQuality = () => {
+    if (
+      disposed ||
+      options.performanceSampling ||
+      qualityPreference !== "auto" ||
+      effectiveQuality !== "high" ||
+      autoQualityController ||
+      autoQualityScheduled
+    )
+      return;
+    autoQualityScheduled = true;
+    const generation = autoQualityGeneration;
+    autoQualityFrame = requestAnimationFrame(() => {
+      autoQualityFrame = 0;
+      autoQualityTask = setTimeout(() => {
+        autoQualityTask = undefined;
+        void startAutoQuality(generation);
+      }, 0);
+    });
+  };
+
+  async function startAutoQuality(generation: number): Promise<void> {
+    try {
+      const loaded = await (options.loadAutoQuality?.() ??
+        import("./performance/auto-quality"));
+      if (
+        disposed ||
+        generation !== autoQualityGeneration ||
+        qualityPreference !== "auto" ||
+        effectiveQuality !== "high"
+      )
+        return;
+      autoQualityScheduled = false;
+      autoQualityController = loaded.createPrismAutoQualityController({
+        onDowngrade(reason) {
+          if (
+            disposed ||
+            generation !== autoQualityGeneration ||
+            qualityPreference !== "auto" ||
+            effectiveQuality !== "high"
+          )
+            return;
+          void applyEffectiveQuality("low", reason, generation).catch(() => {
+            // The active High pipeline and its DPR were restored by the transition.
+          });
+        },
+      });
+    } catch {
+      if (generation === autoQualityGeneration) autoQualityScheduled = false;
+      // Auto is advisory. A failed deferred import leaves the High image intact.
+    }
+  }
+
+  async function applyEffectiveQuality(
+    quality: PrismPipelineQuality,
+    reason: PrismQualityReason,
+    generation = autoQualityGeneration
+  ): Promise<void> {
+    if (disposed || generation !== autoQualityGeneration) return;
+    const transition = ++qualityTransition;
+    const previousRequestedQuality = requestedQuality;
+    const previousRequestedReason = requestedQualityReason;
+    requestedQuality = quality;
+    requestedQualityReason = reason;
+
+    if (!pipelineController) {
+      await ready;
+      if (
+        disposed ||
+        transition !== qualityTransition ||
+        generation !== autoQualityGeneration
+      )
+        return;
+    }
+    const controller = pipelineController;
+    if (!controller) return;
+    if (
+      controller.quality === quality &&
+      controller.requestedQuality === quality
+    ) {
+      setEffectiveQualityState(quality, reason);
+      pendingPresent = true;
+      autoQualityController?.resetHealth();
+      return;
+    }
+
+    if (quality === "low") measureForQuality("low", true);
+    try {
+      await controller.setQuality(quality);
+      if (
+        disposed ||
+        transition !== qualityTransition ||
+        generation !== autoQualityGeneration
+      )
+        return;
+      if (quality === "high") measureForQuality("high", true);
+      setEffectiveQualityState(quality, reason);
+      pendingPresent = true;
+      lastDustTime = -1;
+      debugHost?.invalidate();
+      if (quality === "low") {
+        autoQualityController?.dispose();
+        autoQualityController = undefined;
+      }
+    } catch (error) {
+      if (
+        disposed ||
+        transition !== qualityTransition ||
+        generation !== autoQualityGeneration
+      )
+        return;
+      requestedQuality = previousRequestedQuality;
+      requestedQualityReason = previousRequestedReason;
+      void controller.setQuality(effectiveQuality);
+      if (quality === "low") measureForQuality(effectiveQuality, true);
+      reportRecoverableFailure(error);
+      throw error;
+    }
+  }
 
   const tick = (currentFrame: Frame) => {
     const pipeline = pipelineController?.pipeline;
@@ -262,7 +456,6 @@ export function createRenderer(
     const orbit = performanceFrame
       ? performanceFrame.orbit
       : interaction.stepOrbit();
-    if (!performanceFrame && !shouldRenderAtCappedRate()) return;
     const reveal = currentRevealProgress();
     const revealProgress = reveal.opacity;
     const beamWidthReveal = reveal.beamWidth;
@@ -274,18 +467,48 @@ export function createRenderer(
     const dustTime =
       performanceFrame?.dustTime ??
       (gpuClock ? Math.floor(gpuClock.time * DUST_FPS) / DUST_FPS : 0);
-    const dustMoved =
+    const dustAnimating =
       pipeline.mode === "dark" &&
-      controls.view === "glass" &&
-      dustTime !== lastDustTime;
+      controls.view === "glass";
+    const dustMoved = dustAnimating && dustTime !== lastDustTime;
+    const productionActive =
+      Boolean(performanceFrame) ||
+      updateScene ||
+      dustMoved ||
+      revealChanged;
+    const healthActive =
+      !performanceFrame &&
+      (productionActive || dustAnimating) &&
+      qualityPreference === "auto" &&
+      currentQuality() === "high" &&
+      documentVisible &&
+      canvasNearViewport;
+    const healthSample = (rendered: boolean) => {
+      autoQualityController?.recordFrame({
+        deltaMs: (gpuClock?.deltaTime ?? 0) * 1_000,
+        active: healthActive,
+        rendered,
+        mobile: mobileAutoPointer?.matches === true,
+        workload:
+          dustAnimating && !updateScene && !revealChanged
+            ? "dust"
+            : "interactive",
+      });
+    };
+    if (!performanceFrame && !shouldRenderAtCappedRate()) {
+      healthSample(false);
+      return;
+    }
     if (
       !performanceFrame &&
       !updateScene &&
       !dustMoved &&
       !debugPending &&
       !revealChanged
-    )
+    ) {
+      healthSample(false);
       return;
+    }
     if (performanceFrame || updateScene || dustMoved || revealChanged) {
       try {
         if (aim) setRuntimeLampAim(runtime, aim[0], aim[1]);
@@ -308,12 +531,16 @@ export function createRenderer(
         lastRevealProgress = revealProgress;
         lastBeamWidthReveal = beamWidthReveal;
         if (performanceFrame) performanceSampler?.endFrame(performanceFrame);
+        else {
+          healthSample(true);
+          scheduleAutoQuality();
+        }
       } catch (error) {
         performanceSampler?.fail(error);
         handleFailure(error);
         return;
       }
-    }
+    } else healthSample(false);
     debugPending = false;
     try {
       debugHost?.render(currentFrame, gpuClock?.time ?? 0);
@@ -370,6 +597,7 @@ export function createRenderer(
     if (!shouldRun) {
       loop?.stop();
       loop = undefined;
+      autoQualityController?.resetHealth();
       return;
     }
     // Layout and controls may have changed while no frame was scheduled. A
@@ -384,16 +612,19 @@ export function createRenderer(
   }
 
   const onVisibilityChange = () => {
-    if (!pauseWhenInactive || disposed) return;
+    if (!observeActivity || disposed) return;
     documentVisible = !document.hidden;
     if (!documentVisible) interaction.onPointerLeave();
-    reconcileLoop();
+    autoQualityController?.resetHealth();
+    if (pauseWhenInactive) reconcileLoop();
   };
 
   function dispose(): void {
     if (disposed) return;
     disposed = true;
     schedulingReady = false;
+    cancelAutoQuality();
+    qualityListeners.clear();
     loop?.stop();
     loop = undefined;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
@@ -412,7 +643,7 @@ export function createRenderer(
     window.removeEventListener("blur", interaction.onPointerLeave);
     if (typeof window !== "undefined")
       window.removeEventListener("resize", measure);
-    if (pauseWhenInactive && typeof document !== "undefined")
+    if (observeActivity && typeof document !== "undefined")
       document.removeEventListener("visibilitychange", onVisibilityChange);
 
     debugRelay?.setDelegate(NOOP_PRISM_DEBUG_PREVIEW_BRIDGE);
@@ -512,7 +743,14 @@ export function createRenderer(
         lastDustTime = -1;
         renderTimeBudget = 0;
         hasRenderedCappedFrame = false;
-        if (qualityChanged) measure();
+        setEffectiveQualityState(
+          quality,
+          quality === requestedQuality
+            ? requestedQualityReason
+            : effectiveQualityReason
+        );
+        autoQualityController?.resetHealth();
+        if (qualityChanged) measureForQuality(quality);
         debugHost?.invalidate();
       },
     });
@@ -551,7 +789,7 @@ export function createRenderer(
     await pipelineController.ready;
     if (disposed) return;
     gpuClock = clock(gpu);
-    if (pauseWhenInactive) {
+    if (observeActivity) {
       documentVisible =
         typeof document === "undefined" ? true : !document.hidden;
       canvasNearViewport = isCanvasNearViewport(options.canvas);
@@ -563,7 +801,8 @@ export function createRenderer(
             const entry = entries[entries.length - 1];
             if (!entry || disposed) return;
             canvasNearViewport = entry.isIntersecting;
-            reconcileLoop();
+            autoQualityController?.resetHealth();
+            if (pauseWhenInactive) reconcileLoop();
           },
           {
             rootMargin: `${OFFSCREEN_ROOT_MARGIN_PX}px 0px`,
@@ -589,9 +828,18 @@ export function createRenderer(
     debugSources() {
       return pipelineController?.debugSources() ?? [];
     },
+    getQualityState() {
+      return qualityState();
+    },
+    subscribeQuality(listener) {
+      if (disposed) return () => {};
+      qualityListeners.add(listener);
+      return () => qualityListeners.delete(listener);
+    },
     async setMode(mode) {
       if (disposed) return;
       requestedMode = mode;
+      autoQualityController?.resetHealth();
       if (!pipelineController) {
         await ready;
         return;
@@ -601,6 +849,7 @@ export function createRenderer(
         if (disposed) return;
         pendingPresent = true;
         lastDustTime = -1;
+        autoQualityController?.resetHealth();
         debugHost?.invalidate();
       } catch (error) {
         if (disposed) return;
@@ -611,24 +860,18 @@ export function createRenderer(
         throw error;
       }
     },
-    async setQuality(quality) {
+    async setQualityPreference(preference) {
       if (disposed) return;
-      requestedQuality = quality;
-      if (!pipelineController) {
-        await ready;
-        return;
-      }
-      try {
-        await pipelineController.setQuality(quality);
-        if (disposed) return;
-        pendingPresent = true;
-        lastDustTime = -1;
-        debugHost?.invalidate();
-      } catch (error) {
-        if (disposed) return;
-        reportRecoverableFailure(error);
-        throw error;
-      }
+      cancelAutoQuality();
+      const generation = autoQualityGeneration;
+      qualityPreference = preference;
+      const quality: PrismPipelineQuality =
+        preference === "low" ? "low" : "high";
+      const reason: PrismQualityReason =
+        preference === "auto" ? "initial" : "forced";
+      if (effectiveQuality === quality) effectiveQualityReason = reason;
+      emitQualityState();
+      await applyEffectiveQuality(quality, reason, generation);
     },
     async measurePerformance(measureOptions = {}) {
       if (disposed) throw new Error("Cannot sample a disposed prism renderer.");

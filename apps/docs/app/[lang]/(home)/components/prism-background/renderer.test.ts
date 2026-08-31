@@ -423,6 +423,7 @@ function drawNamed(live: ReturnType<typeof gpu>, label: string) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -855,19 +856,245 @@ test("remeasures the canvas when quality changes at runtime", async () => {
   env.flushAnimationFrames();
   expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
 
-  await renderer.setQuality("low");
+  await renderer.setQualityPreference("low");
   env.flushAnimationFrames();
   expect(live.surface.resize).toHaveBeenLastCalledWith([200, 100]);
   expect(
     (live.lightBuffer.write.mock.calls.at(-1)![0] as Float32Array).byteLength
   ).toBe(LOW_LIGHT_MESH_LAYOUT.vertexCount * LIGHT_VERTEX_STRIDE);
 
-  await renderer.setQuality("high");
+  await renderer.setQualityPreference("high");
   env.flushAnimationFrames();
   expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
   expect(
     (live.lightBuffer.write.mock.calls.at(-1)![0] as Float32Array).byteLength
   ).toBe(lightVertexCount() * LIGHT_VERTEX_STRIDE);
+  renderer.dispose();
+});
+
+test("renders High before loading the deferred Auto controller", async () => {
+  vi.useFakeTimers();
+  const env = browser();
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const autoController = {
+    recordFrame: vi.fn(),
+    resetHealth: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const createAuto = vi.fn(() => autoController);
+  const loadAutoQuality = vi.fn(async () => ({
+    createPrismAutoQualityController: createAuto,
+  }));
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    loadAutoQuality,
+  });
+  await renderer.ready;
+  env.flushAnimationFrames();
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+
+  tick(live.loopFrame);
+  expect(renderer.getQualityState()).toEqual({
+    preference: "auto",
+    effective: "high",
+    reason: "initial",
+  });
+  expect(live.loopFrame.pass).toHaveBeenCalled();
+  expect(loadAutoQuality).not.toHaveBeenCalled();
+
+  env.flushAnimationFrames();
+  expect(loadAutoQuality).not.toHaveBeenCalled();
+  await vi.runOnlyPendingTimersAsync();
+  expect(loadAutoQuality).toHaveBeenCalledOnce();
+  expect(createAuto).toHaveBeenCalledOnce();
+  renderer.dispose();
+});
+
+test("performance sampling never starts Auto", async () => {
+  vi.useFakeTimers();
+  const env = browser();
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const loadAutoQuality = vi.fn();
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    performanceSampling: true,
+    loadAutoQuality,
+  });
+  await renderer.ready;
+  env.flushAnimationFrames();
+  live.instance.fns.frameLoop.mock.calls[0]![0](live.loopFrame);
+  env.flushAnimationFrames();
+  await vi.runOnlyPendingTimersAsync();
+  expect(loadAutoQuality).not.toHaveBeenCalled();
+  renderer.dispose();
+});
+
+test("an explicit preference cancels a stale Auto import", async () => {
+  vi.useFakeTimers();
+  const env = browser();
+  const live = gpu();
+  const pendingAuto = deferred<{
+    createPrismAutoQualityController: ReturnType<typeof vi.fn>;
+  }>();
+  const createAuto = vi.fn();
+  const loadAutoQuality = vi.fn(() => pendingAuto.promise);
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    loadAutoQuality,
+  });
+  await renderer.ready;
+  env.flushAnimationFrames();
+  live.instance.fns.frameLoop.mock.calls[0]![0](live.loopFrame);
+  env.flushAnimationFrames();
+  await vi.runOnlyPendingTimersAsync();
+  expect(loadAutoQuality).toHaveBeenCalledOnce();
+
+  await renderer.setQualityPreference("high");
+  pendingAuto.resolve({ createPrismAutoQualityController: createAuto });
+  await pendingAuto.promise;
+  await Promise.resolve();
+  expect(createAuto).not.toHaveBeenCalled();
+  expect(renderer.getQualityState()).toEqual({
+    preference: "high",
+    effective: "high",
+    reason: "forced",
+  });
+  renderer.dispose();
+});
+
+test("forcing High supersedes an Auto Low preparation and restores DPR", async () => {
+  vi.useFakeTimers();
+  const env = browser();
+  const live = gpu();
+  let requestLow!: (reason: "gpu-tier") => void;
+  const loadAutoQuality = vi.fn(async () => ({
+    createPrismAutoQualityController: (options: {
+      onDowngrade(reason: "gpu-tier"): void;
+    }) => {
+      requestLow = options.onDowngrade;
+      return {
+        recordFrame: vi.fn(),
+        resetHealth: vi.fn(),
+        dispose: vi.fn(),
+      };
+    },
+  }));
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    loadAutoQuality,
+  });
+  await renderer.ready;
+  env.flushAnimationFrames();
+  live.instance.fns.frameLoop.mock.calls[0]![0](live.loopFrame);
+  env.flushAnimationFrames();
+  await vi.runOnlyPendingTimersAsync();
+
+  requestLow("gpu-tier");
+  expect(live.surface.resize).toHaveBeenLastCalledWith([200, 100]);
+  await renderer.setQualityPreference("high");
+  expect(renderer.getQualityState()).toEqual({
+    preference: "high",
+    effective: "high",
+    reason: "forced",
+  });
+  expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
+  renderer.dispose();
+});
+
+test("Auto downgrades once across theme changes and selecting Auto restarts High", async () => {
+  vi.useFakeTimers();
+  const env = browser();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Promise.reject(new Error("offline")))
+  );
+  const live = gpu();
+  const downgrade: ((reason: "gpu-tier") => void)[] = [];
+  const controllers: { dispose: ReturnType<typeof vi.fn> }[] = [];
+  const loadAutoQuality = vi.fn(async () => ({
+    createPrismAutoQualityController: (options: {
+      onDowngrade(reason: "gpu-tier"): void;
+    }) => {
+      downgrade.push(options.onDowngrade);
+      const controller = {
+        recordFrame: vi.fn(),
+        resetHealth: vi.fn(),
+        dispose: vi.fn(),
+      };
+      controllers.push(controller);
+      return controller;
+    },
+  }));
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "dark",
+    loadAutoQuality,
+  });
+  await renderer.ready;
+  env.flushAnimationFrames();
+  const tick = live.instance.fns.frameLoop.mock.calls[0]![0];
+  tick(live.loopFrame);
+  env.flushAnimationFrames();
+  await vi.runOnlyPendingTimersAsync();
+
+  downgrade[0]!("gpu-tier");
+  await vi.waitFor(() =>
+    expect(renderer.getQualityState()).toEqual({
+      preference: "auto",
+      effective: "low",
+      reason: "gpu-tier",
+    })
+  );
+  expect(controllers[0]!.dispose).toHaveBeenCalledOnce();
+
+  await renderer.setMode("light");
+  expect(renderer.getQualityState().effective).toBe("low");
+  downgrade[0]!("gpu-tier");
+  expect(renderer.getQualityState().effective).toBe("low");
+
+  await renderer.setQualityPreference("auto");
+  expect(renderer.getQualityState()).toEqual({
+    preference: "auto",
+    effective: "high",
+    reason: "initial",
+  });
+  tick(live.loopFrame);
+  env.flushAnimationFrames();
+  await vi.runOnlyPendingTimersAsync();
+  expect(loadAutoQuality).toHaveBeenCalledTimes(2);
+  renderer.dispose();
+});
+
+test("applies DPR 1 before Low preparation and restores High DPR on failure", async () => {
+  const env = browser();
+  vi.stubGlobal("navigator", {});
+  const live = gpu();
+  mocks.init.mockResolvedValueOnce(live.instance);
+  const renderer = createRenderer({
+    canvas: env.canvas,
+    initialMode: "light",
+    initialQuality: "high",
+  });
+  await renderer.ready;
+  env.flushAnimationFrames();
+  expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
+
+  live.failNextCompile(new Error("low shader failed"));
+  const transition = renderer.setQualityPreference("low");
+  expect(live.surface.resize).toHaveBeenLastCalledWith([200, 100]);
+  await expect(transition).rejects.toThrow("low shader failed");
+  expect(live.surface.resize).toHaveBeenLastCalledWith([400, 200]);
+  expect(renderer.getQualityState().effective).toBe("high");
   renderer.dispose();
 });
 
@@ -1935,9 +2162,9 @@ test("stays stopped when initialization finishes hidden and offscreen", async ()
 });
 
 test.each([
-  ["debug previews", { debugPreviews: true }],
-  ["performance sampling", { performanceSampling: true }],
-] as const)("%s bypass inactive scheduling", async (_label, optIn) => {
+  ["debug previews", { debugPreviews: true }, true],
+  ["performance sampling", { performanceSampling: true }, false],
+] as const)("%s bypass inactive scheduling", async (_label, optIn, observesActivity) => {
   const env = browser();
   env.setHidden(true);
   env.setCanvasRect({ top: 2_000, bottom: 2_100 });
@@ -1952,8 +2179,12 @@ test.each([
   await renderer.ready;
 
   expect(live.instance.fns.frameLoop).toHaveBeenCalledOnce();
-  expect(env.intersectionObserve).not.toHaveBeenCalled();
-  expect(env.documentListeners.has("visibilitychange")).toBe(false);
+  expect(env.intersectionObserve).toHaveBeenCalledTimes(
+    observesActivity ? 1 : 0
+  );
+  expect(env.documentListeners.has("visibilitychange")).toBe(
+    observesActivity
+  );
   env.setHidden(false, true);
   env.intersect(false);
   expect(live.stop).not.toHaveBeenCalled();

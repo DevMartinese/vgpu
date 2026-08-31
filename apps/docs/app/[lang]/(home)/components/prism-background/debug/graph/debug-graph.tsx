@@ -26,7 +26,8 @@ import "./debug-graph.css";
 import type { PrismDebugSource } from "../../pipelines/types";
 import type {
   PrismPipelineMode,
-  PrismPipelineQuality,
+  PrismQualityPreference,
+  PrismQualityState,
   PrismThemePreference,
 } from "../../pipelines/types";
 import type { PrismControls } from "../../types";
@@ -56,9 +57,9 @@ export interface PrismDebugGraphProps {
   readonly controls: PrismControls;
   readonly mode: PrismPipelineMode;
   onControlsChange(updater: PrismControlsUpdater): void;
-  onQualityChange(quality: PrismPipelineQuality): void;
+  onQualityChange(quality: PrismQualityPreference): void;
   onThemeChange(theme: PrismThemePreference): void;
-  readonly quality: PrismPipelineQuality;
+  readonly quality: PrismQualityState;
   readonly sources?: readonly PrismDebugSource[];
   readonly theme: PrismThemePreference;
 }
@@ -77,8 +78,8 @@ export function PrismDebugGraph({
   theme,
 }: PrismDebugGraphProps) {
   const baseModel = useMemo(
-    () => createDebugGraphModel(sources, bridge, mode, quality),
-    [bridge, mode, quality, sources]
+    () => createDebugGraphModel(sources, bridge, mode, quality.effective),
+    [bridge, mode, quality.effective, sources]
   );
   const [model, setModel] = useState(baseModel);
   useEffect(() => {
@@ -152,9 +153,9 @@ interface GraphSurfaceProps {
   readonly mode: PrismPipelineMode;
   readonly model: ReturnType<typeof createDebugGraphModel>;
   open?(): void;
-  onQualityChange(quality: PrismPipelineQuality): void;
+  onQualityChange(quality: PrismQualityPreference): void;
   onThemeChange(theme: PrismThemePreference): void;
-  readonly quality: PrismPipelineQuality;
+  readonly quality: PrismQualityState;
   readonly rememberViewport: OnMove;
   readonly theme: PrismThemePreference;
   readonly viewportRef: RefObject<Viewport>;
@@ -263,11 +264,13 @@ function PipelineSelectors({
   quality,
   theme,
 }: {
-  onQualityChange(quality: PrismPipelineQuality): void;
+  onQualityChange(quality: PrismQualityPreference): void;
   onThemeChange(theme: PrismThemePreference): void;
-  readonly quality: PrismPipelineQuality;
+  readonly quality: PrismQualityState;
   readonly theme: PrismThemePreference;
 }) {
+  const effectiveLabel =
+    quality.effective === "high" ? "High" : "Low";
   return (
     <div className="prism-debug-graph__selectors">
       <label>
@@ -289,16 +292,37 @@ function PipelineSelectors({
         <select
           aria-label="Prism pipeline quality"
           onChange={(event) =>
-            onQualityChange(event.currentTarget.value as PrismPipelineQuality)
+            onQualityChange(event.currentTarget.value as PrismQualityPreference)
           }
-          value={quality}
+          value={quality.preference}
         >
+          <option value="auto">Auto ({effectiveLabel})</option>
           <option value="high">High</option>
           <option value="low">Low</option>
         </select>
+        <small aria-live="polite">
+          {quality.preference === "auto"
+            ? qualityReasonLabel(quality.reason)
+            : `Effective ${effectiveLabel}`}
+        </small>
       </label>
     </div>
   );
+}
+
+function qualityReasonLabel(reason: PrismQualityState["reason"]): string {
+  switch (reason) {
+    case "gpu-tier":
+      return "GPU tier";
+    case "battery":
+      return "Battery";
+    case "runtime":
+      return "Runtime health";
+    case "forced":
+      return "Explicit override";
+    default:
+      return "Initial High";
+  }
 }
 
 function CopyChangesButton({

@@ -17,6 +17,7 @@ dist
 # mirrors apps/docs/.gitignore).
 public/ort
 public/models/depth
+public/prism-gpu-benchmarks
 
 # local environment
 .env*.local

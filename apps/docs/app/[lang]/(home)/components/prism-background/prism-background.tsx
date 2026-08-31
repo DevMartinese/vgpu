@@ -12,7 +12,8 @@ import { createRenderer, type PrismRenderer } from "./renderer";
 import type {
   PrismDebugSource,
   PrismPipelineMode,
-  PrismPipelineQuality,
+  PrismQualityPreference,
+  PrismQualityState,
   PrismThemePreference,
 } from "./pipelines/types";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
@@ -60,7 +61,7 @@ function PrismCanvas() {
   const controlsRef = useRef<PrismControls>(DEFAULT_PRISM_CONTROLS);
   const controlsFrameRef = useRef(0);
   const themePreferenceRef = useRef<PrismThemePreference>("auto");
-  const qualityRef = useRef<PrismPipelineQuality>("high");
+  const qualityPreferenceRef = useRef<PrismQualityPreference>("auto");
   const requestedModeRef = useRef<PrismPipelineMode>("dark");
   const [showDebug, setShowDebug] = useState(false);
   const [debugSources, setDebugSources] = useState<
@@ -73,8 +74,11 @@ function PrismCanvas() {
     useState<PrismControls>(DEFAULT_PRISM_CONTROLS);
   const [debugMode, setDebugMode] = useState<PrismPipelineMode>("dark");
   const [debugTheme, setDebugTheme] = useState<PrismThemePreference>("auto");
-  const [debugQuality, setDebugQuality] =
-    useState<PrismPipelineQuality>("high");
+  const [debugQuality, setDebugQuality] = useState<PrismQualityState>({
+    preference: "auto",
+    effective: "high",
+    reason: "initial",
+  });
   const reportError = useCallback((error: unknown) => {
     console.error("Prism background failed to render.", error);
   }, []);
@@ -133,21 +137,43 @@ function PrismCanvas() {
     },
     [activateMode]
   );
-  const selectDebugQuality = useCallback((quality: PrismPipelineQuality) => {
-    qualityRef.current = quality;
-    setDebugQuality(quality);
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    void renderer.setQuality(quality).then(
-      () => {
-        if (rendererRef.current === renderer && qualityRef.current === quality)
-          setDebugSources(renderer.debugSources());
-      },
-      () => {
-        // The renderer reports quality preparation failures through onError.
+  const selectDebugQuality = useCallback(
+    (preference: PrismQualityPreference) => {
+      qualityPreferenceRef.current = preference;
+      setDebugQuality((current) => ({
+        ...current,
+        preference,
+        ...(current.effective === (preference === "low" ? "low" : "high")
+          ? { reason: preference === "auto" ? "initial" : "forced" }
+          : {}),
+      }));
+      const renderer = rendererRef.current;
+      if (!renderer) {
+        setDebugQuality({
+          preference,
+          effective: preference === "low" ? "low" : "high",
+          reason: preference === "auto" ? "initial" : "forced",
+        });
+        return;
       }
-    );
-  }, []);
+      void renderer.setQualityPreference(preference).then(
+        () => {
+          if (
+            rendererRef.current === renderer &&
+            qualityPreferenceRef.current === preference
+          ) {
+            const state = renderer.getQualityState();
+            if (state.preference === preference) setDebugQuality(state);
+            setDebugSources(renderer.debugSources());
+          }
+        },
+        () => {
+          // The renderer reports quality preparation failures through onError.
+        }
+      );
+    },
+    []
+  );
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -178,13 +204,19 @@ function PrismCanvas() {
       canvas,
       framingElement: framingElement ?? undefined,
       initialMode,
-      initialQuality: qualityRef.current,
+      initialQuality: qualityPreferenceRef.current,
       initialControls,
       debugPreviews,
       performanceSampling,
       onError: reportError,
     });
     rendererRef.current = renderer;
+    setDebugQuality(renderer.getQualityState());
+    const unsubscribeQuality = renderer.subscribeQuality((state) => {
+      if (rendererRef.current !== renderer) return;
+      setDebugQuality(state);
+      if (debugPreviews) setDebugSources(renderer.debugSources());
+    });
     let removePerformanceApi: (() => void) | undefined;
     if (performanceSampling) {
       void import("./performance/browser-api").then(
@@ -213,6 +245,7 @@ function PrismCanvas() {
     });
     return () => {
       removePerformanceApi?.();
+      unsubscribeQuality();
       themeObserver.disconnect();
       if (controlsFrameRef.current)
         cancelAnimationFrame(controlsFrameRef.current);

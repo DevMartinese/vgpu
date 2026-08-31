@@ -121,9 +121,11 @@ const proxy = createProxy({
 // HERO-ASSETS: `/hero/**` contains the non-localized mesh and cubemap fetched by the homepage
 // WebGPU renderer. There is no localized page route under this prefix, so keep these binaries out
 // of the geistdocs rewrite just like `/models/**` and `/ort/**` above.
+// `/prism-gpu-benchmarks/**` is the same class of homepage-only static data. Auto quality fetches
+// one pinned detect-gpu vendor table from this prefix after the first production frame.
 export const config = {
   matcher: [
-    "/((?!api(?:/|$)|openapi.json$|opengraph-image(?:/|$)|\\.well-known/api-catalog(?:/|$)|\\.well-known/vercel/flags(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api(?:/|$)|openapi.json$|opengraph-image(?:/|$)|\\.well-known/api-catalog(?:/|$)|\\.well-known/vercel/flags(?:/|$)|.well-known/vgpu-examples.json(?:/|$)|preview/|models/|ort/|hero/|prism-gpu-benchmarks/|examples/.+\\.(?:png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mesh)$|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
 

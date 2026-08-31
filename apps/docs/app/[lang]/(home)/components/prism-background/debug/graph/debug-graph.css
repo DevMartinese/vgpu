@@ -75,6 +75,13 @@
   outline-offset: 2px;
 }
 
+.prism-debug-graph__selectors small {
+  grid-column: 2;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.55rem;
+  white-space: nowrap;
+}
+
 .prism-debug-graph__actions button {
   min-height: 2rem;
   border: 1px solid rgba(255, 255, 255, 0.18);
