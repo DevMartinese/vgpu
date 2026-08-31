@@ -12,17 +12,17 @@ import type {
   ExampleRenderer,
   RenderSize,
 } from "@/lib/example-renderer";
-import { prismOptionalFeatures } from "./capabilities";
+import { prismOptionalFeatures } from "./runtime/capabilities";
 import {
   createPrismDebugPreviewRelay,
   NOOP_PRISM_DEBUG_PREVIEW_BRIDGE,
 } from "./debug/preview-bridge";
 import type { PrismDebugPreviewBridge } from "./debug/preview-bridge";
 import type { PrismDebugPreviewHost } from "./debug/gpu";
-import { viewportWithinCanvas, type NormalizedViewport } from "./framing";
+import { viewportWithinCanvas, type NormalizedViewport } from "./scene/framing";
 import { createPrismPipelineController } from "./pipeline-controller";
 import { lightMeshLayoutForQuality } from "./pipelines/quality";
-import { heroRevealProgress } from "./pipelines/presentation";
+import { heroRevealProgress } from "./pipelines/shared/presentation/index";
 import type {
   PrismDebugSource,
   PrismPipelineMode,

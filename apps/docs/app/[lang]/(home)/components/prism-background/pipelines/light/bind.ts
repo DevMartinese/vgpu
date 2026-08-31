@@ -1,8 +1,8 @@
 import { glassUniforms, sceneUniforms } from "../../runtime/uniforms";
 import type { PrismRuntime } from "../../runtime/types";
 import { ensureLightWireframeDraws } from "./create-graph";
-import { lightGlassAccentUniforms } from "./glass-accent";
-import { prismShadowUniforms } from "./shadow/tuning";
+import { lightGlassAccentUniforms } from "./passes/glass-accent/uniforms";
+import { prismShadowUniforms } from "./passes/shadow/tuning";
 import {
   lightCausticUniforms,
   lightPresentUniforms,

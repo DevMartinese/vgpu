@@ -1,4 +1,4 @@
-import { cameraView, wallHalfHeight, type CameraView } from "../camera";
+import { cameraView, wallHalfHeight, type CameraView } from "../scene/camera";
 import {
   applyProjectionFraming,
   fitProjectionDistance,
@@ -7,13 +7,13 @@ import {
   projectedBounds,
   type NormalizedViewport,
   type ProjectionFraming,
-} from "../framing";
+} from "../scene/framing";
 import {
   buildLightMesh,
   LIGHT_VERTEX_FLOATS,
   type LightMeshLayout,
-} from "../light-mesh";
-import { prismMeshData } from "../prism-mesh";
+} from "../scene/light-mesh";
+import { prismMeshData } from "../scene/prism-mesh";
 import {
   CAMERA_DISTANCE,
   DEFAULT_PRISM_CONTROLS,

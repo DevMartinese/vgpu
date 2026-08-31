@@ -8,7 +8,7 @@ import type {
 } from "../types";
 import { DUST_PARTICLE_COUNT } from "./create-graph";
 import type { DarkPipelineGraph } from "./types";
-import { darkWallClear } from "./wall-clear";
+import { darkWallClear } from "./passes/wall/clear";
 
 export function renderDarkGraph(
   current: Frame,

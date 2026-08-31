@@ -1,6 +1,6 @@
 import type { Frame, Surface, Target, TimerSpan } from "vgpu";
 
-import type { LightMeshLayout } from "../light-mesh";
+import type { LightMeshLayout } from "../scene/light-mesh";
 import type { PrismTheme } from "../types";
 
 export type PrismOutput = Surface | Target;

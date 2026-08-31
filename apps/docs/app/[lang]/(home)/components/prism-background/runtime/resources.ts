@@ -1,21 +1,21 @@
 import type { Geometry, Gpu } from "vgpu";
 import { sampler } from "vgpu";
 
-import { cameraView } from "../camera";
+import { cameraView } from "../scene/camera";
 import {
   createEnvironmentSampler,
   createEnvironmentTexture,
   destroyEnvironmentTexture,
   prepareEnvironmentTexture,
-} from "../environment-texture";
-import { IDENTITY_PROJECTION_FRAMING } from "../framing";
+} from "../environment/texture";
+import { IDENTITY_PROJECTION_FRAMING } from "../scene/framing";
 import {
   buildLightMesh,
   HIGH_LIGHT_MESH_LAYOUT,
   LIGHT_VERTEX_STRIDE,
   type LightMeshLayout,
-} from "../light-mesh";
-import { prismGeometry, prismWireframeGeometry } from "../prism-mesh";
+} from "../scene/light-mesh";
+import { prismGeometry, prismWireframeGeometry } from "../scene/prism-mesh";
 import {
   CAMERA_DISTANCE,
   DEFAULT_PRISM_CONTROLS,

@@ -469,8 +469,8 @@ export function controlGroupsForSource(
       return mode !== "dark"
         ? []
         : quality === "low"
-          ? LOW_QUALITY_BLOOM_CONTROLS
-          : BLOOM_CONTROLS;
+        ? LOW_QUALITY_BLOOM_CONTROLS
+        : BLOOM_CONTROLS;
     case "final-output":
       return OUTPUT_CONTROLS;
     default:

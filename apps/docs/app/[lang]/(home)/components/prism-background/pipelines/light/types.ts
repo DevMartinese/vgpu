@@ -1,7 +1,7 @@
 import type { Bundle, Draw, Effect, Geometry, Target } from "vgpu";
 
-import type { LightAssetTextures } from "../../assets/light/types";
-import type { LightMeshLayout } from "../../light-mesh";
+import type { LightAssetTextures } from "./assets/types";
+import type { LightMeshLayout } from "../../scene/light-mesh";
 import type { PrismPipelineQuality } from "../types";
 
 export interface LightPipelineGraph {

@@ -1,6 +1,6 @@
 import type { Bundle, Draw, Effect, Target } from "vgpu";
 
-import type { LightMeshLayout } from "../../light-mesh";
+import type { LightMeshLayout } from "../../scene/light-mesh";
 import type { PrismPipelineQuality } from "../types";
 
 export interface BloomLevelTargets {

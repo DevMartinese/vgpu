@@ -1,4 +1,4 @@
-import { HIGH_LIGHT_MESH_LAYOUT, type LightMeshLayout } from "../light-mesh";
+import { HIGH_LIGHT_MESH_LAYOUT, type LightMeshLayout } from "../scene/light-mesh";
 import type {
   PrismDebugSource,
   PrismPipelineMode,
@@ -204,8 +204,8 @@ export function createLightDebugSources(
         detail(
           "Shader",
           quality === "low"
-            ? "materials/light/wall-low.wgsl"
-            : "materials/light/wall.wgsl"
+            ? "pipelines/light/passes/wall/wall-low.wgsl"
+            : "pipelines/light/passes/wall/wall.wgsl"
         ),
         detail(
           "Material",
@@ -223,7 +223,7 @@ export function createLightDebugSources(
       "scalar",
       [input("shadow-geometry", "rasterize")],
       [
-        detail("Shader", "materials/light/shadow.wgsl"),
+        detail("Shader", "pipelines/light/passes/shadow/shadow.wgsl"),
         detail("Blend", "premultiplied"),
       ]
     ),
@@ -238,7 +238,7 @@ export function createLightDebugSources(
         input("wall-material", "modulate by wall normal"),
       ],
       [
-        detail("Shader", "materials/light/caustic.wgsl"),
+        detail("Shader", "pipelines/light/passes/caustic/caustic.wgsl"),
         detail("Draws", "2 · white beam + outgoing spectrum"),
         detail("Blend", "additive"),
       ]
@@ -252,7 +252,10 @@ export function createLightDebugSources(
         input("prism-mesh", "back faces"),
         input("studio-environment", "reflect"),
       ],
-      [detail("Shader", "glass-back.wgsl"), detail("Blend", "premultiplied")]
+      [
+        detail("Shader", "pipelines/shared/glass/glass-back.wgsl"),
+        detail("Blend", "premultiplied"),
+      ]
     ),
     source(
       "internal-caustic",
@@ -302,7 +305,10 @@ export function createLightDebugSources(
       "draw",
       "none",
       [input("backdrop-hdr", "texture read")],
-      [detail("Shader", "copy-linear.wgsl"), detail("Coverage", "full screen")]
+      [
+        detail("Shader", "pipelines/shared/presentation/copy-linear.wgsl"),
+        detail("Coverage", "full screen"),
+      ]
     ),
     source(
       "front-glass",
@@ -314,7 +320,10 @@ export function createLightDebugSources(
         input("prism-mesh", "front faces"),
         input("studio-environment", "reflect"),
       ],
-      [detail("Shader", "glass.wgsl"), detail("Blend", "replace")]
+      [
+        detail("Shader", "pipelines/shared/glass/glass.wgsl"),
+        detail("Blend", "replace"),
+      ]
     ),
     source(
       "glass-accent",
@@ -326,7 +335,10 @@ export function createLightDebugSources(
         input("studio-environment", "reflect"),
       ],
       [
-        detail("Shader", "materials/light/glass-accent.wgsl"),
+        detail(
+          "Shader",
+          "pipelines/light/passes/glass-accent/glass-accent.wgsl"
+        ),
         detail("Blend", "premultiplied"),
       ]
     ),
@@ -463,7 +475,7 @@ export function createDarkDebugSources(
       "none",
       [input("dark-spectral-light-mesh", "white + outgoing spans")],
       [
-        detail("Shader", "light.wgsl"),
+        detail("Shader", "pipelines/dark/passes/light/light.wgsl"),
         detail("Draws", "2 · white beam + outgoing spectrum"),
         detail("Blend", "additive"),
       ]
@@ -477,7 +489,10 @@ export function createDarkDebugSources(
         input("dark-prism-mesh", "back faces"),
         input("dark-studio-environment", "reflect"),
       ],
-      [detail("Shader", "glass-back.wgsl"), detail("Blend", "premultiplied")]
+      [
+        detail("Shader", "pipelines/shared/glass/glass-back.wgsl"),
+        detail("Blend", "premultiplied"),
+      ]
     ),
     source(
       "dark-internal-light",
@@ -521,7 +536,10 @@ export function createDarkDebugSources(
       "draw",
       "none",
       [input("dark-backdrop-hdr", "texture read")],
-      [detail("Shader", "copy-linear.wgsl"), detail("Coverage", "full screen")]
+      [
+        detail("Shader", "pipelines/shared/presentation/copy-linear.wgsl"),
+        detail("Coverage", "full screen"),
+      ]
     ),
     source(
       "dark-front-glass",
@@ -533,7 +551,10 @@ export function createDarkDebugSources(
         input("dark-prism-mesh", "front faces"),
         input("dark-studio-environment", "reflect"),
       ],
-      [detail("Shader", "glass.wgsl"), detail("Blend", "replace")]
+      [
+        detail("Shader", "pipelines/shared/glass/glass.wgsl"),
+        detail("Blend", "replace"),
+      ]
     ),
     source(
       "dark-scene-pass",
@@ -660,7 +681,10 @@ export function createDarkDebugSources(
       "none",
       [input("dark-presentation-ldr", "textureLoad")],
       [
-        detail("Shader", "copy-presentation.wgsl"),
+        detail(
+          "Shader",
+          "pipelines/dark/passes/presentation/copy-presentation.wgsl"
+        ),
         detail("Coverage", "full screen"),
       ]
     ),
@@ -678,7 +702,7 @@ export function createDarkDebugSources(
             ]),
       ],
       [
-        detail("Shader", "dust.wgsl"),
+        detail("Shader", "pipelines/dark/passes/particles/dust.wgsl"),
         detail("Geometry", "2,200 instanced quads"),
         detail("Blend", "additive"),
       ]

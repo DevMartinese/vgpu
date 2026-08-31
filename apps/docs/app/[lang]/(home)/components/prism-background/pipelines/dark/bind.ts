@@ -1,4 +1,4 @@
-import { BLOOM_LEVEL_FACTORS, bloomSpread } from "../../bloom";
+import { BLOOM_LEVEL_FACTORS, bloomSpread } from "./passes/bloom/config";
 import {
   glassUniforms,
   runtimeWallExtent,
@@ -11,11 +11,11 @@ import {
   PRISM_POSTPROCESS_RANGES,
   PRISM_TRIANGLE,
 } from "../../types";
-import { presentationRevealUniforms } from "../presentation";
+import { presentationRevealUniforms } from "../shared/presentation/index";
 import { darkBloomStrengthForQuality } from "../quality";
 import { ensureDarkWireframeDraws } from "./create-graph";
 import type { DarkPipelineGraph } from "./types";
-import { bloomBlurUniforms } from "./bloom-uniforms";
+import { bloomBlurUniforms } from "./passes/bloom/uniforms";
 
 export function bindDarkGraph(
   graph: DarkPipelineGraph,

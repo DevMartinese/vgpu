@@ -1,29 +1,29 @@
 import { draw, effect } from "vgpu";
 
-import bloomBlurPairedWgsl from "../../bloom-blur-paired.wgsl";
-import bloomBlurWgsl from "../../bloom-blur.wgsl";
-import bloomCompositeLowWgsl from "../../bloom-composite-low.wgsl";
-import bloomCompositeWgsl from "../../bloom-composite.wgsl";
-import bloomExtractWgsl from "../../bloom-extract.wgsl";
-import { BLOOM_BLUR_SAMPLING } from "../../bloom-pairing";
-import copyLinearWgsl from "../../copy-linear.wgsl";
-import dustWgsl from "../../dust.wgsl";
-import glassBackWgsl from "../../glass-back.wgsl";
-import glassWgsl from "../../glass.wgsl";
-import lightWgsl from "../../light.wgsl";
-import lightWireframeWgsl from "../../light-wireframe.wgsl";
-import particleLightDownsampleWgsl from "../../particle-light-downsample.wgsl";
-import presentWgsl from "../../present.wgsl";
+import bloomBlurPairedWgsl from "./passes/bloom/bloom-blur-paired.wgsl";
+import bloomBlurWgsl from "./passes/bloom/bloom-blur.wgsl";
+import bloomCompositeLowWgsl from "./passes/bloom/bloom-composite-low.wgsl";
+import bloomCompositeWgsl from "./passes/bloom/bloom-composite.wgsl";
+import bloomExtractWgsl from "./passes/bloom/bloom-extract.wgsl";
+import { BLOOM_BLUR_SAMPLING } from "./passes/bloom/pairing";
+import copyLinearWgsl from "../shared/presentation/copy-linear.wgsl";
+import dustWgsl from "./passes/particles/dust.wgsl";
+import glassBackWgsl from "../shared/glass/glass-back.wgsl";
+import glassWgsl from "../shared/glass/glass.wgsl";
+import lightWgsl from "./passes/light/light.wgsl";
+import lightWireframeWgsl from "../shared/spectral/light-wireframe.wgsl";
+import particleLightDownsampleWgsl from "./passes/particles/particle-light-downsample.wgsl";
+import presentWgsl from "./passes/presentation/present.wgsl";
 import { ensurePrismWireframeGeometry } from "../../runtime/resources";
 import type { PrismRuntime } from "../../runtime/types";
-import wireframeWgsl from "../../wireframe.wgsl";
+import wireframeWgsl from "../shared/wireframe/wireframe.wgsl";
 import {
   darkBloomLevelCountForQuality,
   darkBloomVisibleLevelsForQuality,
   lightMeshLayoutForQuality,
 } from "../quality";
 import type { PrismPipelineQuality } from "../types";
-import copyPresentationWgsl from "./copy-presentation.wgsl";
+import copyPresentationWgsl from "./passes/presentation/copy-presentation.wgsl";
 import type { BloomBlurEffects, DarkPipelineGraph } from "./types";
 
 export const DUST_PARTICLE_COUNT = 2200;

@@ -338,10 +338,10 @@ function CopyChangesButton({
       {!changes
         ? "No changes"
         : status === "copied"
-          ? "Copied"
-          : status === "failed"
-            ? "Copy failed"
-            : "Copy changes"}
+        ? "Copied"
+        : status === "failed"
+        ? "Copy failed"
+        : "Copy changes"}
     </button>
   );
 }

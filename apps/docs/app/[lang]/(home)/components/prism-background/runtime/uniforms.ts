@@ -1,10 +1,10 @@
-import { rotationMatrix } from "../camera";
+import { rotationMatrix } from "../scene/camera";
 import {
   ENVIRONMENT_SIZE,
   ENVIRONMENT_TEXEL_ANGLE,
-} from "../environment-texture";
-import { LIGHT_INTERNAL_SEGMENTS, type LightMeshLayout } from "../light-mesh";
-import { prismPlanes } from "../prism-mesh";
+} from "../environment/texture";
+import { LIGHT_INTERNAL_SEGMENTS, type LightMeshLayout } from "../scene/light-mesh";
+import { prismPlanes } from "../scene/prism-mesh";
 import {
   PRISM_BACK_Z,
   PRISM_FRONT_Z,

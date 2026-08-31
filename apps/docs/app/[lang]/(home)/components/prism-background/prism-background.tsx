@@ -17,7 +17,7 @@ import type {
 } from "./pipelines/types";
 import { DEFAULT_PRISM_CONTROLS, type PrismControls } from "./types";
 import type { PrismControlsUpdater } from "./debug/graph/control-context";
-import { preloadLightAssets } from "./assets/light/preload";
+import { preloadLightAssets } from "./pipelines/light/assets/preload";
 import { preloadPrismPipeline } from "./pipeline-controller";
 
 const PrismDebugGraph = lazy(() =>

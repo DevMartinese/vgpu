@@ -1,9 +1,9 @@
 import type { Buffer, Geometry, GeometryLike, Gpu } from "vgpu";
 
-import type { CameraView } from "../camera";
-import type { EnvironmentTexture } from "../environment-texture";
-import type { NormalizedViewport, ProjectionFraming } from "../framing";
-import type { LightMeshLayout, LightMeshStats } from "../light-mesh";
+import type { CameraView } from "../scene/camera";
+import type { EnvironmentTexture } from "../environment/texture";
+import type { NormalizedViewport, ProjectionFraming } from "../scene/framing";
+import type { LightMeshLayout, LightMeshStats } from "../scene/light-mesh";
 import type { PrismControls } from "../types";
 
 export interface PrismLightMeshMeasurement {

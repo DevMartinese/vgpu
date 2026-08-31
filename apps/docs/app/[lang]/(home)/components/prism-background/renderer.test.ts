@@ -53,12 +53,12 @@ import {
   LIGHT_VERTEX_STRIDE,
   LIGHT_WHITE_VERTICES,
   lightVertexCount,
-} from "./light-mesh";
+} from "./scene/light-mesh";
 import { LOW_LIGHT_MESH_LAYOUT } from "./pipelines/quality";
-import { prismPlanes } from "./prism-mesh";
-import { darkWallClear } from "./pipelines/dark/wall-clear";
+import { prismPlanes } from "./scene/prism-mesh";
+import { darkWallClear } from "./pipelines/dark/passes/wall/clear";
 import { schlickFresnelF0 } from "./runtime/uniforms";
-import { wallExtent } from "./scene";
+import { wallExtent } from "./scene/scene";
 import {
   CAMERA_DISTANCE,
   DEFAULT_PRISM_CONTROLS,

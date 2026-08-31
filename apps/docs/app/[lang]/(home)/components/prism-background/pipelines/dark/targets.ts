@@ -1,8 +1,8 @@
 import type { Target } from "vgpu";
 import { target } from "vgpu";
 
-import { BLOOM_LEVEL_DIVISORS } from "../../bloom";
-import { bloomFormatForLevel } from "../../capabilities";
+import { BLOOM_LEVEL_DIVISORS } from "./passes/bloom/config";
+import { bloomFormatForLevel } from "../../runtime/capabilities";
 import type { PrismRuntime } from "../../runtime/types";
 import { darkBloomLevelCountForQuality } from "../quality";
 import type { PrismPipelineQuality } from "../types";

@@ -2,8 +2,8 @@ import {
   HIGH_LIGHT_MESH_LAYOUT,
   lightMeshLayout,
   type LightMeshLayout,
-} from "../light-mesh";
-import { BLOOM_LEVELS, BLOOM_VISIBLE_LEVELS } from "../bloom";
+} from "../scene/light-mesh";
+import { BLOOM_LEVELS, BLOOM_VISIBLE_LEVELS } from "./dark/passes/bloom/config";
 import type { PrismPipelineQuality } from "./types";
 
 export const LOW_LIGHT_SPECTRAL_SAMPLES = 64;

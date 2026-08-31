@@ -4,7 +4,7 @@ import {
   destroyLightAssetTextures,
   loadLightAssetTextures,
   type LightTextureLoader,
-} from "../../assets/light/loader";
+} from "./assets/loader";
 import {
   createLightDebugSources,
   PRISM_DEBUG_SOURCES,
@@ -29,7 +29,7 @@ import {
   resizeLightTargets,
 } from "./targets";
 import type { LightPipelineGraph } from "./types";
-import type { LightDebugDraws } from "./debug-draws";
+import type { LightDebugDraws } from "./debug/draws";
 
 export interface LightPipelineOptions {
   readonly assetLoader?: LightTextureLoader;
@@ -145,7 +145,7 @@ export function createLightPipeline(
         throw new Error(
           "prepare() must load light assets before debug previews."
         );
-      debugDrawsPromise ??= import("./debug-draws").then(
+      debugDrawsPromise ??= import("./debug/draws").then(
         ({ createLightDebugDraws }) => {
           if (destroyed)
             throw new Error(
@@ -229,4 +229,4 @@ export { LIGHT_TARGET_COUNT } from "./targets";
 export {
   LIGHT_CAUSTIC_DEBUG_ENTRY,
   LIGHT_WALL_DEBUG_ENTRIES,
-} from "./debug-entries";
+} from "./debug/entries";
