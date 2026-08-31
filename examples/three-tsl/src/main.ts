@@ -2,7 +2,6 @@ import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GUI } from "three/addons/libs/lil-gui.module.min.js";
 import { createDemoCamera, createDemoScene, DEMO_MESH_KINDS, type DemoMeshKind } from "./scenes.ts";
-import { createBloomPipeline } from "./post.ts";
 
 async function main(): Promise<void> {
   if (navigator.gpu === undefined) {
@@ -30,8 +29,6 @@ async function main(): Promise<void> {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  const postProcessing = createBloomPipeline(renderer, scene, camera);
-
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -41,7 +38,7 @@ async function main(): Promise<void> {
   renderer.setAnimationLoop(() => {
     mesh.rotation.y += 0.0012;
     controls.update();
-    postProcessing.render();
+    renderer.render(scene, camera);
   });
 }
 

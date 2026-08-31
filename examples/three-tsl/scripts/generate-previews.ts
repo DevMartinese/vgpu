@@ -6,7 +6,7 @@
 // vgpu/node creates the WebGPU device (see @vgpu/adapter-node's system
 // requirements for the Vulkan ICD setup), three's WebGPURenderer is handed
 // that same GPUDevice plus a stubbed canvas context, and the frame is read
-// back from a RenderTarget through the bloom/output chain.
+// back from a RenderTarget through an output-transform-only chain.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const THREE = await import("three/webgpu");
   const { float } = await import("three/tsl");
   const { createDemoCamera, createDemoScene } = await import("../src/scenes.ts");
-  const { createBloomPipeline } = await import("../src/post.ts");
+  const { createOutputPipeline } = await import("../src/post.ts");
 
   // vgpu owns the device; three renders on it.
   const gpu = await init();
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
   renderer.setRenderTarget(target);
   // Dawn's swiftshader backend rejects multisampled rgba16float, so the
   // scene pass runs single-sampled here; the preview size hides the AA.
-  const postProcessing = createBloomPipeline(renderer, scene, camera, { samples: 1 });
+  const postProcessing = createOutputPipeline(renderer, scene, camera, { samples: 1 });
   await postProcessing.renderAsync();
   const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, SIZE, SIZE)) as Uint8Array;
 

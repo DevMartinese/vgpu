@@ -10,7 +10,8 @@ The preview is rendered headless in Node by `pnpm previews`
 (`scripts/generate-previews.ts`): `vgpu/node` creates the Dawn-backed WebGPU
 device, three's `WebGPURenderer` receives that same `GPUDevice` (plus stub
 canvas/context and a handful of browser-global shims), and the frame is read
-back from a `RenderTarget` through the post chain — no browser involved.
+back from a `RenderTarget` through an output-transform-only chain — no browser
+involved.
 The environment needs a Vulkan ICD for Dawn (see `@vgpu/adapter-node`'s
 system requirements: `VK_ICD_FILENAMES`, `XDG_RUNTIME_DIR`,
 `VGPU_DAWN_FLAGS=backend=vulkan`).
@@ -82,14 +83,14 @@ TSL nodes:
 Lighting is image-based: a CC0 Poly Haven night HDRI (via `@pmndrs/assets`)
 drives `scene.environment` and the backdrop, plus a cool moonlight key and a
 faint warm floor bounce standing in for the glow lighting the crust back.
-The lava scene renders through `THREE.PostProcessing` with an HDR bloom
-(`three/addons/tsl/display/BloomNode.js`) thresholded above anything the
-crust can reflect, so only the incandescent melt blooms.
+The interactive lava scene renders directly to the WebGPU canvas, without a
+bloom or fullscreen post-processing pass. ACES tone mapping still runs as the
+renderer output transform.
 
 Note on the harness: rendering straight into a `RenderTarget` skips tone
 mapping and sRGB encoding (three treats targets as linear intermediates),
-while the `PostProcessing` chain bakes the full output transform — so
-harness screenshots match the on-screen image only on the post path
+while the offscreen `PostProcessing` helper bakes the full output transform —
+so harness screenshots match the on-screen image only on the post path
 (`?post=0` reads back linear and darker).
 
 ## How the bridge works
