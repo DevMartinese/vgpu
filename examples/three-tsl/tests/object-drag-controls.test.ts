@@ -54,7 +54,7 @@ describe("createObjectDragControls", () => {
     dragState.instances.length = 0;
   });
 
-  it("uses DragControls rotation while keeping the render camera fixed", () => {
+  it("uses DragControls rotation while keeping the render camera fixed", async () => {
     const camera = new THREE.PerspectiveCamera();
     camera.position.set(0, 1.2, 4.2);
     camera.lookAt(0, 0, 0);
@@ -62,11 +62,8 @@ describe("createObjectDragControls", () => {
     const originalCameraQuaternion = camera.quaternion.clone();
     const object = new THREE.Group();
     const originalObjectQuaternion = object.quaternion.clone();
-    const objectControls = createObjectDragControls(
-      camera,
-      object,
-      {} as HTMLElement
-    );
+    const domElement = { style: { cursor: "" } } as HTMLElement;
+    const objectControls = createObjectDragControls(camera, object, domElement);
     const drag = dragState.instances[0]!;
 
     expect(drag.objects).toEqual([object]);
@@ -75,6 +72,18 @@ describe("createObjectDragControls", () => {
     expect(drag.rotateSpeed).toBe(1.5);
     expect(drag.mouseButtons.LEFT).toBe(THREE.MOUSE.ROTATE);
     expect(drag.touches.ONE).toBe(THREE.TOUCH.ROTATE);
+
+    drag.emit("hoveron");
+    await Promise.resolve();
+    expect(domElement.style.cursor).toBe("grab");
+    drag.emit("dragstart");
+    expect(domElement.style.cursor).toBe("grabbing");
+    drag.emit("dragend");
+    await Promise.resolve();
+    expect(domElement.style.cursor).toBe("grab");
+    drag.emit("hoveroff");
+    await Promise.resolve();
+    expect(domElement.style.cursor).toBe("");
 
     const target = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0),

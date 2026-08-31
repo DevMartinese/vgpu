@@ -33,6 +33,34 @@ export function createObjectDragControls(
   const dragDelta = new THREE.Quaternion();
   const automaticDelta = new THREE.Quaternion();
   let previousFrameTime: number | undefined;
+  let hovered = false;
+  let dragging = false;
+
+  const updateCursor = () => {
+    domElement.style.cursor = dragging ? "grabbing" : hovered ? "grab" : "";
+  };
+  // DragControls writes `pointer`/`move` around its event dispatches. Updating
+  // now and once its handler finishes keeps the cursor semantically correct.
+  const scheduleCursorUpdate = () => {
+    updateCursor();
+    queueMicrotask(updateCursor);
+  };
+  const handleHoverOn = () => {
+    hovered = true;
+    scheduleCursorUpdate();
+  };
+  const handleHoverOff = () => {
+    hovered = false;
+    scheduleCursorUpdate();
+  };
+  const handleDragStart = () => {
+    dragging = true;
+    scheduleCursorUpdate();
+  };
+  const handleDragEnd = () => {
+    dragging = false;
+    scheduleCursorUpdate();
+  };
 
   const captureDragTarget = () => {
     draggedQuaternion.copy(object.quaternion);
@@ -46,6 +74,10 @@ export function createObjectDragControls(
     // the render loop can ease toward the new target instead of snapping.
     object.quaternion.copy(renderedQuaternion);
   };
+  controls.addEventListener("hoveron", handleHoverOn);
+  controls.addEventListener("hoveroff", handleHoverOff);
+  controls.addEventListener("dragstart", handleDragStart);
+  controls.addEventListener("dragend", handleDragEnd);
   controls.addEventListener("drag", captureDragTarget);
 
   return {
@@ -71,6 +103,10 @@ export function createObjectDragControls(
       object.quaternion.copy(renderedQuaternion);
     },
     dispose() {
+      controls.removeEventListener("hoveron", handleHoverOn);
+      controls.removeEventListener("hoveroff", handleHoverOff);
+      controls.removeEventListener("dragstart", handleDragStart);
+      controls.removeEventListener("dragend", handleDragEnd);
       controls.removeEventListener("drag", captureDragTarget);
       controls.dispose();
     },
