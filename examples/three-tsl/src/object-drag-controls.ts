@@ -18,7 +18,7 @@ export function createObjectDragControls(
 ) {
   const controls = new DragControls([object], camera, domElement);
   controls.transformGroup = true;
-  controls.rotateSpeed = 1;
+  controls.rotateSpeed = 1.5;
   controls.mouseButtons = {
     LEFT: THREE.MOUSE.ROTATE,
     MIDDLE: null,

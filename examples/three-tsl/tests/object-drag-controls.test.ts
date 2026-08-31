@@ -72,6 +72,7 @@ describe("createObjectDragControls", () => {
     expect(drag.objects).toEqual([object]);
     expect(drag.object).toBe(camera);
     expect(drag.transformGroup).toBe(true);
+    expect(drag.rotateSpeed).toBe(1.5);
     expect(drag.mouseButtons.LEFT).toBe(THREE.MOUSE.ROTATE);
     expect(drag.touches.ONE).toBe(THREE.TOUCH.ROTATE);
 
