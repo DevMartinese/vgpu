@@ -53,6 +53,7 @@ import type { PrismPerformanceSampler } from "./performance/sampler";
 import type {
   PrismAutoQualityController,
   PrismAutoQualityControllerOptions,
+  PrismQualityLogger,
 } from "./performance/auto-quality";
 
 export type { PrismThumbnailOptions } from "./thumbnail";
@@ -123,6 +124,8 @@ export interface PrismBrowserRendererOptions
       options: PrismAutoQualityControllerOptions
     ): PrismAutoQualityController;
   }>;
+  /** Test seam for structured Auto-quality diagnostics. */
+  readonly qualityLogger?: PrismQualityLogger;
 }
 
 export function createRenderer(
@@ -134,6 +137,7 @@ export function createRenderer(
   const debugRelay = options.debugPreviews
     ? createPrismDebugPreviewRelay()
     : undefined;
+  const qualityLogger = options.qualityLogger ?? console;
   let disposed = false;
   let reportedError = false;
   let controls: PrismControls =
@@ -355,6 +359,7 @@ export function createRenderer(
         return;
       autoQualityScheduled = false;
       autoQualityController = loaded.createPrismAutoQualityController({
+        logger: qualityLogger,
         onDowngrade(reason) {
           if (
             disposed ||
@@ -424,6 +429,14 @@ export function createRenderer(
       if (quality === "low") {
         autoQualityController?.dispose();
         autoQualityController = undefined;
+        if (reason !== "forced")
+          qualityLogger.info("[Prism quality] Downgraded to Low.", {
+            preference: qualityPreference,
+            reason,
+            from: "high",
+            to: "low",
+            dpr: LOW_QUALITY_DPR,
+          });
       }
     } catch (error) {
       if (

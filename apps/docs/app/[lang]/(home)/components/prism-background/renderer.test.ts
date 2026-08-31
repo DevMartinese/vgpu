@@ -1020,6 +1020,7 @@ test("Auto downgrades once across theme changes and selecting Auto restarts High
   const live = gpu();
   const downgrade: ((reason: "gpu-tier") => void)[] = [];
   const controllers: { dispose: ReturnType<typeof vi.fn> }[] = [];
+  const qualityLogger = { info: vi.fn() };
   const loadAutoQuality = vi.fn(async () => ({
     createPrismAutoQualityController: (options: {
       onDowngrade(reason: "gpu-tier"): void;
@@ -1039,6 +1040,7 @@ test("Auto downgrades once across theme changes and selecting Auto restarts High
     canvas: env.canvas,
     initialMode: "dark",
     loadAutoQuality,
+    qualityLogger,
   });
   await renderer.ready;
   env.flushAnimationFrames();
@@ -1056,6 +1058,16 @@ test("Auto downgrades once across theme changes and selecting Auto restarts High
     })
   );
   expect(controllers[0]!.dispose).toHaveBeenCalledOnce();
+  expect(qualityLogger.info).toHaveBeenCalledWith(
+    "[Prism quality] Downgraded to Low.",
+    {
+      preference: "auto",
+      reason: "gpu-tier",
+      from: "high",
+      to: "low",
+      dpr: 1,
+    }
+  );
 
   await renderer.setMode("light");
   expect(renderer.getQualityState().effective).toBe("low");

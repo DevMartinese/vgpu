@@ -11,6 +11,7 @@ const tier = (type: TierResult["type"], value: number): TierResult => ({
   type,
   tier: value,
 });
+const silentLogger = () => ({ info: vi.fn() });
 
 test.each([
   ["BENCHMARK", 0, true],
@@ -30,6 +31,36 @@ test("an unknown/new FALLBACK tier 1 GPU remains High", () => {
   expect(gpuTierRequestsLow(tier("FALLBACK", 1))).toBe(false);
 });
 
+test("logs the complete GPU result and resulting policy decision", async () => {
+  const logger = silentLogger();
+  const controller = createPrismAutoQualityController({
+    navigator: {},
+    loadGpuTier: async () => ({
+      type: "BENCHMARK",
+      tier: 3,
+      gpu: "apple m3 gpu",
+      fps: 120,
+      isMobile: false,
+    }),
+    logger,
+    onDowngrade: vi.fn(),
+  });
+  await vi.waitFor(() =>
+    expect(logger.info).toHaveBeenCalledWith(
+      "[Prism quality] GPU detected.",
+      expect.objectContaining({
+        type: "BENCHMARK",
+        tier: 3,
+        gpu: "apple m3 gpu",
+        fps: 120,
+        isMobile: false,
+        decision: "keep-high",
+      })
+    )
+  );
+  controller.dispose();
+});
+
 test.each([
   [{ level: 0.3, charging: false }, true],
   [{ level: 0.3001, charging: false }, false],
@@ -47,17 +78,38 @@ test("battery changes downgrade only after becoming unplugged at 30%", async () 
   const battery = new FakeBattery();
   battery.level = 0.3;
   const onDowngrade = vi.fn();
+  const logger = silentLogger();
   const controller = createPrismAutoQualityController({
     navigator: { getBattery: async () => battery },
     loadGpuTier: async () => tier("FALLBACK", 1),
+    logger,
     onDowngrade,
   });
-  await Promise.resolve();
+  await vi.waitFor(() =>
+    expect(logger.info).toHaveBeenCalledWith(
+      "[Prism quality] Battery status.",
+      expect.objectContaining({
+        source: "initial",
+        level: 0.3,
+        charging: true,
+        decision: "keep-high",
+      })
+    )
+  );
   expect(onDowngrade).not.toHaveBeenCalled();
 
   battery.charging = false;
   battery.dispatchEvent(new Event("chargingchange"));
   expect(onDowngrade).toHaveBeenCalledWith("battery");
+  expect(logger.info).toHaveBeenCalledWith(
+    "[Prism quality] Battery status.",
+    expect.objectContaining({
+      source: "chargingchange",
+      level: 0.3,
+      charging: false,
+      decision: "request-low",
+    })
+  );
   controller.dispose();
 });
 
@@ -66,9 +118,11 @@ test("battery listeners are cleaned up and unsupported/rejected APIs are ignored
   const add = vi.spyOn(battery, "addEventListener");
   const remove = vi.spyOn(battery, "removeEventListener");
   const onDowngrade = vi.fn();
+  const logger = silentLogger();
   const controller = createPrismAutoQualityController({
     navigator: { getBattery: async () => battery },
     loadGpuTier: async () => tier("FALLBACK", 1),
+    logger,
     onDowngrade,
   });
   await Promise.resolve();
@@ -80,12 +134,14 @@ test("battery listeners are cleaned up and unsupported/rejected APIs are ignored
     createPrismAutoQualityController({
       navigator: {},
       loadGpuTier: async () => tier("FALLBACK", 1),
+      logger,
       onDowngrade,
     }).dispose()
   ).not.toThrow();
   createPrismAutoQualityController({
     navigator: { getBattery: async () => Promise.reject(new Error("denied")) },
     loadGpuTier: async () => tier("FALLBACK", 1),
+    logger,
     onDowngrade,
   });
   await Promise.resolve();
@@ -94,11 +150,15 @@ test("battery listeners are cleaned up and unsupported/rejected APIs are ignored
 
 test("tier 2 waits for runtime-health confirmation", async () => {
   const onDowngrade = vi.fn();
+  const logger = silentLogger();
   const healthMonitor = {
     record: vi.fn(() => ({
       downgrade: true,
       estimatedRefreshFps: 60,
       targetFps: 60,
+      thresholdFps: 48,
+      observedFps: 32,
+      activeWindowMs: 2_000,
     })),
     reset: vi.fn(),
   };
@@ -106,6 +166,7 @@ test("tier 2 waits for runtime-health confirmation", async () => {
     navigator: {},
     loadGpuTier: async () => tier("BENCHMARK", 2),
     healthMonitor,
+    logger,
     onDowngrade,
   });
   await Promise.resolve();
@@ -118,6 +179,19 @@ test("tier 2 waits for runtime-health confirmation", async () => {
     workload: "interactive",
   });
   expect(onDowngrade).toHaveBeenCalledWith("runtime");
+  expect(logger.info).toHaveBeenCalledWith(
+    "[Prism quality] Runtime health below target.",
+    {
+      workload: "interactive",
+      mobile: false,
+      estimatedRefreshFps: 60,
+      targetFps: 60,
+      thresholdFps: 48,
+      observedFps: 32,
+      activeWindowMs: 2_000,
+      decision: "request-low",
+    }
+  );
   controller.dispose();
 });
 
@@ -127,9 +201,11 @@ test("detector failures and late results after disposal are ignored", async () =
     resolveTier = resolve;
   });
   const onDowngrade = vi.fn();
+  const logger = silentLogger();
   const controller = createPrismAutoQualityController({
     navigator: {},
     loadGpuTier: () => pending,
+    logger,
     onDowngrade,
   });
   controller.dispose();
@@ -141,8 +217,14 @@ test("detector failures and late results after disposal are ignored", async () =
   createPrismAutoQualityController({
     navigator: {},
     loadGpuTier: async () => Promise.reject(new Error("offline")),
+    logger,
     onDowngrade,
   });
-  await Promise.resolve();
+  await vi.waitFor(() =>
+    expect(logger.info).toHaveBeenCalledWith(
+      "[Prism quality] GPU detection unavailable.",
+      { error: "offline", decision: "keep-high" }
+    )
+  );
   expect(onDowngrade).not.toHaveBeenCalled();
 });

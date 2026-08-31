@@ -24,6 +24,9 @@ export interface PrismFrameHealthStatus {
   readonly downgrade: boolean;
   readonly estimatedRefreshFps: number;
   readonly targetFps: number;
+  readonly thresholdFps: number;
+  readonly observedFps?: number;
+  readonly activeWindowMs: number;
 }
 
 export interface PrismFrameHealthMonitor {
@@ -64,7 +67,14 @@ export function createPrismFrameHealthMonitor(): PrismFrameHealthMonitor {
   };
 
   const record = (sample: PrismFrameHealthSample): PrismFrameHealthStatus => {
-    if (downgrade) return status(true, refreshFps, activeTargetFps ?? 60);
+    if (downgrade)
+      return status(
+        true,
+        refreshFps,
+        activeTargetFps ?? 60,
+        activeRenderedFrames,
+        activeDurationMs
+      );
     if (
       !sample.active ||
       !Number.isFinite(sample.deltaMs) ||
@@ -72,7 +82,7 @@ export function createPrismFrameHealthMonitor(): PrismFrameHealthMonitor {
       sample.deltaMs > INACTIVE_GAP_MS
     ) {
       resetActiveWindow();
-      return status(false, refreshFps, targetFps(sample, refreshFps));
+      return status(false, refreshFps, targetFps(sample, refreshFps), 0, 0);
     }
 
     const previousRefresh = refreshFps;
@@ -104,12 +114,19 @@ export function createPrismFrameHealthMonitor(): PrismFrameHealthMonitor {
       if (removed.rendered) activeRenderedFrames -= 1;
     }
 
+    const observedFps =
+      activeRenderedFrames / (activeDurationMs / 1_000);
     if (activeDurationMs >= HEALTH_WINDOW_MS) {
-      const observedFps = activeRenderedFrames / (activeDurationMs / 1_000);
       if (observedFps < target * HEALTH_RATIO) downgrade = true;
     }
 
-    return status(downgrade, refreshFps, target);
+    return status(
+      downgrade,
+      refreshFps,
+      target,
+      activeRenderedFrames,
+      activeDurationMs
+    );
   };
 
   return { record, reset };
@@ -145,7 +162,19 @@ function updatedRefreshFps(
 function status(
   downgrade: boolean,
   estimatedRefreshFps: number,
-  targetFps: number
+  targetFps: number,
+  renderedFrames: number,
+  activeWindowMs: number
 ): PrismFrameHealthStatus {
-  return { downgrade, estimatedRefreshFps, targetFps };
+  return {
+    downgrade,
+    estimatedRefreshFps,
+    targetFps,
+    thresholdFps: targetFps * HEALTH_RATIO,
+    observedFps:
+      activeWindowMs > 0
+        ? renderedFrames / (activeWindowMs / 1_000)
+        : undefined,
+    activeWindowMs,
+  };
 }

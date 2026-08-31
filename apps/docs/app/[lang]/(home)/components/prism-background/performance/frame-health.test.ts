@@ -81,15 +81,17 @@ test("requests Low only after two active seconds below 80% of target", () => {
     });
     expect(status.downgrade).toBe(false);
   }
-  expect(
-    monitor.record({
-      deltaMs: 1_000 / 60,
-      active: true,
-      rendered: false,
-      mobile: false,
-      workload: "interactive",
-    }).downgrade
-  ).toBe(true);
+  const status = monitor.record({
+    deltaMs: 1_000 / 60,
+    active: true,
+    rendered: false,
+    mobile: false,
+    workload: "interactive",
+  });
+  expect(status.downgrade).toBe(true);
+  expect(status.thresholdFps).toBe(48);
+  expect(status.observedFps).toBeLessThan(48);
+  expect(status.activeWindowMs).toBeCloseTo(2_000, 0);
 });
 
 test("inactivity and explicit resets discard a partial unhealthy window", () => {
