@@ -1,4 +1,5 @@
 import { translations } from "../../../../../geistdocs";
+import { portableExampleSource } from "../../../../../lib/example-export";
 import { examples, getExample } from "../../../../../lib/examples-registry";
 import { createZip } from "../../../../../lib/zip";
 
@@ -29,7 +30,7 @@ export async function GET(
   const archive = createZip(
     example.sources.map(({ code, name }) => ({
       name: `${slug}/${name}`,
-      content: code,
+      content: portableExampleSource(code),
     })),
   );
 
