@@ -24,6 +24,7 @@ import { meta as nextjsFlareMeta } from '../examples/nextjs-flare/meta';
 import { meta as depthEstimationMeta } from '../examples/depth-estimation/meta';
 import { meta as mnistClassifierMeta } from '../examples/mnist-classifier/meta';
 import { meta as airPaintingMeta } from '../examples/air-painting/meta';
+import { meta as bootVoidMeta } from '../examples/boot-void/meta';
 
 const rawMetadata = {
   gradient: gradientMeta,
@@ -48,6 +49,7 @@ const rawMetadata = {
   'depth-estimation': depthEstimationMeta,
   'mnist-classifier': mnistClassifierMeta,
   'air-painting': airPaintingMeta,
+  'boot-void': bootVoidMeta,
 } satisfies Record<ExampleSlug, ExampleMetaDefinition>;
 
 function withThumbnails(meta: ExampleMetaDefinition): ExampleMeta {
@@ -81,6 +83,7 @@ export const exampleMetadataBySlug = {
   'depth-estimation': withThumbnails(rawMetadata['depth-estimation']),
   'mnist-classifier': withThumbnails(rawMetadata['mnist-classifier']),
   'air-painting': withThumbnails(rawMetadata['air-painting']),
+  'boot-void': withThumbnails(rawMetadata['boot-void']),
 } satisfies Record<ExampleSlug, ExampleMeta>;
 
 export const examplesMetadata = exampleSlugs.map((slug) => exampleMetadataBySlug[slug]);

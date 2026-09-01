@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "contractId": "vgpu-examples/v1",
+  "revision": "531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754",
+  "id": "boot-void",
+  "title": "Boot Void",
+  "description": "A retro console boot homage co-driven by vgpu and TypeGPU on one shared device: TypeGPU simulates light-seeking dust with typed schemas, fed by the irradiance vgpu renders through radiance cascades, and vgpu draws the particle buffer back zero-copy. Plus a render bundle, bloom, and a CRT finish.",
+  "tags": [
+    "instancing",
+    "particles",
+    "compute",
+    "simulation",
+    "bloom",
+    "lighting",
+    "raymarching",
+    "post-processing",
+    "render-bundles",
+    "animation"
+  ],
+  "capabilities": [
+    "webgpu",
+    "render-targets",
+    "multi-pass",
+    "instanced-rendering",
+    "render-bundles",
+    "controls",
+    "select-control",
+    "compute-shader",
+    "storage-buffers",
+    "gpu-buffer-interop",
+    "zero-copy",
+    "textures",
+    "hdr",
+    "pointer-input",
+    "responsive-canvas",
+    "continuous-rendering"
+  ],
+  "aggregateSha256": "27fdced08a1a55f235b7b604275983d94ef75f132d4fd401c05ee10fe480b7eb",
+  "files": [
+    {
+      "path": "index.tsx",
+      "contentType": "text/typescript",
+      "size": 566,
+      "sha256": "25c0b3b37af0ab38c83bac8b3efb64209ecc2ec6476894a0b2898abbabb084fb",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/index.tsx.raw"
+    },
+    {
+      "path": "renderer.ts",
+      "contentType": "text/typescript",
+      "size": 7442,
+      "sha256": "2a2d71f813377b6ece864e9d09bf45e8433a608d10975a7c885a6fbdb158942e",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/renderer.ts.raw"
+    },
+    {
+      "path": "pipeline.ts",
+      "contentType": "text/typescript",
+      "size": 7946,
+      "sha256": "e878a440e1c401f5d6b18857917f864a71e2ca9a41cf899fcfc552e00fe783f3",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/pipeline.ts.raw"
+    },
+    {
+      "path": "dust.ts",
+      "contentType": "text/typescript",
+      "size": 6622,
+      "sha256": "59090f9e71496483b6813ffc0f56d29aaf6da484138ea474b5e37427508ca5a7",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/dust.ts.raw"
+    },
+    {
+      "path": "dust-vgpu.ts",
+      "contentType": "text/typescript",
+      "size": 2337,
+      "sha256": "3575e5f777ed24755daf66beb72c836cc19b84177f99a41f4b99a8c504dc87b0",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/dust-vgpu.ts.raw"
+    },
+    {
+      "path": "dust-sim.wgsl",
+      "contentType": "text/wgsl",
+      "size": 2830,
+      "sha256": "78dcf204bc314fa825b0dc0b39995073dd8cb0280861b3b58f237bc82825b57e",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/dust-sim.wgsl.raw"
+    },
+    {
+      "path": "radiance.ts",
+      "contentType": "text/typescript",
+      "size": 6565,
+      "sha256": "9940b154fdde870b66e3fef59692e8e1d78c89d1f976a707d0033138c49346a4",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/radiance.ts.raw"
+    },
+    {
+      "path": "nebula.wgsl",
+      "contentType": "text/wgsl",
+      "size": 1128,
+      "sha256": "cf1e83f019d55e5ea46ef22ffa426ceb3035c0a9acd3fb0b4b41769aed070d47",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/nebula.wgsl.raw"
+    },
+    {
+      "path": "stars.wgsl",
+      "contentType": "text/wgsl",
+      "size": 1839,
+      "sha256": "0c48fe525863d1e43b7dda2d0119ae248d246aaf84e1da8ae365157da5008ae0",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/stars.wgsl.raw"
+    },
+    {
+      "path": "field.wgsl",
+      "contentType": "text/wgsl",
+      "size": 3380,
+      "sha256": "8665c1f0ed92d5423d22de67853bb52e2407723a1deae6f05d321752453e9ae3",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/field.wgsl.raw"
+    },
+    {
+      "path": "glass.wgsl",
+      "contentType": "text/wgsl",
+      "size": 2970,
+      "sha256": "b997d93802623f30be1346fbeae82c7ef3e3135d7a6cbe7cf3f689b2807083aa",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/glass.wgsl.raw"
+    },
+    {
+      "path": "atmosphere.wgsl",
+      "contentType": "text/wgsl",
+      "size": 1911,
+      "sha256": "21829b646dbab0fcd996277a6c5ce36d3deb7e61836e4397b31f38869080f433",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/atmosphere.wgsl.raw"
+    },
+    {
+      "path": "trails.wgsl",
+      "contentType": "text/wgsl",
+      "size": 3084,
+      "sha256": "c365292e98a7177616b72daaea61505c59f60393a1679060a752c941402a0af6",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/trails.wgsl.raw"
+    },
+    {
+      "path": "rc-emitter.wgsl",
+      "contentType": "text/wgsl",
+      "size": 2007,
+      "sha256": "35bb32ce0a174b165b2a623f65ece76ddd9f6691444c4fc0e16158306506b355",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/rc-emitter.wgsl.raw"
+    },
+    {
+      "path": "rc-directions.wgsl",
+      "contentType": "text/wgsl",
+      "size": 1840,
+      "sha256": "2c8786c881287214471a96849d4320ca5641370925adfeef4eda476d499fdf41",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/rc-directions.wgsl.raw"
+    },
+    {
+      "path": "sdf-sample.wgsl",
+      "contentType": "text/wgsl",
+      "size": 2953,
+      "sha256": "5bc048b338fc1847b792cacf757030b55ba4dc998de126b10dd5661abd8df7ae",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/sdf-sample.wgsl.raw"
+    },
+    {
+      "path": "jfa-init.wgsl",
+      "contentType": "text/wgsl",
+      "size": 857,
+      "sha256": "9e7461840564f4ebd04df1fa5409c651f4610e6379e08584ca2f04ec932336e9",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/jfa-init.wgsl.raw"
+    },
+    {
+      "path": "jfa-pass.wgsl",
+      "contentType": "text/wgsl",
+      "size": 1662,
+      "sha256": "a235ff6391eff805836f259c5b47391ac6c1479d311fb17dc928d1bdb70ad2ef",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/jfa-pass.wgsl.raw"
+    },
+    {
+      "path": "sdf-finalize.wgsl",
+      "contentType": "text/wgsl",
+      "size": 802,
+      "sha256": "06ecec4b8070c80ad28b1ff172a33348f3a25a3a550f94d70d36677e78a08e1b",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/sdf-finalize.wgsl.raw"
+    },
+    {
+      "path": "radiance-cascade.wgsl",
+      "contentType": "text/wgsl",
+      "size": 4407,
+      "sha256": "79f02a930a0be58e3e1ec1fa24dd466c535d27a483970a65cc091847023af536",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/radiance-cascade.wgsl.raw"
+    },
+    {
+      "path": "rc-resolve.wgsl",
+      "contentType": "text/wgsl",
+      "size": 841,
+      "sha256": "5d4e5f8fbb24098a734954ea482d314158a1ed545f984801496f053ae4ef87aa",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/rc-resolve.wgsl.raw"
+    },
+    {
+      "path": "bright.wgsl",
+      "contentType": "text/wgsl",
+      "size": 736,
+      "sha256": "04c8cb10c57f2df52c0d2964e803e1e670f03e3b452878b3037793bc404da352",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/bright.wgsl.raw"
+    },
+    {
+      "path": "blur.wgsl",
+      "contentType": "text/wgsl",
+      "size": 818,
+      "sha256": "bfd3b0c87e5088c5d2b86f840e9d4015657811cf9cbd9106db3c4ac443c64917",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/blur.wgsl.raw"
+    },
+    {
+      "path": "post.wgsl",
+      "contentType": "text/wgsl",
+      "size": 2240,
+      "sha256": "aaf122a01c6f24f982ff47f4764baf4b38483a82fe2abee37bae2c507e2ddda2",
+      "url": "https://vgpu.sh/api/examples/v1/revisions/531b0ccb47e41895a1d743be1aa47b6754f5ab5f0838252110569fb3fedd5754/examples/boot-void/files/post.wgsl.raw"
+    }
+  ]
+}
